@@ -14,6 +14,10 @@ except Exception:
     except Exception:
         TEAM_OFFENSE = {}
 
+try:
+    from first_inning_data import FIRST_INNING_RISK
+except Exception:
+    FIRST_INNING_RISK = {}
 
 try:
     from bullpen_stats import get_recent_bullpen_fatigue
@@ -28,6 +32,8 @@ except Exception:
 def get_team_offense_score(team_name):
     return TEAM_OFFENSE.get(team_name, 5)
 
+def get_first_inning_risk(team_name):
+    return FIRST_INNING_RISK.get(team_name, 5)
 
 def get_bullpen_fatigue_score(team_name):
     return BULLPEN_FATIGUE.get(team_name, 5)
@@ -203,6 +209,9 @@ def get_today_games():
             away_offense = get_team_offense_score(away_team)
             home_offense = get_team_offense_score(home_team)
 
+            away_first_inning = get_first_inning_risk(away_team)
+            home_first_inning = get_first_inning_risk(home_team)
+
             away_bullpen = get_bullpen_fatigue_score(away_team)
             home_bullpen = get_bullpen_fatigue_score(home_team)
 
@@ -218,8 +227,8 @@ def get_today_games():
             nrfi_score, lean, summary, f5_edge, confidence = calculate_nrfi_score(
                 away_stats,
                 home_stats,
-                away_offense,
-                home_offense,
+                away_offense + away_first_inning,
+                home_offense + home_first_inning,
             )
 
             recommendation = generate_recommendation(
@@ -249,6 +258,8 @@ def get_today_games():
                 "Home Bullpen Fatigue": home_bullpen,
                 "Agent Notes": summary,
                 "Status": game["status"]["detailedState"],
+                "Away 1st Inning Risk": away_first_inning,
+                "Home 1st Inning Risk": home_first_inning,
             })
 
     return pd.DataFrame(games)
