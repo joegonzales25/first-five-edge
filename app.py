@@ -9,28 +9,29 @@ st.set_page_config(
 st.title("⚾ First Five Edge")
 st.subheader("Daily MLB YRFI / NRFI + F5 Dashboard")
 
+selected_date = st.date_input("Select Date")
+st.caption(f"Showing MLB slate for: {selected_date}")
+
 if st.button("Refresh MLB Data"):
     st.cache_data.clear()
     st.rerun()
 
 
 @st.cache_data(ttl=900)
-def load_games():
-    return get_today_games()
+def load_games(selected_date):
+    return get_today_games(selected_date.isoformat())
 
 
-games = load_games()
+games = load_games(selected_date)
 
 if games.empty:
-    st.warning("No MLB games found for today.")
+    st.warning("No MLB games found for selected date.")
 else:
     games_sorted = games.sort_values(
         "NRFI Score",
         ascending=False,
         na_position="last"
     )
-
-    col1, col2, col3 = st.columns(3)
 
     top_nrfi = games_sorted[
         games_sorted["Lean"].isin(["NRFI", "Strong NRFI"])
@@ -47,6 +48,8 @@ else:
     top_f5 = games_sorted[
         games_sorted["F5 Edge"] != "F5 Pass"
     ].head(1)
+
+    col1, col2, col3 = st.columns(3)
 
     with col1:
         st.metric(
@@ -70,7 +73,6 @@ else:
         )
 
     st.divider()
-
     st.subheader("Best Board")
 
     best_board = games[
@@ -84,7 +86,7 @@ else:
     )
 
     if best_board.empty:
-        st.info("No strong recommendations today.")
+        st.info("No strong recommendations for this slate.")
     else:
         for _, row in best_board.head(5).iterrows():
             st.markdown(
@@ -148,8 +150,8 @@ else:
         "Away WHIP",
         "Home WHIP",
         "Away Offense",
-        "Away 1st Inning Risk",
         "Home Offense",
+        "Away 1st Inning Risk",
         "Home 1st Inning Risk",
         "Away Bullpen Fatigue",
         "Home Bullpen Fatigue",
@@ -168,9 +170,9 @@ else:
     csv = filtered_games.to_csv(index=False).encode("utf-8")
 
     st.download_button(
-        label="Download Today's MLB Report",
+        label="Download MLB Report",
         data=csv,
-        file_name="first_five_edge_report.csv",
+        file_name=f"first_five_edge_report_{selected_date}.csv",
         mime="text/csv"
     )
 

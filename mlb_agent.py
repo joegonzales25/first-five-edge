@@ -184,8 +184,8 @@ def generate_recommendation(lean, f5_edge, away_bullpen, home_bullpen):
     return " / ".join(notes)
 
 
-def get_today_games():
-    today = date.today().isoformat()
+def get_today_games(selected_date=None):
+    today = selected_date or date.today().isoformat()
 
     url = (
         "https://statsapi.mlb.com/api/v1/schedule"
