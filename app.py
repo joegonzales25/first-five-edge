@@ -1,187 +1,194 @@
 import streamlit as st
+from datetime import date, timedelta
 from mlb_agent import get_today_games
 
 st.set_page_config(
     page_title="First Five Edge",
+    page_icon="⚾",
     layout="wide"
 )
 
+st.markdown("""
+<style>
+.main {
+    background-color: #0b1220;
+}
+.game-card {
+    background: #111827;
+    border: 1px solid #263244;
+    border-radius: 18px;
+    padding: 20px;
+    margin-bottom: 18px;
+}
+.power-card {
+    background: linear-gradient(90deg, #064e3b, #047857);
+    border-radius: 18px;
+    padding: 22px;
+    margin-bottom: 18px;
+    color: white;
+}
+.badge {
+    display: inline-block;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: #2563eb;
+    color: white;
+    font-weight: 700;
+    margin-right: 8px;
+}
+.small-muted {
+    color: #9ca3af;
+    font-size: 14px;
+}
+.big-pick {
+    font-size: 26px;
+    font-weight: 800;
+}
+</style>
+""", unsafe_allow_html=True)
+
 st.title("⚾ First Five Edge")
-st.subheader("Daily MLB YRFI / NRFI + F5 Dashboard")
+st.caption("MLB YRFI / NRFI • First 5 • Bullpen Fatigue Intelligence")
 
-selected_date = st.date_input("Select Date")
-st.caption(f"Showing MLB slate for: {selected_date}")
+# Sidebar
+st.sidebar.title("Controls")
+selected_date = st.sidebar.date_input("Slate Date", value=date.today())
 
-if st.button("Refresh MLB Data"):
+if st.sidebar.button("Refresh Data"):
     st.cache_data.clear()
     st.rerun()
 
+view = st.sidebar.radio(
+    "View",
+    ["All Games", "Power Picks", "NRFI", "YRFI", "F5", "Bullpen Watch"]
+)
+
+min_edge = st.sidebar.slider("Minimum Edge Score", 0, 100, 0)
 
 @st.cache_data(ttl=900)
 def load_games(selected_date):
     return get_today_games(selected_date.isoformat())
 
-
 games = load_games(selected_date)
 
 if games.empty:
     st.warning("No MLB games found for selected date.")
-else:
-    games_sorted = games.sort_values(
-        "Edge Score",
-        ascending=False,
-        na_position="last"
-    )
+    st.stop()
 
-    top_nrfi = games_sorted[
-        games_sorted["Lean"].isin(["NRFI", "Strong NRFI"])
-    ].head(1)
+games = games.copy()
+games["Edge Score"] = games["Edge Score"].fillna(0)
 
-    top_yrfi = games_sorted[
-        games_sorted["Lean"].isin(["YRFI", "Strong YRFI"])
-    ].sort_values(
-        "NRFI Score",
-        ascending=True,
-        na_position="last"
-    ).head(1)
+# Filters
+filtered = games[games["Edge Score"] >= min_edge].copy()
 
-    top_f5 = games_sorted[
-        games_sorted["F5 Edge"] != "F5 Pass"
-    ].head(1)
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.metric(
-            "Top NRFI",
-            top_nrfi.iloc[0]["Game"] if not top_nrfi.empty else "None",
-            top_nrfi.iloc[0]["Confidence"] if not top_nrfi.empty else ""
-        )
-
-    with col2:
-        st.metric(
-            "Top YRFI",
-            top_yrfi.iloc[0]["Game"] if not top_yrfi.empty else "None",
-            top_yrfi.iloc[0]["Confidence"] if not top_yrfi.empty else ""
-        )
-
-    with col3:
-        st.metric(
-            "Top F5 Edge",
-            top_f5.iloc[0]["Game"] if not top_f5.empty else "None",
-            top_f5.iloc[0]["F5 Edge"] if not top_f5.empty else ""
-        )
-
-    st.divider()
-    st.subheader("Best Board")
-
-    best_board = games[
-        games["Recommendation"] != "Pass"
-    ].copy()
-
-    best_board = best_board.sort_values(
-        "Edge Score",
-        ascending=False,
-        na_position="last"
-    )
-
-    if best_board.empty:
-        st.info("No strong recommendations for this slate.")
-    else:
-        for _, row in best_board.head(5).iterrows():
-            st.markdown(
-                f"""
-                **{row["Game Time"]} | {row["Game"]}**  
-                Recommendation: **{row["Recommendation"]}**  
-                Confidence: **{row["Confidence"]}**  
-                Edge Score: **{row["Edge Score"]}**  
-                NRFI Score: **{row["NRFI Score"]}**  
-                Notes: {row["Agent Notes"]}
-                """
-            )
-            st.divider()
-
-    filter_choice = st.radio(
-        "View",
-        [
-            "All Games",
-            "NRFI Only",
-            "YRFI Looks",
-            "F5 Edges",
-            "High Bullpen Fatigue",
-        ],
-        horizontal=True
-    )
-
-    filtered_games = games.copy()
-
-    if filter_choice == "NRFI Only":
-        filtered_games = filtered_games[
-            filtered_games["Lean"].isin(["NRFI", "Strong NRFI"])
-        ]
-
-    elif filter_choice == "YRFI Looks":
-        filtered_games = filtered_games[
-            filtered_games["Lean"].isin(["YRFI", "Strong YRFI"])
-        ]
-
-    elif filter_choice == "F5 Edges":
-        filtered_games = filtered_games[
-            filtered_games["F5 Edge"] != "F5 Pass"
-        ]
-
-    elif filter_choice == "High Bullpen Fatigue":
-        filtered_games = filtered_games[
-            (filtered_games["Away Bullpen Fatigue"] >= 8) |
-            (filtered_games["Home Bullpen Fatigue"] >= 8)
-        ]
-
-    display_columns = [
-        "Game Time",
-        "Game",
-        "Recommendation",
-        "Confidence",
-        "Edge Score",
-        "NRFI Score",
-        "Lean",
-        "F5 Edge",
-        "Away Pitcher",
-        "Home Pitcher",
-        "Away ERA",
-        "Home ERA",
-        "Away WHIP",
-        "Home WHIP",
-        "Away Offense",
-        "Home Offense",
-        "Away 1st Inning Risk",
-        "Home 1st Inning Risk",
-        "Away Bullpen Fatigue",
-        "Home Bullpen Fatigue",
-        "Away Bullpen Status",
-        "Home Bullpen Status",
-        "Agent Notes",
-        "Status",
+if view == "Power Picks":
+    filtered = filtered[filtered["Recommendation"] != "Pass"]
+elif view == "NRFI":
+    filtered = filtered[filtered["Lean"].isin(["NRFI", "Strong NRFI"])]
+elif view == "YRFI":
+    filtered = filtered[filtered["Lean"].isin(["YRFI", "Strong YRFI"])]
+elif view == "F5":
+    filtered = filtered[filtered["F5 Edge"] != "F5 Pass"]
+elif view == "Bullpen Watch":
+    filtered = filtered[
+        (filtered["Away Bullpen Fatigue"] >= 8) |
+        (filtered["Home Bullpen Fatigue"] >= 8)
     ]
 
-    filtered_games = filtered_games[display_columns]
+filtered = filtered.sort_values("Edge Score", ascending=False)
 
-    filtered_games = filtered_games.sort_values(
-        "Edge Score",
-        ascending=False,
-        na_position="last"
+# Header metrics
+st.subheader(f"Slate: {selected_date}")
+
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Games", len(games))
+c2.metric("Power Picks", len(games[games["Recommendation"] != "Pass"]))
+c3.metric("NRFI Looks", len(games[games["Lean"].isin(["NRFI", "Strong NRFI"])]))
+c4.metric("F5 Edges", len(games[games["F5 Edge"] != "F5 Pass"]))
+
+st.divider()
+
+# Power Pick Hero
+power_picks = games[games["Recommendation"] != "Pass"].sort_values(
+    "Edge Score",
+    ascending=False
+)
+
+if not power_picks.empty:
+    top = power_picks.iloc[0]
+
+    st.markdown(
+        f"""
+        <div class="power-card">
+            <div class="small-muted">MODEL FAVORITE</div>
+            <div class="big-pick">{top["Recommendation"]}</div>
+            <h2>{top["Game"]}</h2>
+            <p>{top["Game Time"]}</p>
+            <span class="badge">Confidence {top["Confidence"]}</span>
+            <span class="badge">Edge {top["Edge Score"]}</span>
+            <span class="badge">{top["Lean"]}</span>
+            <p style="margin-top:15px;">{top["Agent Notes"]}</p>
+        </div>
+        """,
+        unsafe_allow_html=True
     )
 
-    csv = filtered_games.to_csv(index=False).encode("utf-8")
+st.subheader("Game Cards")
 
-    st.download_button(
-        label="Download MLB Report",
-        data=csv,
-        file_name=f"first_five_edge_report_{selected_date}.csv",
-        mime="text/csv"
-    )
+# Game Cards
+for _, row in filtered.iterrows():
+    with st.container(border=True):
+        left, right = st.columns([2, 1])
 
-    st.dataframe(
-        filtered_games,
-        use_container_width=True,
-        hide_index=True
-    )
+        with left:
+            st.markdown(f"### {row['Game']}")
+            st.caption(f"{row['Game Time']} • {row['Status']}")
+
+            st.markdown(f"**Recommendation:** {row['Recommendation']}")
+            st.markdown(f"**Lean:** {row['Lean']}")
+
+        with right:
+            st.metric("Edge Score", row["Edge Score"])
+            st.metric("Confidence", row["Confidence"])
+
+        a, b, c = st.columns(3)
+        a.metric("NRFI Score", row["NRFI Score"])
+        b.metric("F5 Edge", row["F5 Edge"])
+        c.metric(
+            "Bullpen",
+            f'{row["Away Bullpen Status"]} / {row["Home Bullpen Status"]}'
+        )
+
+        with st.expander("View Analysis"):
+            st.markdown("#### Starting Pitchers")
+            st.write(f'{row["Away Pitcher"]}: ERA {row["Away ERA"]}, WHIP {row["Away WHIP"]}')
+            st.write(f'{row["Home Pitcher"]}: ERA {row["Home ERA"]}, WHIP {row["Home WHIP"]}')
+
+            st.markdown("#### First Inning Risk")
+            st.write(f'Away: {row["Away 1st Inning Risk"]}')
+            st.write(f'Home: {row["Home 1st Inning Risk"]}')
+
+            st.markdown("#### Bullpen Fatigue")
+            st.write(
+                f'Away: {row["Away Bullpen Fatigue"]} '
+                f'({row["Away Bullpen Status"]})'
+            )
+            st.write(
+                f'Home: {row["Home Bullpen Fatigue"]} '
+                f'({row["Home Bullpen Status"]})'
+            )
+
+            st.markdown("#### Model Notes")
+            st.write(row["Agent Notes"])
+
+st.divider()
+
+# Download
+csv = filtered.to_csv(index=False).encode("utf-8")
+
+st.download_button(
+    label="Download MLB Report",
+    data=csv,
+    file_name=f"first_five_edge_report_{selected_date}.csv",
+    mime="text/csv"
+)
