@@ -4,8 +4,25 @@ import pandas as pd
 from datetime import date
 from datetime import datetime
 
-from team_data import TEAM_OFFENSE
-from bullpen_data import BULLPEN_FATIGUE
+
+try:
+    from team_stats import get_team_hitting_stats
+    TEAM_OFFENSE = get_team_hitting_stats()
+except Exception:
+    try:
+        from team_data import TEAM_OFFENSE
+    except Exception:
+        TEAM_OFFENSE = {}
+
+
+try:
+    from bullpen_stats import get_recent_bullpen_fatigue
+    BULLPEN_FATIGUE = get_recent_bullpen_fatigue()
+except Exception:
+    try:
+        from bullpen_data import BULLPEN_FATIGUE
+    except Exception:
+        BULLPEN_FATIGUE = {}
 
 
 def get_team_offense_score(team_name):
@@ -30,7 +47,10 @@ def format_game_time(raw_time):
 
 def get_pitcher_stats(pitcher_id):
     if not pitcher_id:
-        return {"ERA": None, "WHIP": None}
+        return {
+            "ERA": None,
+            "WHIP": None,
+        }
 
     url = (
         f"https://statsapi.mlb.com/api/v1/people/"
@@ -47,12 +67,15 @@ def get_pitcher_stats(pitcher_id):
         }
 
     except Exception:
-        return {"ERA": None, "WHIP": None}
+        return {
+            "ERA": None,
+            "WHIP": None,
+        }
 
 
 def calculate_nrfi_score(away_stats, home_stats, away_offense, home_offense):
     if away_stats["ERA"] is None or home_stats["ERA"] is None:
-        return None, "Pending", "Waiting on probable pitchers", "Pending"
+        return None, "Pending", "Waiting on probable pitchers", "Pending", "N/A"
 
     avg_era = (away_stats["ERA"] + home_stats["ERA"]) / 2
     avg_whip = (away_stats["WHIP"] + home_stats["WHIP"]) / 2
@@ -114,7 +137,7 @@ def calculate_nrfi_score(away_stats, home_stats, away_offense, home_offense):
         f5_edge = "Home F5 Lean"
     else:
         f5_edge = "F5 Pass"
-    
+
     if score >= 75:
         confidence = "A+"
     elif score >= 68:
@@ -163,7 +186,11 @@ def get_today_games():
         f"?sportId=1&date={today}&hydrate=probablePitcher"
     )
 
-    data = requests.get(url, timeout=10).json()
+    try:
+        data = requests.get(url, timeout=10).json()
+    except Exception:
+        return pd.DataFrame()
+
     games = []
 
     for day in data.get("dates", []):
@@ -205,6 +232,11 @@ def get_today_games():
             games.append({
                 "Game Time": game_time,
                 "Game": f"{away_team} @ {home_team}",
+                "Recommendation": recommendation,
+                "Confidence": confidence,
+                "NRFI Score": nrfi_score,
+                "Lean": lean,
+                "F5 Edge": f5_edge,
                 "Away Pitcher": away_pitcher,
                 "Home Pitcher": home_pitcher,
                 "Away ERA": away_stats["ERA"],
@@ -215,13 +247,8 @@ def get_today_games():
                 "Home Offense": home_offense,
                 "Away Bullpen Fatigue": away_bullpen,
                 "Home Bullpen Fatigue": home_bullpen,
-                "NRFI Score": nrfi_score,
-                "Lean": lean,
-                "F5 Edge": f5_edge,
-                "Recommendation": recommendation,
                 "Agent Notes": summary,
                 "Status": game["status"]["detailedState"],
-                "Confidence": confidence,
             })
 
     return pd.DataFrame(games)

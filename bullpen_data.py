@@ -1,3 +1,4 @@
+
 BULLPEN_FATIGUE = {
     "Arizona Diamondbacks": 5,
     "Atlanta Braves": 4,

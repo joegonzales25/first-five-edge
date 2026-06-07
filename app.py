@@ -9,7 +9,6 @@ st.set_page_config(
 st.title("⚾ First Five Edge")
 st.subheader("Daily MLB YRFI / NRFI + F5 Dashboard")
 
-
 if st.button("Refresh MLB Data"):
     st.cache_data.clear()
     st.rerun()
@@ -31,6 +30,8 @@ else:
         na_position="last"
     )
 
+    col1, col2, col3 = st.columns(3)
+
     top_nrfi = games_sorted[
         games_sorted["Lean"].isin(["NRFI", "Strong NRFI"])
     ].head(1)
@@ -47,20 +48,18 @@ else:
         games_sorted["F5 Edge"] != "F5 Pass"
     ].head(1)
 
-    col1, col2, col3 = st.columns(3)
-
     with col1:
         st.metric(
             "Top NRFI",
             top_nrfi.iloc[0]["Game"] if not top_nrfi.empty else "None",
-            top_nrfi.iloc[0]["Lean"] if not top_nrfi.empty else ""
+            top_nrfi.iloc[0]["Confidence"] if not top_nrfi.empty else ""
         )
 
     with col2:
         st.metric(
             "Top YRFI",
             top_yrfi.iloc[0]["Game"] if not top_yrfi.empty else "None",
-            top_yrfi.iloc[0]["Lean"] if not top_yrfi.empty else ""
+            top_yrfi.iloc[0]["Confidence"] if not top_yrfi.empty else ""
         )
 
     with col3:
@@ -92,6 +91,7 @@ else:
                 f"""
                 **{row["Game Time"]} | {row["Game"]}**  
                 Recommendation: **{row["Recommendation"]}**  
+                Confidence: **{row["Confidence"]}**  
                 NRFI Score: **{row["NRFI Score"]}**  
                 Notes: {row["Agent Notes"]}
                 """
@@ -137,6 +137,7 @@ else:
         "Game Time",
         "Game",
         "Recommendation",
+        "Confidence",
         "NRFI Score",
         "Lean",
         "F5 Edge",

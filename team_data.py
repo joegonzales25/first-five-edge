@@ -1,32 +1,41 @@
-TEAM_OFFENSE = {
-    "Arizona Diamondbacks": 7,
-    "Atlanta Braves": 8,
-    "Baltimore Orioles": 7,
-    "Boston Red Sox": 7,
-    "Chicago Cubs": 7,
-    "Chicago White Sox": 3,
-    "Cincinnati Reds": 6,
-    "Cleveland Guardians": 6,
-    "Colorado Rockies": 5,
-    "Detroit Tigers": 6,
-    "Houston Astros": 7,
-    "Kansas City Royals": 5,
-    "Los Angeles Angels": 5,
-    "Los Angeles Dodgers": 10,
-    "Miami Marlins": 3,
-    "Milwaukee Brewers": 6,
-    "Minnesota Twins": 6,
-    "New York Mets": 7,
-    "New York Yankees": 9,
-    "Oakland Athletics": 4,
-    "Philadelphia Phillies": 8,
-    "Pittsburgh Pirates": 4,
-    "San Diego Padres": 7,
-    "San Francisco Giants": 6,
-    "Seattle Mariners": 6,
-    "St. Louis Cardinals": 6,
-    "Tampa Bay Rays": 6,
-    "Texas Rangers": 7,
-    "Toronto Blue Jays": 7,
-    "Washington Nationals": 4,
-}
+import requests
+
+
+def get_team_hitting_stats():
+    url = (
+        "https://statsapi.mlb.com/api/v1/teams/stats"
+        "?group=hitting&stats=season&sportIds=1"
+    )
+
+    data = requests.get(url, timeout=10).json()
+
+    team_scores = {}
+
+    for split in data.get("stats", [])[0].get("splits", []):
+        team_name = split["team"]["name"]
+        stat = split["stat"]
+
+        runs = int(stat.get("runs", 0))
+        ops = float(stat.get("ops", 0))
+
+        score = 5
+
+        if ops >= 0.780:
+            score += 3
+        elif ops >= 0.740:
+            score += 2
+        elif ops >= 0.700:
+            score += 1
+        elif ops < 0.650:
+            score -= 2
+
+        if runs >= 350:
+            score += 2
+        elif runs >= 300:
+            score += 1
+        elif runs < 250:
+            score -= 1
+
+        team_scores[team_name] = max(1, min(10, score))
+
+    return team_scores
