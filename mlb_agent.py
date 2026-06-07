@@ -1,8 +1,7 @@
 import requests
 import pandas as pd
 
-from datetime import date
-from datetime import datetime
+from datetime import date, datetime
 
 
 try:
@@ -14,14 +13,10 @@ except Exception:
     except Exception:
         TEAM_OFFENSE = {}
 
-try:
-    from first_inning_data import FIRST_INNING_RISK
-except Exception:
-    FIRST_INNING_RISK = {}
 
 try:
     from bullpen_stats import get_recent_bullpen_fatigue
-    BULLPEN_FATIGUE = get_recent_bullpen_fatigue()
+    BULLPEN_FATIGUE = get_recent_bullpen_fatigue(days_back=2)
 except Exception:
     try:
         from bullpen_data import BULLPEN_FATIGUE
@@ -29,14 +24,34 @@ except Exception:
         BULLPEN_FATIGUE = {}
 
 
+try:
+    from first_inning_data import FIRST_INNING_RISK
+except Exception:
+    FIRST_INNING_RISK = {}
+
+
 def get_team_offense_score(team_name):
     return TEAM_OFFENSE.get(team_name, 5)
+
 
 def get_first_inning_risk(team_name):
     return FIRST_INNING_RISK.get(team_name, 5)
 
+
 def get_bullpen_fatigue_score(team_name):
     return BULLPEN_FATIGUE.get(team_name, 5)
+
+
+def bullpen_label(score):
+    if score <= 3:
+        return "Fresh"
+    if score <= 5:
+        return "Normal"
+    if score <= 7:
+        return "Moderate"
+    if score <= 9:
+        return "Heavy"
+    return "Extreme"
 
 
 def format_game_time(raw_time):
@@ -53,10 +68,7 @@ def format_game_time(raw_time):
 
 def get_pitcher_stats(pitcher_id):
     if not pitcher_id:
-        return {
-            "ERA": None,
-            "WHIP": None,
-        }
+        return {"ERA": None, "WHIP": None}
 
     url = (
         f"https://statsapi.mlb.com/api/v1/people/"
@@ -71,21 +83,25 @@ def get_pitcher_stats(pitcher_id):
             "ERA": float(stats.get("era", 0)),
             "WHIP": float(stats.get("whip", 0)),
         }
-
     except Exception:
-        return {
-            "ERA": None,
-            "WHIP": None,
-        }
+        return {"ERA": None, "WHIP": None}
 
 
-def calculate_nrfi_score(away_stats, home_stats, away_offense, home_offense):
+def calculate_nrfi_score(
+    away_stats,
+    home_stats,
+    away_offense,
+    home_offense,
+    away_first_inning,
+    home_first_inning,
+):
     if away_stats["ERA"] is None or home_stats["ERA"] is None:
         return None, "Pending", "Waiting on probable pitchers", "Pending", "N/A"
 
     avg_era = (away_stats["ERA"] + home_stats["ERA"]) / 2
     avg_whip = (away_stats["WHIP"] + home_stats["WHIP"]) / 2
     combined_offense = away_offense + home_offense
+    combined_first_inning = away_first_inning + home_first_inning
 
     score = 70
     reasons = []
@@ -117,14 +133,24 @@ def calculate_nrfi_score(away_stats, home_stats, away_offense, home_offense):
         reasons.append("Elevated WHIP risk")
 
     if combined_offense >= 17:
-        score -= 10
-        reasons.append("Elite offensive matchup increases YRFI risk")
+        score -= 8
+        reasons.append("Elite offense profile increases YRFI risk")
     elif combined_offense >= 14:
         score -= 5
         reasons.append("Above-average offenses reduce NRFI confidence")
     elif combined_offense <= 8:
-        score += 6
+        score += 5
         reasons.append("Weak offensive matchup supports NRFI")
+
+    if combined_first_inning >= 15:
+        score -= 10
+        reasons.append("High first-inning scoring risk")
+    elif combined_first_inning >= 12:
+        score -= 5
+        reasons.append("Moderate first-inning scoring risk")
+    elif combined_first_inning <= 8:
+        score += 5
+        reasons.append("Low first-inning scoring risk")
 
     score = max(35, min(85, score))
 
@@ -155,7 +181,7 @@ def calculate_nrfi_score(away_stats, home_stats, away_offense, home_offense):
     else:
         confidence = "D"
 
-    summary = "; ".join(reasons) if reasons else "Neutral starter profile"
+    summary = "; ".join(reasons) if reasons else "Neutral profile"
 
     return round(score, 1), lean, summary, f5_edge, confidence
 
@@ -172,24 +198,43 @@ def generate_recommendation(lean, f5_edge, away_bullpen, home_bullpen):
     if f5_edge != "F5 Pass":
         notes.append(f5_edge)
 
-    if away_bullpen >= 7:
+    if away_bullpen >= 8:
         notes.append("Fade Away Bullpen")
 
-    if home_bullpen >= 7:
+    if home_bullpen >= 8:
         notes.append("Fade Home Bullpen")
 
-    if not notes:
-        return "Pass"
+    return " / ".join(notes) if notes else "Pass"
 
-    return " / ".join(notes)
+
+def calculate_edge_score(nrfi_score, confidence, away_bullpen, home_bullpen):
+    if nrfi_score is None:
+        return None
+
+    edge_score = nrfi_score
+
+    if confidence == "A+":
+        edge_score += 10
+    elif confidence == "A":
+        edge_score += 7
+    elif confidence == "B":
+        edge_score += 3
+
+    if away_bullpen >= 8:
+        edge_score += 2
+
+    if home_bullpen >= 8:
+        edge_score += 2
+
+    return round(edge_score, 1)
 
 
 def get_today_games(selected_date=None):
-    today = selected_date or date.today().isoformat()
+    slate_date = selected_date or date.today().isoformat()
 
     url = (
         "https://statsapi.mlb.com/api/v1/schedule"
-        f"?sportId=1&date={today}&hydrate=probablePitcher"
+        f"?sportId=1&date={slate_date}&hydrate=probablePitcher"
     )
 
     try:
@@ -203,8 +248,6 @@ def get_today_games(selected_date=None):
         for game in day.get("games", []):
             away_team = game["teams"]["away"]["team"]["name"]
             home_team = game["teams"]["home"]["team"]["name"]
-
-            game_time = format_game_time(game.get("gameDate", ""))
 
             away_offense = get_team_offense_score(away_team)
             home_offense = get_team_offense_score(home_team)
@@ -227,8 +270,10 @@ def get_today_games(selected_date=None):
             nrfi_score, lean, summary, f5_edge, confidence = calculate_nrfi_score(
                 away_stats,
                 home_stats,
-                away_offense + away_first_inning,
-                home_offense + home_first_inning,
+                away_offense,
+                home_offense,
+                away_first_inning,
+                home_first_inning,
             )
 
             recommendation = generate_recommendation(
@@ -238,11 +283,19 @@ def get_today_games(selected_date=None):
                 home_bullpen,
             )
 
+            edge_score = calculate_edge_score(
+                nrfi_score,
+                confidence,
+                away_bullpen,
+                home_bullpen,
+            )
+
             games.append({
-                "Game Time": game_time,
+                "Game Time": format_game_time(game.get("gameDate", "")),
                 "Game": f"{away_team} @ {home_team}",
                 "Recommendation": recommendation,
                 "Confidence": confidence,
+                "Edge Score": edge_score,
                 "NRFI Score": nrfi_score,
                 "Lean": lean,
                 "F5 Edge": f5_edge,
@@ -254,12 +307,14 @@ def get_today_games(selected_date=None):
                 "Home WHIP": home_stats["WHIP"],
                 "Away Offense": away_offense,
                 "Home Offense": home_offense,
-                "Away Bullpen Fatigue": away_bullpen,
-                "Home Bullpen Fatigue": home_bullpen,
-                "Agent Notes": summary,
-                "Status": game["status"]["detailedState"],
                 "Away 1st Inning Risk": away_first_inning,
                 "Home 1st Inning Risk": home_first_inning,
+                "Away Bullpen Fatigue": away_bullpen,
+                "Home Bullpen Fatigue": home_bullpen,
+                "Away Bullpen Status": bullpen_label(away_bullpen),
+                "Home Bullpen Status": bullpen_label(home_bullpen),
+                "Agent Notes": summary,
+                "Status": game["status"]["detailedState"],
             })
 
     return pd.DataFrame(games)

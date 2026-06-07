@@ -28,7 +28,7 @@ if games.empty:
     st.warning("No MLB games found for selected date.")
 else:
     games_sorted = games.sort_values(
-        "NRFI Score",
+        "Edge Score",
         ascending=False,
         na_position="last"
     )
@@ -80,7 +80,7 @@ else:
     ].copy()
 
     best_board = best_board.sort_values(
-        "NRFI Score",
+        "Edge Score",
         ascending=False,
         na_position="last"
     )
@@ -94,6 +94,7 @@ else:
                 **{row["Game Time"]} | {row["Game"]}**  
                 Recommendation: **{row["Recommendation"]}**  
                 Confidence: **{row["Confidence"]}**  
+                Edge Score: **{row["Edge Score"]}**  
                 NRFI Score: **{row["NRFI Score"]}**  
                 Notes: {row["Agent Notes"]}
                 """
@@ -131,8 +132,8 @@ else:
 
     elif filter_choice == "High Bullpen Fatigue":
         filtered_games = filtered_games[
-            (filtered_games["Away Bullpen Fatigue"] >= 7) |
-            (filtered_games["Home Bullpen Fatigue"] >= 7)
+            (filtered_games["Away Bullpen Fatigue"] >= 8) |
+            (filtered_games["Home Bullpen Fatigue"] >= 8)
         ]
 
     display_columns = [
@@ -140,6 +141,7 @@ else:
         "Game",
         "Recommendation",
         "Confidence",
+        "Edge Score",
         "NRFI Score",
         "Lean",
         "F5 Edge",
@@ -155,6 +157,8 @@ else:
         "Home 1st Inning Risk",
         "Away Bullpen Fatigue",
         "Home Bullpen Fatigue",
+        "Away Bullpen Status",
+        "Home Bullpen Status",
         "Agent Notes",
         "Status",
     ]
@@ -162,7 +166,7 @@ else:
     filtered_games = filtered_games[display_columns]
 
     filtered_games = filtered_games.sort_values(
-        "NRFI Score",
+        "Edge Score",
         ascending=False,
         na_position="last"
     )
