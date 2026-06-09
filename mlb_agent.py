@@ -37,6 +37,12 @@ except Exception:
     FIRST_INNING_LIVE = {}
 
 
+try:
+    from pitcher_first_inning_stats import get_pitcher_first_inning_stats
+except Exception:
+    get_pitcher_first_inning_stats = None
+
+
 def safe_float(value):
     try:
         return float(value)
@@ -57,6 +63,24 @@ def get_live_first_inning_stats(team_name):
         "Offense YRFI %": "TBD",
         "1st Run Avg": "TBD",
     })
+
+
+def get_pitcher_first_stats(pitcher_id, season=None):
+    fallback = {
+        "Pitcher YRFI %": "TBD",
+        "1st ERA": "TBD",
+        "1st WHIP": "TBD",
+        "1st BB Avg": "TBD",
+        "Starts": 0,
+    }
+
+    if get_pitcher_first_inning_stats is None:
+        return fallback
+
+    try:
+        return get_pitcher_first_inning_stats(pitcher_id, season)
+    except Exception:
+        return fallback
 
 
 def get_bullpen_data(team_name):
@@ -347,11 +371,24 @@ def get_today_games(selected_date=None):
             away_pitcher_data = game["teams"]["away"].get("probablePitcher", {})
             home_pitcher_data = game["teams"]["home"].get("probablePitcher", {})
 
+            away_pitcher_id = away_pitcher_data.get("id")
+            home_pitcher_id = home_pitcher_data.get("id")
+
             away_pitcher = away_pitcher_data.get("fullName", "TBD")
             home_pitcher = home_pitcher_data.get("fullName", "TBD")
 
-            away_stats = get_pitcher_stats(away_pitcher_data.get("id"))
-            home_stats = get_pitcher_stats(home_pitcher_data.get("id"))
+            away_stats = get_pitcher_stats(away_pitcher_id)
+            home_stats = get_pitcher_stats(home_pitcher_id)
+
+            away_pitcher_first = get_pitcher_first_stats(
+                away_pitcher_id,
+                season
+            )
+
+            home_pitcher_first = get_pitcher_first_stats(
+                home_pitcher_id,
+                season
+            )
 
             nrfi_score, lean, summary, f5_edge, confidence = calculate_nrfi_score(
                 away_stats,
@@ -411,6 +448,15 @@ def get_today_games(selected_date=None):
                 "Home Offense YRFI %": home_first_live["Offense YRFI %"],
                 "Away 1st Run Avg": away_first_live["1st Run Avg"],
                 "Home 1st Run Avg": home_first_live["1st Run Avg"],
+
+                "Away Pitcher YRFI %": away_pitcher_first["Pitcher YRFI %"],
+                "Home Pitcher YRFI %": home_pitcher_first["Pitcher YRFI %"],
+                "Away 1st ERA": away_pitcher_first["1st ERA"],
+                "Home 1st ERA": home_pitcher_first["1st ERA"],
+                "Away 1st WHIP": away_pitcher_first["1st WHIP"],
+                "Home 1st WHIP": home_pitcher_first["1st WHIP"],
+                "Away 1st BB Avg": away_pitcher_first["1st BB Avg"],
+                "Home 1st BB Avg": home_pitcher_first["1st BB Avg"],
 
                 "Away Bullpen Fatigue": away_bullpen,
                 "Home Bullpen Fatigue": home_bullpen,

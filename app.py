@@ -308,10 +308,12 @@ else:
                 | Metric | Value |
                 |---|---|
                 | YRFI Risk | {row["Away 1st Inning Risk"]} |
-                | Pitcher YRFI % | TBD |
-                | 1st BB Average | {row["Away 1st Run Avg"]} |
-                | 1st ERA | TBD |
+                | Pitcher YRFI % | {row["Away Pitcher YRFI %"]} |
+                | 1st BB Average | {row["Away 1st BB Avg"]} |
+                | 1st ERA | {row["Away 1st ERA"]} |
+                | 1st WHIP | {row["Away 1st WHIP"]} |
                 | Offense YRFI % | {row["Away Offense YRFI %"]} |
+                | 1st Run Avg | {row["Away 1st Run Avg"]} |
                 """)
 
             with home_first_col:
@@ -320,10 +322,12 @@ else:
                 | Metric | Value |
                 |---|---|
                 | YRFI Risk | {row["Home 1st Inning Risk"]} |
-                | Pitcher YRFI % | TBD |
-                | 1st BB Average | {row["Home 1st Run Avg"]} |
-                | 1st ERA | TBD |
+                | Pitcher YRFI % | {row["Home Pitcher YRFI %"]} |
+                | 1st BB Average | {row["Home 1st BB Avg"]} |
+                | 1st ERA | {row["Home 1st ERA"]} |
+                | 1st WHIP | {row["Home 1st WHIP"]} |
                 | Offense YRFI % | {row["Home Offense YRFI %"]} |
+                | 1st Run Avg | {row["Home 1st Run Avg"]} |
                 """)
 
             st.markdown("---")
