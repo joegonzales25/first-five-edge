@@ -1,5 +1,6 @@
 import requests
 from datetime import date, timedelta
+from collections import defaultdict
 
 
 def safe_int(value):
@@ -11,15 +12,14 @@ def safe_int(value):
 
 def get_boxscore(game_pk):
     url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/boxscore"
+
     try:
         return requests.get(url, timeout=15).json()
     except Exception:
         return {}
 
 
-def get_recent_bullpen_fatigue(days_back=2):
-    fatigue = {}
-
+def get_recent_bullpen_fatigue(days_back=3):
     end_date = date.today() - timedelta(days=1)
     start_date = end_date - timedelta(days=days_back)
 
@@ -33,7 +33,18 @@ def get_recent_bullpen_fatigue(days_back=2):
     except Exception:
         return {}
 
+    team_data = defaultdict(lambda: {
+        "last_3_days_pitches": 0,
+        "yesterday_pitches": 0,
+        "yesterday_relievers": 0,
+        "pitcher_dates": defaultdict(set),
+    })
+
+    yesterday = str(end_date)
+
     for day in schedule.get("dates", []):
+        game_date = day.get("date")
+
         for game in day.get("games", []):
             game_pk = game.get("gamePk")
             if not game_pk:
@@ -52,11 +63,6 @@ def get_recent_bullpen_fatigue(days_back=2):
                 if not team_name:
                     continue
 
-                fatigue.setdefault(team_name, {
-                    "relievers_used": 0,
-                    "bullpen_pitches": 0,
-                })
-
                 team_box = boxscore.get("teams", {}).get(side, {})
                 players = team_box.get("players", {})
                 pitcher_ids = team_box.get("pitchers", [])
@@ -68,47 +74,79 @@ def get_recent_bullpen_fatigue(days_back=2):
                     games_started = safe_int(pitching.get("gamesStarted", 0))
                     pitches = safe_int(pitching.get("numberOfPitches", 0))
 
-                    if games_started > 0:
+                    # Skip starting pitchers
+                    if games_started > 0 or pitches <= 0:
                         continue
 
-                    if pitches <= 0:
-                        continue
+                    team_data[team_name]["last_3_days_pitches"] += pitches
+                    team_data[team_name]["pitcher_dates"][pitcher_id].add(game_date)
 
-                    fatigue[team_name]["relievers_used"] += 1
-                    fatigue[team_name]["bullpen_pitches"] += pitches
+                    if game_date == yesterday:
+                        team_data[team_name]["yesterday_pitches"] += pitches
+                        team_data[team_name]["yesterday_relievers"] += 1
 
     final_scores = {}
 
-    for team, stats in fatigue.items():
-        relievers_used = stats["relievers_used"]
-        bullpen_pitches = stats["bullpen_pitches"]
+    for team, stats in team_data.items():
+        back_to_back_arms = 0
 
-        score = 3
+        for _, dates_used in stats["pitcher_dates"].items():
+            sorted_dates = sorted(list(dates_used))
 
-        if relievers_used >= 14:
-            score += 4
-        elif relievers_used >= 10:
-            score += 3
-        elif relievers_used >= 7:
+            for i in range(1, len(sorted_dates)):
+                prev_date = date.fromisoformat(sorted_dates[i - 1])
+                curr_date = date.fromisoformat(sorted_dates[i])
+
+                if (curr_date - prev_date).days == 1:
+                    back_to_back_arms += 1
+                    break
+
+        score = 0
+
+        # Yesterday relievers used
+        if stats["yesterday_relievers"] >= 5:
             score += 2
-        elif relievers_used >= 4:
+        elif stats["yesterday_relievers"] >= 3:
             score += 1
 
-        if bullpen_pitches >= 240:
-            score += 4
-        elif bullpen_pitches >= 180:
+        # Yesterday bullpen pitches
+        if stats["yesterday_pitches"] >= 100:
             score += 3
-        elif bullpen_pitches >= 120:
+        elif stats["yesterday_pitches"] >= 70:
             score += 2
-        elif bullpen_pitches >= 70:
+        elif stats["yesterday_pitches"] >= 40:
             score += 1
 
-        final_scores[team] = max(1, min(10, score))
+        # Back-to-back arms
+        if back_to_back_arms >= 3:
+            score += 3
+        elif back_to_back_arms == 2:
+            score += 2
+        elif back_to_back_arms == 1:
+            score += 1
+
+        # Last 3 days bullpen pitches
+        if stats["last_3_days_pitches"] >= 250:
+            score += 3
+        elif stats["last_3_days_pitches"] >= 180:
+            score += 2
+        elif stats["last_3_days_pitches"] >= 120:
+            score += 1
+
+        fatigue_score = max(1, min(10, score))
+
+        final_scores[team] = {
+            "Fatigue Score": fatigue_score,
+            "Yesterday Relievers": stats["yesterday_relievers"],
+            "Yesterday Pitches": stats["yesterday_pitches"],
+            "Last 3 Days Pitches": stats["last_3_days_pitches"],
+            "Back-to-Back Arms": back_to_back_arms,
+        }
 
     return final_scores
 
 
 if __name__ == "__main__":
-    scores = get_recent_bullpen_fatigue()
-    print(scores)
-    print("Teams found:", len(scores))
+    data = get_recent_bullpen_fatigue()
+    print(data)
+    print("Teams found:", len(data))

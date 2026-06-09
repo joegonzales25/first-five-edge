@@ -15,7 +15,7 @@ st.html("""
     border: 1px solid #d1d5db;
     border-left: 8px solid #9ca3af;
     padding: 22px;
-    margin-bottom: 0px;
+    margin-bottom: 6px;
     background: #ffffff;
 }
 .card-nrfi { border-left-color: #22c55e; }
@@ -73,11 +73,10 @@ st.html("""
     font-weight: 900;
     margin-top: 6px;
 }
+
 div[data-testid="stExpander"] {
-    margin-top: -8px;
+    margin-top: -4px;
     margin-bottom: 18px;
-    border-left: 8px solid #d1d5db;
-    border-radius: 0 0 18px 18px;
 }
 </style>
 """)
@@ -103,6 +102,13 @@ def get_badge_class(row):
     return "badge-pass"
 
 
+def split_game_name(game_name):
+    if " @ " in game_name:
+        away, home = game_name.split(" @ ", 1)
+        return away, home
+    return "Away", "Home"
+
+
 @st.cache_data(ttl=900)
 def load_games(selected_date):
     return get_today_games(selected_date.isoformat())
@@ -113,6 +119,28 @@ st.caption("MLB YRFI / NRFI • First 5 • Bullpen Fatigue Intelligence")
 
 st.sidebar.title("Controls")
 selected_date = st.sidebar.date_input("Slate Date", value=date.today())
+st.sidebar.divider()
+st.sidebar.subheader("Data Sources")
+
+st.sidebar.markdown("""
+**Game Schedule / Probable Pitchers**  
+MLB Stats API
+
+**Team Records**  
+MLB Standings API
+
+**Pitcher Season Stats**  
+MLB Stats API
+
+**Bullpen Fatigue**  
+MLB Game Boxscore API
+
+**Team 1st Inning Offense**  
+MLB Linescore API
+
+**Pitcher 1st Inning Metrics**  
+Baseball Savant / Statcast
+""")
 
 if st.sidebar.button("Refresh Data"):
     st.cache_data.clear()
@@ -192,6 +220,7 @@ else:
     for _, row in filtered.iterrows():
         card_class = get_card_class(row)
         badge_class = get_badge_class(row)
+        away_team, home_team = split_game_name(row["Game"])
 
         st.html(f"""
         <div class="game-card {card_class}">
@@ -211,26 +240,126 @@ else:
                 F5 Edge: <strong>{row["F5 Edge"]}</strong> &nbsp; • &nbsp;
                 Bullpen: <strong>{row["Away Bullpen Status"]} / {row["Home Bullpen Status"]}</strong>
             </div>
-            
-
         </div>
         """)
 
-        with st.expander(f"🔍 Why the Model Likes This: {row['Game']}"):
-            st.markdown("#### Starting Pitchers")
-            st.write(f'{row["Away Pitcher"]}: ERA {row["Away ERA"]}, WHIP {row["Away WHIP"]}')
-            st.write(f'{row["Home Pitcher"]}: ERA {row["Home ERA"]}, WHIP {row["Home WHIP"]}')
+        with st.expander(f"🔍 Analysis: {row['Game']}"):
+            st.markdown("### Analysis")
 
-            st.markdown("#### First Inning Risk")
-            st.write(f'Away: {row["Away 1st Inning Risk"]}')
-            st.write(f'Home: {row["Home 1st Inning Risk"]}')
+            away_col, home_col = st.columns(2)
 
-            st.markdown("#### Bullpen Fatigue")
-            st.write(f'Away: {row["Away Bullpen Fatigue"]} ({row["Away Bullpen Status"]})')
-            st.write(f'Home: {row["Home Bullpen Fatigue"]} ({row["Home Bullpen Status"]})')
+            with away_col:
+                st.markdown("#### Away")
+                st.markdown(f"""
+                | Field | Value |
+                |---|---|
+                | Team Name | {away_team} |
+                | Record | {row["Away Record"]} |
+                """)
 
-            st.markdown("#### Model Notes")
-            st.write(row["Agent Notes"])
+            with home_col:
+                st.markdown("#### Home")
+                st.markdown(f"""
+                | Field | Value |
+                |---|---|
+                | Team Name | {home_team} |
+                | Record | {row["Home Record"]} |
+                """)
+
+            st.markdown("---")
+            st.markdown("### Pitching Matchup")
+
+            away_pitch_col, home_pitch_col = st.columns(2)
+
+            with away_pitch_col:
+                st.markdown(f"#### {away_team}")
+                st.markdown(f"""
+                | Metric | Value |
+                |---|---|
+                | Pitcher | {row["Away Pitcher"]} |
+                | Record | {row["Away Pitcher Record"]} |
+                | ERA | {row["Away ERA"]} |
+                | WHIP | {row["Away WHIP"]} |
+                | IP | {row["Away IP"]} |
+                | K | {row["Away K"]} |
+                """)
+
+            with home_pitch_col:
+                st.markdown(f"#### {home_team}")
+                st.markdown(f"""
+                | Metric | Value |
+                |---|---|
+                | Pitcher | {row["Home Pitcher"]} |
+                | Record | {row["Home Pitcher Record"]} |
+                | ERA | {row["Home ERA"]} |
+                | WHIP | {row["Home WHIP"]} |
+                | IP | {row["Home IP"]} |
+                | K | {row["Home K"]} |
+                """)
+
+            st.markdown("---")
+            st.markdown("### 1st Inning")
+
+            away_first_col, home_first_col = st.columns(2)
+
+            with away_first_col:
+                st.markdown(f"#### {away_team}")
+                st.markdown(f"""
+                | Metric | Value |
+                |---|---|
+                | YRFI Risk | {row["Away 1st Inning Risk"]} |
+                | Pitcher YRFI % | TBD |
+                | 1st BB Average | {row["Away 1st Run Avg"]} |
+                | 1st ERA | TBD |
+                | Offense YRFI % | {row["Away Offense YRFI %"]} |
+                """)
+
+            with home_first_col:
+                st.markdown(f"#### {home_team}")
+                st.markdown(f"""
+                | Metric | Value |
+                |---|---|
+                | YRFI Risk | {row["Home 1st Inning Risk"]} |
+                | Pitcher YRFI % | TBD |
+                | 1st BB Average | {row["Home 1st Run Avg"]} |
+                | 1st ERA | TBD |
+                | Offense YRFI % | {row["Home Offense YRFI %"]} |
+                """)
+
+            st.markdown("---")
+            st.markdown("### Bullpen Usage")
+
+            away_bullpen_col, home_bullpen_col = st.columns(2)
+
+            with away_bullpen_col:
+                st.markdown(f"#### {away_team}")
+                st.markdown(f"""
+                | Metric | Value |
+                |---|---|
+                | Rating | {row["Away Bullpen Status"]} |
+                | Fatigue Score | {row["Away Bullpen Fatigue"]} |
+                | Yesterday Relievers | {row["Away Yesterday Relievers"]} |
+                | Yesterday Pitches | {row["Away Yesterday Pitches"]} |
+                | 3-Day Bullpen Pitches | {row["Away 3 Day Bullpen Pitches"]} |
+                | Back-to-Back Arms | {row["Away Back-to-Back Arms"]} |
+                """)
+
+            with home_bullpen_col:
+                st.markdown(f"#### {home_team}")
+                st.markdown(f"""
+                | Metric | Value |
+                |---|---|
+                | Rating | {row["Home Bullpen Status"]} |
+                | Fatigue Score | {row["Home Bullpen Fatigue"]} |
+                | Yesterday Relievers | {row["Home Yesterday Relievers"]} |
+                | Yesterday Pitches | {row["Home Yesterday Pitches"]} |
+                | 3-Day Bullpen Pitches | {row["Home 3 Day Bullpen Pitches"]} |
+                | Back-to-Back Arms | {row["Home Back-to-Back Arms"]} |
+                """)
+
+            st.markdown("---")
+            st.markdown("### Model Notes")
+            st.info(row["Agent Notes"])
 
 st.divider()
 
