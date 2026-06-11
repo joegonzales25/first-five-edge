@@ -1,6 +1,9 @@
 import requests
 
 
+UNAVAILABLE = "N/A"
+
+
 def get_team_bullpen_stats():
     url = (
         "https://statsapi.mlb.com/api/v1/teams/stats"
@@ -19,8 +22,8 @@ def get_team_bullpen_stats():
         stat = split["stat"]
 
         final[team] = {
-            "Bullpen ERA": stat.get("era", "TBD"),
-            "Bullpen IP": stat.get("inningsPitched", "TBD"),
+            "Bullpen ERA": stat.get("era", UNAVAILABLE),
+            "Bullpen IP": stat.get("inningsPitched", UNAVAILABLE),
         }
 
     return final

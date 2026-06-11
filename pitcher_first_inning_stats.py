@@ -2,6 +2,9 @@ import requests
 from datetime import date
 
 
+UNAVAILABLE = "N/A"
+
+
 def safe_float(value):
     try:
         return float(value)
@@ -40,10 +43,9 @@ def estimate_pitcher_first_inning_stats(pitcher_id, season=None):
 
     if not logs:
         return {
-            "Pitcher YRFI %": "TBD",
-            "1st ERA": "TBD",
-            "1st WHIP": "TBD",
-            "1st BB Avg": "TBD",
+            "Pitcher YRFI %": UNAVAILABLE,
+            "1st ERA": UNAVAILABLE,
+            "1st WHIP": UNAVAILABLE,
             "Starts": 0,
         }
 
@@ -72,10 +74,9 @@ def estimate_pitcher_first_inning_stats(pitcher_id, season=None):
 
     if starts == 0 or valid_games == 0:
         return {
-            "Pitcher YRFI %": "TBD",
-            "1st ERA": "TBD",
-            "1st WHIP": "TBD",
-            "1st BB Avg": "TBD",
+            "Pitcher YRFI %": UNAVAILABLE,
+            "1st ERA": UNAVAILABLE,
+            "1st WHIP": UNAVAILABLE,
             "Starts": starts,
         }
 
@@ -91,7 +92,6 @@ def estimate_pitcher_first_inning_stats(pitcher_id, season=None):
         "Pitcher YRFI %": estimated_yrfi,
         "1st ERA": estimated_first_era,
         "1st WHIP": estimated_first_whip,
-        "1st BB Avg": "TBD",
         "Starts": starts,
     }
 

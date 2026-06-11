@@ -4,6 +4,9 @@ import pandas as pd
 from datetime import date, datetime
 
 
+UNAVAILABLE = "N/A"
+
+
 try:
     from team_stats import get_team_hitting_stats
     TEAM_OFFENSE = get_team_hitting_stats()
@@ -60,17 +63,16 @@ def get_first_inning_risk(team_name):
 
 def get_live_first_inning_stats(team_name):
     return FIRST_INNING_LIVE.get(team_name, {
-        "Offense YRFI %": "TBD",
-        "1st Run Avg": "TBD",
+        "Offense YRFI %": UNAVAILABLE,
+        "1st Run Avg": UNAVAILABLE,
     })
 
 
 def get_pitcher_first_stats(pitcher_id, season=None):
     fallback = {
-        "Pitcher YRFI %": "TBD",
-        "1st ERA": "TBD",
-        "1st WHIP": "TBD",
-        "1st BB Avg": "TBD",
+        "Pitcher YRFI %": UNAVAILABLE,
+        "1st ERA": UNAVAILABLE,
+        "1st WHIP": UNAVAILABLE,
         "Starts": 0,
     }
 
@@ -86,10 +88,10 @@ def get_pitcher_first_stats(pitcher_id, season=None):
 def get_bullpen_data(team_name):
     return BULLPEN_FATIGUE.get(team_name, {
         "Fatigue Score": 5,
-        "Yesterday Relievers": "TBD",
-        "Yesterday Pitches": "TBD",
-        "Last 3 Days Pitches": "TBD",
-        "Back-to-Back Arms": "TBD",
+        "Yesterday Relievers": UNAVAILABLE,
+        "Yesterday Pitches": UNAVAILABLE,
+        "Last 3 Days Pitches": UNAVAILABLE,
+        "Back-to-Back Arms": UNAVAILABLE,
     })
 
 
@@ -111,7 +113,7 @@ def bullpen_label(score):
 
 def format_game_time(raw_time):
     if not raw_time:
-        return "TBD"
+        return UNAVAILABLE
 
     try:
         utc_dt = datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
@@ -125,10 +127,10 @@ def get_pitcher_stats(pitcher_id):
     fallback = {
         "ERA": None,
         "WHIP": None,
-        "W": "TBD",
-        "L": "TBD",
-        "IP": "TBD",
-        "K": "TBD",
+        "W": UNAVAILABLE,
+        "L": UNAVAILABLE,
+        "IP": UNAVAILABLE,
+        "K": UNAVAILABLE,
     }
 
     if not pitcher_id:
@@ -146,10 +148,10 @@ def get_pitcher_stats(pitcher_id):
         return {
             "ERA": safe_float(stats.get("era")),
             "WHIP": safe_float(stats.get("whip")),
-            "W": stats.get("wins", "TBD"),
-            "L": stats.get("losses", "TBD"),
-            "IP": stats.get("inningsPitched", "TBD"),
-            "K": stats.get("strikeOuts", "TBD"),
+            "W": stats.get("wins", UNAVAILABLE),
+            "L": stats.get("losses", UNAVAILABLE),
+            "IP": stats.get("inningsPitched", UNAVAILABLE),
+            "K": stats.get("strikeOuts", UNAVAILABLE),
         }
 
     except Exception:
@@ -179,6 +181,17 @@ def get_team_records(season=None):
             records[team_name] = f"{wins}-{losses}"
 
     return records
+
+
+def format_team_record(team_side, fallback=UNAVAILABLE):
+    record = team_side.get("leagueRecord", {})
+    wins = record.get("wins")
+    losses = record.get("losses")
+
+    if wins is None or losses is None:
+        return fallback
+
+    return f"{wins}-{losses}"
 
 
 def calculate_nrfi_score(
@@ -347,11 +360,20 @@ def get_today_games(selected_date=None):
 
     for day in data.get("dates", []):
         for game in day.get("games", []):
-            away_team = game["teams"]["away"]["team"]["name"]
-            home_team = game["teams"]["home"]["team"]["name"]
+            away_side = game["teams"]["away"]
+            home_side = game["teams"]["home"]
 
-            away_record = team_records.get(away_team, "TBD")
-            home_record = team_records.get(home_team, "TBD")
+            away_team = away_side["team"]["name"]
+            home_team = home_side["team"]["name"]
+
+            away_record = format_team_record(
+                away_side,
+                team_records.get(away_team, UNAVAILABLE),
+            )
+            home_record = format_team_record(
+                home_side,
+                team_records.get(home_team, UNAVAILABLE),
+            )
 
             away_offense = get_team_offense_score(away_team)
             home_offense = get_team_offense_score(home_team)
@@ -374,8 +396,8 @@ def get_today_games(selected_date=None):
             away_pitcher_id = away_pitcher_data.get("id")
             home_pitcher_id = home_pitcher_data.get("id")
 
-            away_pitcher = away_pitcher_data.get("fullName", "TBD")
-            home_pitcher = home_pitcher_data.get("fullName", "TBD")
+            away_pitcher = away_pitcher_data.get("fullName", UNAVAILABLE)
+            home_pitcher = home_pitcher_data.get("fullName", UNAVAILABLE)
 
             away_stats = get_pitcher_stats(away_pitcher_id)
             home_stats = get_pitcher_stats(home_pitcher_id)
@@ -455,8 +477,6 @@ def get_today_games(selected_date=None):
                 "Home 1st ERA": home_pitcher_first["1st ERA"],
                 "Away 1st WHIP": away_pitcher_first["1st WHIP"],
                 "Home 1st WHIP": home_pitcher_first["1st WHIP"],
-                "Away 1st BB Avg": away_pitcher_first["1st BB Avg"],
-                "Home 1st BB Avg": home_pitcher_first["1st BB Avg"],
 
                 "Away Bullpen Fatigue": away_bullpen,
                 "Home Bullpen Fatigue": home_bullpen,

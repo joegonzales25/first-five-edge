@@ -2,6 +2,8 @@ import streamlit as st
 from datetime import date
 from mlb_agent import get_today_games
 
+APP_VERSION = "2.0"
+
 st.set_page_config(
     page_title="First Five Edge",
     page_icon="⚾",
@@ -118,6 +120,7 @@ st.title("⚾ First Five Edge")
 st.caption("MLB YRFI / NRFI • First 5 • Bullpen Fatigue Intelligence")
 
 st.sidebar.title("Controls")
+st.sidebar.caption(f"Version {APP_VERSION}")
 selected_date = st.sidebar.date_input("Slate Date", value=date.today())
 st.sidebar.divider()
 st.sidebar.subheader("Data Sources")
@@ -309,7 +312,6 @@ else:
                 |---|---|
                 | YRFI Risk | {row["Away 1st Inning Risk"]} |
                 | Pitcher YRFI % | {row["Away Pitcher YRFI %"]} |
-                | 1st BB Average | {row["Away 1st BB Avg"]} |
                 | 1st ERA | {row["Away 1st ERA"]} |
                 | 1st WHIP | {row["Away 1st WHIP"]} |
                 | Offense YRFI % | {row["Away Offense YRFI %"]} |
@@ -323,7 +325,6 @@ else:
                 |---|---|
                 | YRFI Risk | {row["Home 1st Inning Risk"]} |
                 | Pitcher YRFI % | {row["Home Pitcher YRFI %"]} |
-                | 1st BB Average | {row["Home 1st BB Avg"]} |
                 | 1st ERA | {row["Home 1st ERA"]} |
                 | 1st WHIP | {row["Home 1st WHIP"]} |
                 | Offense YRFI % | {row["Home Offense YRFI %"]} |
