@@ -10,6 +10,25 @@ def safe_int(value):
         return 0
 
 
+def innings_to_outs(value):
+    if value in [None, ""]:
+        return 0
+
+    whole, _, partial = str(value).partition(".")
+    outs = safe_int(whole) * 3
+
+    if partial:
+        outs += min(safe_int(partial[0]), 2)
+
+    return outs
+
+
+def outs_to_innings(outs):
+    innings = outs // 3
+    partial = outs % 3
+    return f"{innings}.{partial}" if partial else str(innings)
+
+
 def get_boxscore(game_pk):
     url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/boxscore"
 
@@ -35,12 +54,10 @@ def get_recent_bullpen_fatigue(days_back=3):
 
     team_data = defaultdict(lambda: {
         "last_3_days_pitches": 0,
-        "yesterday_pitches": 0,
-        "yesterday_relievers": 0,
+        "last_3_days_outs": 0,
+        "reliever_appearances": 0,
         "pitcher_dates": defaultdict(set),
     })
-
-    yesterday = str(end_date)
 
     for day in schedule.get("dates", []):
         game_date = day.get("date")
@@ -73,17 +90,16 @@ def get_recent_bullpen_fatigue(days_back=3):
 
                     games_started = safe_int(pitching.get("gamesStarted", 0))
                     pitches = safe_int(pitching.get("numberOfPitches", 0))
+                    outs = innings_to_outs(pitching.get("inningsPitched", 0))
 
                     # Skip starting pitchers
                     if games_started > 0 or pitches <= 0:
                         continue
 
                     team_data[team_name]["last_3_days_pitches"] += pitches
+                    team_data[team_name]["last_3_days_outs"] += outs
+                    team_data[team_name]["reliever_appearances"] += 1
                     team_data[team_name]["pitcher_dates"][pitcher_id].add(game_date)
-
-                    if game_date == yesterday:
-                        team_data[team_name]["yesterday_pitches"] += pitches
-                        team_data[team_name]["yesterday_relievers"] += 1
 
     final_scores = {}
 
@@ -102,27 +118,14 @@ def get_recent_bullpen_fatigue(days_back=3):
                     break
 
         score = 0
+        last_3_days_innings = stats["last_3_days_outs"] / 3
 
-        # Yesterday relievers used
-        if stats["yesterday_relievers"] >= 5:
-            score += 2
-        elif stats["yesterday_relievers"] >= 3:
-            score += 1
-
-        # Yesterday bullpen pitches
-        if stats["yesterday_pitches"] >= 100:
+        # Last 3 days bullpen innings
+        if last_3_days_innings >= 12:
             score += 3
-        elif stats["yesterday_pitches"] >= 70:
+        elif last_3_days_innings >= 9:
             score += 2
-        elif stats["yesterday_pitches"] >= 40:
-            score += 1
-
-        # Back-to-back arms
-        if back_to_back_arms >= 3:
-            score += 3
-        elif back_to_back_arms == 2:
-            score += 2
-        elif back_to_back_arms == 1:
+        elif last_3_days_innings >= 6:
             score += 1
 
         # Last 3 days bullpen pitches
@@ -133,13 +136,29 @@ def get_recent_bullpen_fatigue(days_back=3):
         elif stats["last_3_days_pitches"] >= 120:
             score += 1
 
+        # Last 3 days reliever appearances
+        if stats["reliever_appearances"] >= 12:
+            score += 3
+        elif stats["reliever_appearances"] >= 9:
+            score += 2
+        elif stats["reliever_appearances"] >= 6:
+            score += 1
+
+        # Back-to-back arms
+        if back_to_back_arms >= 3:
+            score += 3
+        elif back_to_back_arms == 2:
+            score += 2
+        elif back_to_back_arms == 1:
+            score += 1
+
         fatigue_score = max(1, min(10, score))
 
         final_scores[team] = {
             "Fatigue Score": fatigue_score,
-            "Yesterday Relievers": stats["yesterday_relievers"],
-            "Yesterday Pitches": stats["yesterday_pitches"],
+            "Last 3 Days IP": outs_to_innings(stats["last_3_days_outs"]),
             "Last 3 Days Pitches": stats["last_3_days_pitches"],
+            "Last 3 Days Relievers": stats["reliever_appearances"],
             "Back-to-Back Arms": back_to_back_arms,
         }
 

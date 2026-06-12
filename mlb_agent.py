@@ -86,13 +86,22 @@ def get_pitcher_first_stats(pitcher_id, season=None):
 
 
 def get_bullpen_data(team_name):
-    return BULLPEN_FATIGUE.get(team_name, {
+    fallback = {
         "Fatigue Score": 5,
         "Yesterday Relievers": UNAVAILABLE,
         "Yesterday Pitches": UNAVAILABLE,
+        "Last 3 Days IP": UNAVAILABLE,
         "Last 3 Days Pitches": UNAVAILABLE,
+        "Last 3 Days Relievers": UNAVAILABLE,
         "Back-to-Back Arms": UNAVAILABLE,
-    })
+    }
+
+    data = BULLPEN_FATIGUE.get(team_name, fallback)
+
+    if isinstance(data, dict):
+        return {**fallback, **data}
+
+    return {**fallback, "Fatigue Score": data}
 
 
 def get_bullpen_fatigue_score(team_name):
@@ -201,6 +210,16 @@ def calculate_nrfi_score(
     home_offense,
     away_first_inning,
     home_first_inning,
+    away_pitcher_yrfi=None,
+    home_pitcher_yrfi=None,
+    away_offense_yrfi=None,
+    home_offense_yrfi=None,
+    away_first_era=None,
+    home_first_era=None,
+    away_first_whip=None,
+    home_first_whip=None,
+    away_first_run_avg=None,
+    home_first_run_avg=None,
 ):
     if away_stats["ERA"] is None or home_stats["ERA"] is None:
         return None, "Pending", "Waiting on probable pitchers", "Pending", "N/A"
@@ -212,68 +231,126 @@ def calculate_nrfi_score(
     else:
         avg_whip = (away_stats["WHIP"] + home_stats["WHIP"]) / 2
 
-    combined_offense = away_offense + home_offense
-    combined_first_inning = away_first_inning + home_first_inning
-
-    score = 70
+    score = 50
     reasons = []
 
-    if avg_era <= 3.00:
-        score += 10
-        reasons.append("Strong starter ERA profile")
-    elif avg_era <= 4.00:
+    if avg_era <= 3.25:
         score += 5
-        reasons.append("Solid starter ERA profile")
+        reasons.append("Strong starter ERA profile")
     elif avg_era >= 5.00:
-        score -= 12
+        score -= 5
         reasons.append("High starter ERA creates YRFI risk")
-    elif avg_era >= 4.50:
-        score -= 7
-        reasons.append("Elevated starter ERA risk")
 
     if avg_whip <= 1.10:
-        score += 8
-        reasons.append("Low WHIP limits early baserunners")
-    elif avg_whip <= 1.25:
         score += 4
-        reasons.append("Good WHIP profile")
+        reasons.append("Low WHIP limits early baserunners")
     elif avg_whip >= 1.45:
-        score -= 10
+        score -= 4
         reasons.append("High WHIP creates traffic risk")
-    elif avg_whip >= 1.35:
-        score -= 6
-        reasons.append("Elevated WHIP risk")
 
+    combined_offense = away_offense + home_offense
     if combined_offense >= 17:
-        score -= 8
+        score -= 4
         reasons.append("Elite offense profile increases YRFI risk")
-    elif combined_offense >= 14:
-        score -= 5
-        reasons.append("Above-average offenses reduce NRFI confidence")
     elif combined_offense <= 8:
-        score += 5
+        score += 3
         reasons.append("Weak offensive matchup supports NRFI")
 
+    combined_first_inning = away_first_inning + home_first_inning
     if combined_first_inning >= 15:
-        score -= 10
+        score -= 4
         reasons.append("High first-inning scoring risk")
-    elif combined_first_inning >= 12:
-        score -= 5
-        reasons.append("Moderate first-inning scoring risk")
     elif combined_first_inning <= 8:
-        score += 5
+        score += 3
         reasons.append("Low first-inning scoring risk")
 
-    score = max(35, min(85, score))
+    pitcher_yrfi_values = [
+        value for value in [
+            safe_float(away_pitcher_yrfi),
+            safe_float(home_pitcher_yrfi),
+        ] if value is not None
+    ]
+    if pitcher_yrfi_values:
+        avg_pitcher_yrfi = sum(pitcher_yrfi_values) / len(pitcher_yrfi_values)
+        if avg_pitcher_yrfi <= 18:
+            score += 6
+            reasons.append("Low pitcher YRFI rate supports NRFI")
+        elif avg_pitcher_yrfi >= 38:
+            score -= 6
+            reasons.append("High pitcher YRFI rate increases early scoring risk")
 
-    if score >= 68:
+    offense_yrfi_values = [
+        value for value in [
+            safe_float(away_offense_yrfi),
+            safe_float(home_offense_yrfi),
+        ] if value is not None
+    ]
+    if offense_yrfi_values:
+        avg_offense_yrfi = sum(offense_yrfi_values) / len(offense_yrfi_values)
+        if avg_offense_yrfi <= 20:
+            score += 5
+            reasons.append("Low offense YRFI rate supports NRFI")
+        elif avg_offense_yrfi >= 35:
+            score -= 5
+            reasons.append("High offense YRFI rate creates YRFI risk")
+
+    first_era_values = [
+        value for value in [
+            safe_float(away_first_era),
+            safe_float(home_first_era),
+        ] if value is not None
+    ]
+    if first_era_values:
+        avg_first_era = sum(first_era_values) / len(first_era_values)
+        if avg_first_era <= 3.00:
+            score += 5
+            reasons.append("Low first-inning ERA supports NRFI")
+        elif avg_first_era >= 6.00:
+            score -= 5
+            reasons.append("High first-inning ERA creates YRFI risk")
+
+    first_whip_values = [
+        value for value in [
+            safe_float(away_first_whip),
+            safe_float(home_first_whip),
+        ] if value is not None
+    ]
+    if first_whip_values:
+        avg_first_whip = sum(first_whip_values) / len(first_whip_values)
+        if avg_first_whip <= 1.00:
+            score += 5
+            reasons.append("Low first-inning WHIP limits traffic")
+        elif avg_first_whip >= 1.60:
+            score -= 5
+            reasons.append("High first-inning WHIP creates traffic risk")
+
+    first_run_values = [
+        value for value in [
+            safe_float(away_first_run_avg),
+            safe_float(home_first_run_avg),
+        ] if value is not None
+    ]
+    if first_run_values:
+        avg_first_run = sum(first_run_values) / len(first_run_values)
+        if avg_first_run <= 0.30:
+            score += 5
+            reasons.append("Low first-run average supports NRFI")
+        elif avg_first_run >= 0.60:
+            score -= 5
+            reasons.append("High first-run average creates YRFI risk")
+
+    score = max(20, min(90, score))
+
+    if score >= 75:
         lean = "Strong NRFI"
-    elif score >= 60:
+    elif score >= 65:
         lean = "NRFI"
-    elif score <= 48:
-        lean = "YRFI"
-    else:
+    elif score >= 50:
         lean = "Pass"
+    elif score < 40:
+        lean = "Strong YRFI"
+    else:
+        lean = "YRFI"
 
     if away_stats["ERA"] < home_stats["ERA"] and away_offense >= home_offense:
         f5_edge = "Away F5 Lean"
@@ -282,11 +359,11 @@ def calculate_nrfi_score(
     else:
         f5_edge = "F5 Pass"
 
-    if score >= 75:
+    if score >= 80:
         confidence = "A+"
-    elif score >= 68:
+    elif score >= 75:
         confidence = "A"
-    elif score >= 60:
+    elif score >= 65:
         confidence = "B"
     elif score >= 50:
         confidence = "C"
@@ -304,7 +381,7 @@ def generate_recommendation(lean, f5_edge, away_bullpen, home_bullpen):
     if lean in ["Strong NRFI", "NRFI"]:
         notes.append(lean)
 
-    if lean == "YRFI":
+    if lean in ["Strong YRFI", "YRFI"]:
         notes.append("YRFI Look")
 
     if f5_edge != "F5 Pass":
@@ -339,6 +416,424 @@ def calculate_edge_score(nrfi_score, confidence, away_bullpen, home_bullpen):
         edge_score += 2
 
     return round(edge_score, 1)
+
+
+def add_offensive_edge_points(away_score, home_score, away_value, home_value, weight, cap):
+    away_value = safe_float(away_value)
+    home_value = safe_float(home_value)
+
+    if away_value is None or home_value is None:
+        return away_score, home_score
+
+    margin = abs(away_value - home_value)
+    points = min(cap, round(margin * weight, 1))
+
+    if points == 0:
+        return away_score, home_score
+
+    if away_value > home_value:
+        away_score += points
+    else:
+        home_score += points
+
+    return away_score, home_score
+
+
+def calculate_offensive_edge(
+    away_offense,
+    home_offense,
+    away_offense_yrfi,
+    home_offense_yrfi,
+    away_first_run_avg,
+    home_first_run_avg,
+):
+    away_score = 50
+    home_score = 50
+
+    away_score, home_score = add_offensive_edge_points(
+        away_score,
+        home_score,
+        away_offense,
+        home_offense,
+        weight=2,
+        cap=12,
+    )
+    away_score, home_score = add_offensive_edge_points(
+        away_score,
+        home_score,
+        away_offense_yrfi,
+        home_offense_yrfi,
+        weight=0.25,
+        cap=10,
+    )
+    away_score, home_score = add_offensive_edge_points(
+        away_score,
+        home_score,
+        away_first_run_avg,
+        home_first_run_avg,
+        weight=10,
+        cap=8,
+    )
+
+    margin = round(abs(away_score - home_score), 1)
+
+    if margin == 0:
+        winner = "Even"
+    elif away_score > home_score:
+        winner = "Away"
+    else:
+        winner = "Home"
+
+    return round(away_score, 1), round(home_score, 1), winner, margin
+
+
+def add_starter_edge_points(
+    away_score,
+    home_score,
+    away_value,
+    home_value,
+    weight,
+    cap,
+    lower_is_better=False,
+):
+    away_value = safe_float(away_value)
+    home_value = safe_float(home_value)
+
+    if away_value is None or home_value is None:
+        return away_score, home_score
+
+    margin = abs(away_value - home_value)
+    points = min(cap, round(margin * weight, 1))
+
+    if points == 0:
+        return away_score, home_score
+
+    away_has_edge = away_value < home_value if lower_is_better else away_value > home_value
+
+    if away_has_edge:
+        away_score += points
+    else:
+        home_score += points
+
+    return away_score, home_score
+
+
+def calculate_starter_edge(
+    away_era,
+    home_era,
+    away_whip,
+    home_whip,
+    away_ip,
+    home_ip,
+    away_k,
+    home_k,
+    away_first_era,
+    home_first_era,
+    away_first_whip,
+    home_first_whip,
+    away_pitcher_yrfi,
+    home_pitcher_yrfi,
+):
+    away_score = 50
+    home_score = 50
+
+    away_score, home_score = add_starter_edge_points(
+        away_score,
+        home_score,
+        away_era,
+        home_era,
+        weight=2,
+        cap=10,
+        lower_is_better=True,
+    )
+    away_score, home_score = add_starter_edge_points(
+        away_score,
+        home_score,
+        away_whip,
+        home_whip,
+        weight=12,
+        cap=10,
+        lower_is_better=True,
+    )
+    away_score, home_score = add_starter_edge_points(
+        away_score,
+        home_score,
+        away_ip,
+        home_ip,
+        weight=0.08,
+        cap=8,
+    )
+    away_score, home_score = add_starter_edge_points(
+        away_score,
+        home_score,
+        away_k,
+        home_k,
+        weight=0.12,
+        cap=8,
+    )
+    away_score, home_score = add_starter_edge_points(
+        away_score,
+        home_score,
+        away_first_era,
+        home_first_era,
+        weight=2,
+        cap=8,
+        lower_is_better=True,
+    )
+    away_score, home_score = add_starter_edge_points(
+        away_score,
+        home_score,
+        away_first_whip,
+        home_first_whip,
+        weight=12,
+        cap=8,
+        lower_is_better=True,
+    )
+    away_score, home_score = add_starter_edge_points(
+        away_score,
+        home_score,
+        away_pitcher_yrfi,
+        home_pitcher_yrfi,
+        weight=0.25,
+        cap=8,
+        lower_is_better=True,
+    )
+
+    margin = round(abs(away_score - home_score), 1)
+
+    if margin == 0:
+        winner = "Even"
+    elif away_score > home_score:
+        winner = "Away"
+    else:
+        winner = "Home"
+
+    return round(away_score, 1), round(home_score, 1), winner, margin
+
+
+def add_bullpen_edge_points(away_score, home_score, away_value, home_value, weight, cap):
+    away_value = safe_float(away_value)
+    home_value = safe_float(home_value)
+
+    if away_value is None or home_value is None:
+        return away_score, home_score
+
+    margin = abs(away_value - home_value)
+    points = min(cap, round(margin * weight, 1))
+
+    if points == 0:
+        return away_score, home_score
+
+    if away_value < home_value:
+        away_score += points
+    else:
+        home_score += points
+
+    return away_score, home_score
+
+
+def calculate_bullpen_edge(
+    away_fatigue,
+    home_fatigue,
+    away_yesterday_relievers,
+    home_yesterday_relievers,
+    away_yesterday_pitches,
+    home_yesterday_pitches,
+    away_three_day_pitches,
+    home_three_day_pitches,
+    away_back_to_back,
+    home_back_to_back,
+):
+    away_score = 50
+    home_score = 50
+
+    away_score, home_score = add_bullpen_edge_points(
+        away_score,
+        home_score,
+        away_fatigue,
+        home_fatigue,
+        weight=2,
+        cap=10,
+    )
+    away_score, home_score = add_bullpen_edge_points(
+        away_score,
+        home_score,
+        away_yesterday_relievers,
+        home_yesterday_relievers,
+        weight=2,
+        cap=8,
+    )
+    away_score, home_score = add_bullpen_edge_points(
+        away_score,
+        home_score,
+        away_yesterday_pitches,
+        home_yesterday_pitches,
+        weight=0.08,
+        cap=8,
+    )
+    away_score, home_score = add_bullpen_edge_points(
+        away_score,
+        home_score,
+        away_three_day_pitches,
+        home_three_day_pitches,
+        weight=0.04,
+        cap=10,
+    )
+    away_score, home_score = add_bullpen_edge_points(
+        away_score,
+        home_score,
+        away_back_to_back,
+        home_back_to_back,
+        weight=2,
+        cap=8,
+    )
+
+    margin = round(abs(away_score - home_score), 1)
+
+    if margin == 0:
+        winner = "Even"
+    elif away_score > home_score:
+        winner = "Away"
+    else:
+        winner = "Home"
+
+    return round(away_score, 1), round(home_score, 1), winner, margin
+
+
+def confidence_from_margin(margin):
+    margin = safe_float(margin)
+
+    if margin is None:
+        return "Pass"
+    if margin >= 30:
+        return "A+"
+    if margin >= 20:
+        return "A"
+    if margin >= 12:
+        return "B"
+    if margin >= 7:
+        return "C"
+    return "Pass"
+
+
+def calculate_first_inning_decision(
+    away_pitcher_yrfi,
+    home_pitcher_yrfi,
+    away_offense_yrfi,
+    home_offense_yrfi,
+    away_first_era,
+    home_first_era,
+    away_first_whip,
+    home_first_whip,
+    away_first_run_avg,
+    home_first_run_avg,
+):
+    score = 50
+
+    for away_value, home_value, neutral, weight, cap in [
+        (away_pitcher_yrfi, home_pitcher_yrfi, 32, 0.35, 12),
+        (away_offense_yrfi, home_offense_yrfi, 35, 0.25, 10),
+        (away_first_era, home_first_era, 3.75, 3, 10),
+        (away_first_whip, home_first_whip, 1.15, 16, 10),
+        (away_first_run_avg, home_first_run_avg, 0.45, 18, 10),
+    ]:
+        values = [safe_float(away_value), safe_float(home_value)]
+        available = [value for value in values if value is not None]
+
+        if not available:
+            continue
+
+        avg_value = sum(available) / len(available)
+        impact = max(-cap, min(cap, round((avg_value - neutral) * weight, 1)))
+        score += impact
+
+    distance = abs(score - 50)
+    confidence = confidence_from_margin(distance * 2)
+
+    if confidence == "Pass":
+        return "Pass", "Pass"
+    if score >= 56:
+        return "YRFI Yes", confidence
+    if score <= 44:
+        return "NRFI Yes", confidence
+
+    return "Pass", "Pass"
+
+
+def calculate_f5_decision(
+    starter_winner,
+    starter_margin,
+    offensive_winner,
+    offensive_margin,
+):
+    starter_margin = safe_float(starter_margin) or 0
+    offensive_margin = safe_float(offensive_margin) or 0
+
+    if starter_winner == offensive_winner and starter_winner in ["Away", "Home"]:
+        margin = starter_margin + offensive_margin
+        confidence = confidence_from_margin(margin)
+
+        if confidence == "Pass":
+            return "Pass", "Pass"
+
+        return f"{starter_winner} F5", confidence
+
+    if starter_winner in ["Away", "Home"] and offensive_winner == "Even":
+        confidence = confidence_from_margin(starter_margin)
+
+        if confidence == "Pass":
+            return "Pass", "Pass"
+
+        return f"{starter_winner} F5", confidence
+
+    if offensive_winner in ["Away", "Home"] and starter_winner == "Even":
+        confidence = confidence_from_margin(offensive_margin)
+
+        if confidence == "Pass":
+            return "Pass", "Pass"
+
+        return f"{offensive_winner} F5", confidence
+
+    return "Pass", "Pass"
+
+
+def calculate_full_game_decision(
+    starter_winner,
+    starter_margin,
+    offensive_winner,
+    offensive_margin,
+    bullpen_winner,
+    bullpen_margin,
+):
+    away_score = 0
+    home_score = 0
+    agreement = {"Away": 0, "Home": 0}
+
+    for winner, margin in [
+        (starter_winner, starter_margin),
+        (offensive_winner, offensive_margin),
+        (bullpen_winner, bullpen_margin),
+    ]:
+        margin = safe_float(margin) or 0
+
+        if winner == "Away":
+            away_score += margin
+            agreement["Away"] += 1
+        elif winner == "Home":
+            home_score += margin
+            agreement["Home"] += 1
+
+    margin = round(abs(away_score - home_score), 1)
+    confidence = confidence_from_margin(margin)
+
+    if confidence == "Pass":
+        return "Pass", "Pass"
+    if away_score > home_score and agreement["Away"] >= 2:
+        return "Away Full Game", confidence
+    if home_score > away_score and agreement["Home"] >= 2:
+        return "Home Full Game", confidence
+
+    return "Pass", "Pass"
 
 
 def get_today_games(selected_date=None):
@@ -419,6 +914,16 @@ def get_today_games(selected_date=None):
                 home_offense,
                 away_first_inning,
                 home_first_inning,
+                away_pitcher_first["Pitcher YRFI %"],
+                home_pitcher_first["Pitcher YRFI %"],
+                away_first_live["Offense YRFI %"],
+                home_first_live["Offense YRFI %"],
+                away_pitcher_first["1st ERA"],
+                home_pitcher_first["1st ERA"],
+                away_pitcher_first["1st WHIP"],
+                home_pitcher_first["1st WHIP"],
+                away_first_live["1st Run Avg"],
+                home_first_live["1st Run Avg"],
             )
 
             recommendation = generate_recommendation(
@@ -435,6 +940,89 @@ def get_today_games(selected_date=None):
                 home_bullpen,
             )
 
+            (
+                away_offensive_edge,
+                home_offensive_edge,
+                offensive_edge_winner,
+                offensive_edge_margin,
+            ) = calculate_offensive_edge(
+                away_offense,
+                home_offense,
+                away_first_live["Offense YRFI %"],
+                home_first_live["Offense YRFI %"],
+                away_first_live["1st Run Avg"],
+                home_first_live["1st Run Avg"],
+            )
+
+            (
+                away_starter_edge,
+                home_starter_edge,
+                starter_edge_winner,
+                starter_edge_margin,
+            ) = calculate_starter_edge(
+                away_stats["ERA"],
+                home_stats["ERA"],
+                away_stats["WHIP"],
+                home_stats["WHIP"],
+                away_stats["IP"],
+                home_stats["IP"],
+                away_stats["K"],
+                home_stats["K"],
+                away_pitcher_first["1st ERA"],
+                home_pitcher_first["1st ERA"],
+                away_pitcher_first["1st WHIP"],
+                home_pitcher_first["1st WHIP"],
+                away_pitcher_first["Pitcher YRFI %"],
+                home_pitcher_first["Pitcher YRFI %"],
+            )
+
+            (
+                away_bullpen_edge,
+                home_bullpen_edge,
+                bullpen_edge_winner,
+                bullpen_edge_margin,
+            ) = calculate_bullpen_edge(
+                away_bullpen,
+                home_bullpen,
+                away_bullpen_data["Yesterday Relievers"],
+                home_bullpen_data["Yesterday Relievers"],
+                away_bullpen_data["Yesterday Pitches"],
+                home_bullpen_data["Yesterday Pitches"],
+                away_bullpen_data["Last 3 Days Pitches"],
+                home_bullpen_data["Last 3 Days Pitches"],
+                away_bullpen_data["Back-to-Back Arms"],
+                home_bullpen_data["Back-to-Back Arms"],
+            )
+
+            first_inning_pick, first_inning_confidence = calculate_first_inning_decision(
+                away_pitcher_first["Pitcher YRFI %"],
+                home_pitcher_first["Pitcher YRFI %"],
+                away_first_live["Offense YRFI %"],
+                home_first_live["Offense YRFI %"],
+                away_pitcher_first["1st ERA"],
+                home_pitcher_first["1st ERA"],
+                away_pitcher_first["1st WHIP"],
+                home_pitcher_first["1st WHIP"],
+                away_first_live["1st Run Avg"],
+                home_first_live["1st Run Avg"],
+            )
+
+            f5_pick, f5_confidence = calculate_f5_decision(
+                starter_edge_winner,
+                starter_edge_margin,
+                offensive_edge_winner,
+                offensive_edge_margin,
+            )
+
+            full_game_pick, full_game_confidence = calculate_full_game_decision(
+                starter_edge_winner,
+                starter_edge_margin,
+                offensive_edge_winner,
+                offensive_edge_margin,
+                bullpen_edge_winner,
+                bullpen_edge_margin,
+            )
+
             games.append({
                 "Game Time": format_game_time(game.get("gameDate", "")),
                 "Game": f"{away_team} @ {home_team}",
@@ -444,6 +1032,12 @@ def get_today_games(selected_date=None):
                 "NRFI Score": nrfi_score,
                 "Lean": lean,
                 "F5 Edge": f5_edge,
+                "First Inning Pick": first_inning_pick,
+                "First Inning Confidence": first_inning_confidence,
+                "F5 Pick": f5_pick,
+                "F5 Confidence": f5_confidence,
+                "Full Game Pick": full_game_pick,
+                "Full Game Confidence": full_game_confidence,
 
                 "Away Record": away_record,
                 "Home Record": home_record,
@@ -460,9 +1054,17 @@ def get_today_games(selected_date=None):
                 "Home IP": home_stats["IP"],
                 "Away K": away_stats["K"],
                 "Home K": home_stats["K"],
+                "Away Starter Edge": away_starter_edge,
+                "Home Starter Edge": home_starter_edge,
+                "Starter Edge Winner": starter_edge_winner,
+                "Starter Edge Margin": starter_edge_margin,
 
                 "Away Offense": away_offense,
                 "Home Offense": home_offense,
+                "Away Offensive Edge": away_offensive_edge,
+                "Home Offensive Edge": home_offensive_edge,
+                "Offensive Edge Winner": offensive_edge_winner,
+                "Offensive Edge Margin": offensive_edge_margin,
 
                 "Away 1st Inning Risk": away_first_inning,
                 "Home 1st Inning Risk": home_first_inning,
@@ -480,14 +1082,22 @@ def get_today_games(selected_date=None):
 
                 "Away Bullpen Fatigue": away_bullpen,
                 "Home Bullpen Fatigue": home_bullpen,
+                "Away Bullpen Edge": away_bullpen_edge,
+                "Home Bullpen Edge": home_bullpen_edge,
+                "Bullpen Edge Winner": bullpen_edge_winner,
+                "Bullpen Edge Margin": bullpen_edge_margin,
                 "Away Bullpen Status": bullpen_label(away_bullpen),
                 "Home Bullpen Status": bullpen_label(home_bullpen),
                 "Away Yesterday Relievers": away_bullpen_data["Yesterday Relievers"],
                 "Home Yesterday Relievers": home_bullpen_data["Yesterday Relievers"],
                 "Away Yesterday Pitches": away_bullpen_data["Yesterday Pitches"],
                 "Home Yesterday Pitches": home_bullpen_data["Yesterday Pitches"],
+                "Away 3 Day Bullpen IP": away_bullpen_data["Last 3 Days IP"],
+                "Home 3 Day Bullpen IP": home_bullpen_data["Last 3 Days IP"],
                 "Away 3 Day Bullpen Pitches": away_bullpen_data["Last 3 Days Pitches"],
                 "Home 3 Day Bullpen Pitches": home_bullpen_data["Last 3 Days Pitches"],
+                "Away 3 Day Relievers": away_bullpen_data["Last 3 Days Relievers"],
+                "Home 3 Day Relievers": home_bullpen_data["Last 3 Days Relievers"],
                 "Away Back-to-Back Arms": away_bullpen_data["Back-to-Back Arms"],
                 "Home Back-to-Back Arms": home_bullpen_data["Back-to-Back Arms"],
 
