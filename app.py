@@ -3,7 +3,7 @@ from datetime import date
 from html import escape
 from mlb_agent import get_today_games
 
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.2"
 
 team_logo_map = {
     "Arizona Diamondbacks": "https://www.mlbstatic.com/team-logos/109.svg",
@@ -45,15 +45,19 @@ st.set_page_config(
     layout="wide"
 )
 
-st.html("""
+st.markdown("""
 <style>
 .game-card {
     border-radius: 18px;
-    border: 1px solid #d1d5db;
-    border-left: 8px solid #9CA3AF;
+    border: 1px solid #243244;
+    border-left: 8px solid #0ea5e9;
     padding: 22px;
     margin-bottom: 6px;
-    background: #ffffff;
+    background:
+        linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(17, 24, 39, 0.98)),
+        #0f172a;
+    color: #f8fafc;
+    box-shadow: 0 18px 34px rgba(15, 23, 42, 0.22);
 }
 
 .badge {
@@ -76,9 +80,12 @@ st.html("""
     display: flex;
     align-items: center;
     gap: 14px;
-    margin-top: 4px;
-    margin-bottom: 6px;
+    margin: -6px -6px 18px -6px;
+    padding: 14px 16px;
     flex-wrap: wrap;
+    border-radius: 14px;
+    background: linear-gradient(90deg, #1e3a8a, #0f766e);
+    border: 1px solid rgba(255, 255, 255, 0.1);
 }
 .logo-team {
     display: inline-flex;
@@ -87,17 +94,20 @@ st.html("""
     min-height: 42px;
 }
 .team-logo {
-    width: 38px;
-    height: 38px;
+    width: 44px;
+    height: 44px;
     object-fit: contain;
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 999px;
+    padding: 4px;
 }
 .team-logo-name {
     font-size: 15px;
     font-weight: 700;
-    color: #374151;
+    color: #f8fafc;
 }
 .logo-at {
-    color: #6b7280;
+    color: #bfdbfe;
     font-weight: 800;
 }
 
@@ -106,9 +116,10 @@ st.html("""
     font-weight: 800;
     margin-top: 8px;
     margin-bottom: 4px;
+    color: #ffffff;
 }
 .muted {
-    color: #6b7280;
+    color: #cbd5e1;
     font-size: 15px;
     margin-bottom: 14px;
 }
@@ -119,26 +130,29 @@ st.html("""
 }
 .market-watch {
     margin: 12px 0 14px 0;
-    padding: 10px 12px;
-    border-left: 4px solid #2563eb;
-    background: #f8fafc;
+    padding: 16px 18px;
+    border-left: 0;
+    border-radius: 14px;
+    background: linear-gradient(90deg, #065f46, #047857);
+    color: #dcfce7;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 .market-heading {
     font-size: 14px;
     font-weight: 800;
-    color: #475569;
+    color: #a7f3d0;
     margin-bottom: 4px;
 }
 .market-pick {
     font-size: 18px;
     font-weight: 900;
-    color: #111827;
+    color: #ffffff;
     margin-bottom: 6px;
 }
 .market-why {
     font-size: 13px;
     font-weight: 800;
-    color: #475569;
+    color: #bbf7d0;
     margin-bottom: 4px;
 }
 .key-factors {
@@ -146,21 +160,40 @@ st.html("""
 }
 .decision-stack {
     display: grid;
-    gap: 6px;
-    margin: 10px 0 12px 0;
-    color: #111827;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin: 14px 0 16px 0;
+    color: #f8fafc;
     font-size: 16px;
 }
 .decision-line {
+    min-height: 72px;
+    border-radius: 14px;
+    padding: 14px 16px;
+    background: #1e293b;
+    border: 1px solid #334155;
     font-weight: 700;
     line-height: 1.3;
+    box-shadow: inset 0 0 24px rgba(14, 165, 233, 0.12);
+}
+.decision-line:nth-child(1) {
+    border-color: #22c55e;
+    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.22), inset 0 0 24px rgba(34, 197, 94, 0.16);
+}
+.decision-line:nth-child(2) {
+    border-color: #38bdf8;
+    box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2), inset 0 0 24px rgba(56, 189, 248, 0.15);
+}
+.decision-line:nth-child(3) {
+    border-color: #f97316;
+    box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.2), inset 0 0 24px rgba(249, 115, 22, 0.15);
 }
 .reason-stack {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 6px 14px;
     margin: 0 0 14px 0;
-    color: #374151;
+    color: #e2e8f0;
     font-size: 14px;
 }
 .reason-item {
@@ -170,9 +203,18 @@ st.html("""
     line-height: 1.3;
 }
 .reason-check {
-    color: #16a34a;
+    color: #22c55e;
     font-weight: 900;
     line-height: 1.2;
+}
+.key-factors {
+    border-radius: 14px;
+    padding: 14px 16px 2px;
+    background: rgba(30, 41, 59, 0.72);
+    border: 1px solid #334155;
+}
+.key-factors .market-heading {
+    color: #bfdbfe;
 }
 .model-favorite {
     background: linear-gradient(90deg, #064e3b, #047857);
@@ -197,8 +239,75 @@ div[data-testid="stExpander"] {
     margin-top: -4px;
     margin-bottom: 18px;
 }
+
+div[data-testid="stExpander"] details {
+    border: 1px solid #243244;
+    border-radius: 14px;
+    overflow: hidden;
+    background: #0f172a;
+    box-shadow: 0 16px 28px rgba(15, 23, 42, 0.16);
+}
+
+div[data-testid="stExpander"] summary {
+    background: linear-gradient(90deg, #1e3a8a, #0f766e);
+    color: #f8fafc;
+    font-weight: 800;
+}
+
+div[data-testid="stExpander"] div[data-testid="stExpanderDetails"] {
+    background:
+        linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(17, 24, 39, 0.98)),
+        #0f172a;
+    color: #e2e8f0;
+    padding: 20px 24px 24px;
+}
+
+div[data-testid="stExpander"] div[data-testid="stMarkdownContainer"] h3 {
+    color: #ffffff;
+    border-left: 5px solid #0ea5e9;
+    padding-left: 12px;
+    margin-top: 20px;
+}
+
+div[data-testid="stExpander"] div[data-testid="stMarkdownContainer"] h4 {
+    color: #bfdbfe;
+    margin-top: 16px;
+}
+
+div[data-testid="stExpander"] hr {
+    border-color: #334155;
+}
+
+div[data-testid="stExpander"] table {
+    border-collapse: separate;
+    border-spacing: 0;
+    overflow: hidden;
+    border-radius: 12px;
+    border: 1px solid #334155;
+    background: #111827;
+}
+
+div[data-testid="stExpander"] thead tr {
+    background: linear-gradient(90deg, #1d4ed8, #0f766e);
+}
+
+div[data-testid="stExpander"] th {
+    color: #f8fafc !important;
+    font-weight: 900 !important;
+    border-color: #334155 !important;
+}
+
+div[data-testid="stExpander"] td {
+    color: #e2e8f0 !important;
+    border-color: #334155 !important;
+    background: #111827;
+}
+
+div[data-testid="stExpander"] tbody tr:nth-child(even) td {
+    background: #162033;
+}
 </style>
-""")
+""", unsafe_allow_html=True)
 
 
 def get_badge_class(row):
@@ -233,19 +342,13 @@ def render_logo_matchup(away_team, home_team):
     away_logo = render_team_logo(away_team)
     home_logo = render_team_logo(home_team)
 
-    return f"""
-    <div class="logo-row">
-        <div class="logo-team">
-            {away_logo}
-            <span class="team-logo-name">{escape(away_team)}</span>
-        </div>
-        <span class="logo-at">@</span>
-        <div class="logo-team">
-            {home_logo}
-            <span class="team-logo-name">{escape(home_team)}</span>
-        </div>
-    </div>
-    """
+    return (
+        '<div class="logo-row">'
+        f'<div class="logo-team">{away_logo}<span class="team-logo-name">{escape(away_team)}</span></div>'
+        '<span class="logo-at">@</span>'
+        f'<div class="logo-team">{home_logo}<span class="team-logo-name">{escape(home_team)}</span></div>'
+        '</div>'
+    )
 
 
 def build_reason_stack(row):
