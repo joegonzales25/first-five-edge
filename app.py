@@ -4,7 +4,7 @@ from html import escape
 import re
 from mlb_agent import get_today_games
 
-APP_VERSION = "2.2.3"
+APP_VERSION = "2.2.4"
 MODEL_CACHE_VERSION = "edge-confidence-v2"
 
 team_logo_map = {
@@ -181,6 +181,7 @@ st.markdown("""
     font-size: 16px;
 }
 .decision-line {
+    display: block;
     min-height: 72px;
     border-radius: 14px;
     padding: 14px 16px;
@@ -189,6 +190,18 @@ st.markdown("""
     font-weight: 700;
     line-height: 1.3;
     box-shadow: inset 0 0 24px rgba(14, 165, 233, 0.12);
+    color: #f8fafc !important;
+    text-decoration: none !important;
+    cursor: pointer;
+    transition: transform 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+}
+.decision-line:hover {
+    transform: translateY(-1px);
+    background: #24324a;
+}
+.decision-line.is-selected {
+    background: #26364f;
+    box-shadow: 0 0 0 3px rgba(248, 250, 252, 0.18), inset 0 0 28px rgba(248, 250, 252, 0.08);
 }
 .decision-line:nth-child(1) {
     border-color: #22c55e;
@@ -201,6 +214,42 @@ st.markdown("""
 .decision-line:nth-child(3) {
     border-color: #f97316;
     box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.2), inset 0 0 24px rgba(249, 115, 22, 0.15);
+}
+.decision-line.is-selected:nth-child(1) {
+    box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.42), inset 0 0 28px rgba(34, 197, 94, 0.22);
+}
+.decision-line.is-selected:nth-child(2) {
+    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.4), inset 0 0 28px rgba(56, 189, 248, 0.22);
+}
+.decision-line.is-selected:nth-child(3) {
+    box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.4), inset 0 0 28px rgba(249, 115, 22, 0.22);
+}
+.edge-view-control {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+.edge-factor-panel {
+    display: none;
+}
+.edge-view-first:checked ~ .decision-stack .decision-first,
+.edge-view-f5:checked ~ .decision-stack .decision-f5,
+.edge-view-full:checked ~ .decision-stack .decision-full {
+    background: #26364f;
+}
+.edge-view-first:checked ~ .decision-stack .decision-first {
+    box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.42), inset 0 0 28px rgba(34, 197, 94, 0.22);
+}
+.edge-view-f5:checked ~ .decision-stack .decision-f5 {
+    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.4), inset 0 0 28px rgba(56, 189, 248, 0.22);
+}
+.edge-view-full:checked ~ .decision-stack .decision-full {
+    box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.4), inset 0 0 28px rgba(249, 115, 22, 0.22);
+}
+.edge-view-first:checked ~ .edge-factor-panels .edge-factor-first,
+.edge-view-f5:checked ~ .edge-factor-panels .edge-factor-f5,
+.edge-view-full:checked ~ .edge-factor-panels .edge-factor-full {
+    display: block;
 }
 .reason-stack {
     display: grid;
@@ -297,6 +346,57 @@ st.markdown("""
 }
 .top-look-link:hover {
     text-decoration: underline;
+}
+
+div[data-testid="stRadio"] [role="radiogroup"] {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 12px;
+}
+
+div[data-testid="stRadio"] label {
+    min-height: 78px;
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: #1e293b;
+    border: 1px solid #334155;
+    color: #f8fafc;
+    box-shadow: inset 0 0 24px rgba(14, 165, 233, 0.12);
+}
+
+div[data-testid="stRadio"] label:nth-child(1) {
+    border-color: #22c55e;
+}
+
+div[data-testid="stRadio"] label:nth-child(2) {
+    border-color: #38bdf8;
+}
+
+div[data-testid="stRadio"] label:nth-child(3) {
+    border-color: #f97316;
+}
+
+div[data-testid="stRadio"] label:nth-child(4) {
+    border-color: #a855f7;
+}
+
+div[data-testid="stRadio"] label:nth-child(5) {
+    border-color: #ef4444;
+}
+
+div[data-testid="stRadio"] label p {
+    color: #f8fafc;
+    font-weight: 900;
+    line-height: 1.25;
+}
+
+div[data-testid="stRadio"] label:has(input:checked) {
+    background: linear-gradient(135deg, #1d4ed8, #0f766e);
+    box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.28), inset 0 0 26px rgba(255, 255, 255, 0.08);
+}
+
+div[data-testid="stCaptionContainer"]:has(+ div[data-testid="stVerticalBlock"]) {
+    display: none;
 }
 
 div[data-testid="stExpander"] {
@@ -481,14 +581,39 @@ def is_no_edge_pick(pick):
     return str(pick).strip() in ["Pass", "No Edge", "F5 Pass"]
 
 
-def format_decision_pick(pick, confidence):
+def replace_home_away(value, away_team, home_team):
+    text = str(value)
+    if not away_team or not home_team:
+        return text
+
+    replacements = {
+        "Away": away_team,
+        "Home": home_team,
+    }
+
+    for side, team_name in replacements.items():
+        text = re.sub(rf"\b{side}\b", team_name, text)
+
+    return text
+
+
+def format_decision_pick(pick, confidence, away_team=None, home_team=None, market=None):
     if is_no_edge_pick(pick):
         return "No Edge"
 
-    if is_no_edge_pick(confidence) or confidence in [None, ""]:
-        return str(pick)
+    display_pick = str(pick)
+    if away_team and home_team:
+        display_pick = replace_home_away(display_pick, away_team, home_team)
 
-    return f"{pick} ({confidence})"
+    if market == "f5":
+        display_pick = re.sub(r"\s+F5$", "", display_pick)
+    elif market == "full_game":
+        display_pick = re.sub(r"\s+Full Game$", "", display_pick)
+
+    if is_no_edge_pick(confidence) or confidence in [None, ""]:
+        return display_pick
+
+    return f"{display_pick} ({confidence})"
 
 
 def get_first_existing_value(row, column_names):
@@ -588,42 +713,99 @@ def render_market_watch(row):
     """
 
 
-def build_key_factors(row):
+def format_edge_factor(row, winner_column, margin_column, label, away_team=None, home_team=None):
+    winner = get_row_value(row, winner_column, "Pass")
+    margin = get_numeric_value(row, margin_column)
+
+    if is_no_edge_pick(winner) or margin is None:
+        return f"{label}: no clear edge"
+
+    winner = replace_home_away(winner, away_team, home_team)
+    return f"{label}: {winner} +{margin:g}"
+
+
+def build_key_factors(row, view="first", away_team=None, home_team=None):
     factors = []
 
-    starter_winner = get_row_value(row, "Starter Edge Winner", "Pass")
-    starter_margin = get_numeric_value(row, "Starter Edge Margin")
-    if not is_no_edge_pick(starter_winner) and starter_margin is not None and starter_margin >= 6:
-        factors.append(f"Starter edge: {starter_winner} +{starter_margin:g}")
+    if view == "first":
+        pick = get_row_value(row, "First Inning Pick", "Pass")
+        confidence = get_row_value(row, "First Inning Confidence", "Pass")
+        if is_no_edge_pick(pick):
+            factors.append("No clear first-inning edge")
 
-    offensive_winner = get_row_value(row, "Offensive Edge Winner", "Pass")
-    offensive_margin = get_numeric_value(row, "Offensive Edge Margin")
-    if not is_no_edge_pick(offensive_winner) and offensive_margin is not None and offensive_margin >= 5:
-        factors.append(f"Offensive edge: {offensive_winner} +{offensive_margin:g}")
+        notes = [
+            note.strip()
+            for note in str(get_row_value(row, "Agent Notes", "")).split(";")
+            if note.strip()
+        ]
+        factors.extend(notes[:2])
 
-    bullpen_winner = get_row_value(row, "Bullpen Edge Winner", "Pass")
-    bullpen_margin = get_numeric_value(row, "Bullpen Edge Margin")
-    if not is_no_edge_pick(bullpen_winner) and bullpen_margin is not None and bullpen_margin >= 5:
-        factors.append(f"Bullpen edge: {bullpen_winner} +{bullpen_margin:g}")
+    elif view == "f5":
+        pick = get_row_value(row, "F5 Pick", "Pass")
+        confidence = get_row_value(row, "F5 Confidence", "Pass")
+        if is_no_edge_pick(pick):
+            factors.append("No qualified First 5 edge")
 
-    if is_no_edge_pick(get_row_value(row, "First Inning Pick", "Pass")):
-        factors.append("No clear first-inning edge")
+        factors.append(format_edge_factor(
+            row,
+            "Starter Edge Winner",
+            "Starter Edge Margin",
+            "Starter edge",
+            away_team,
+            home_team,
+        ))
+        factors.append(format_edge_factor(
+            row,
+            "Offensive Edge Winner",
+            "Offensive Edge Margin",
+            "Offensive edge",
+            away_team,
+            home_team,
+        ))
 
-    away_fatigue = get_numeric_value(row, "Away Bullpen Fatigue")
-    home_fatigue = get_numeric_value(row, "Home Bullpen Fatigue")
-    if (
-        (away_fatigue is not None and away_fatigue >= 8)
-        or (home_fatigue is not None and home_fatigue >= 8)
-    ):
-        factors.append("Bullpen fatigue watch")
+    elif view == "full":
+        pick = get_row_value(row, "Full Game Pick", "Pass")
+        confidence = get_row_value(row, "Full Game Confidence", "Pass")
+        if is_no_edge_pick(pick):
+            factors.append("No qualified full-game edge")
+
+        factors.append(format_edge_factor(
+            row,
+            "Starter Edge Winner",
+            "Starter Edge Margin",
+            "Starter edge",
+            away_team,
+            home_team,
+        ))
+        factors.append(format_edge_factor(
+            row,
+            "Offensive Edge Winner",
+            "Offensive Edge Margin",
+            "Offensive edge",
+            away_team,
+            home_team,
+        ))
+        factors.append(format_edge_factor(
+            row,
+            "Bullpen Edge Winner",
+            "Bullpen Edge Margin",
+            "Bullpen edge",
+            away_team,
+            home_team,
+        ))
 
     if not factors:
         factors.append("No major model imbalance detected")
 
-    return factors[:3]
+    return factors[:4]
 
 
-def render_key_factors(row):
+def render_key_factors(row, view="first", away_team=None, home_team=None):
+    headings = {
+        "first": "Key Factors: 1st Inning Edge",
+        "f5": "Key Factors: First 5 Edge",
+        "full": "Key Factors: Full Game Edge",
+    }
     factor_items = "".join(
         f"""
         <div class="reason-item">
@@ -631,15 +813,24 @@ def render_key_factors(row):
             <span>{escape(factor)}</span>
         </div>
         """
-        for factor in build_key_factors(row)
+        for factor in build_key_factors(row, view, away_team, home_team)
     )
 
     return f"""
-    <div class="key-factors">
-        <div class="market-heading">Key Factors</div>
+    <div class="key-factors edge-factor-panel edge-factor-{escape(view)}">
+        <div class="market-heading">{escape(headings.get(view, "Key Factors"))}</div>
         <div class="reason-stack">{factor_items}</div>
     </div>
     """
+
+
+def render_key_factor_panels(row, away_team=None, home_team=None):
+    panels = "".join(
+        render_key_factors(row, view, away_team, home_team)
+        for view in ["first", "f5", "full"]
+    )
+
+    return f'<div class="edge-factor-panels">{panels}</div>'
 
 
 def game_anchor(game_name):
@@ -693,13 +884,17 @@ def build_top_looks(games):
             "meta": "No qualified YRFI or NRFI look on this slate.",
             "why": "",
             "link": "",
+            "game": "",
         })
     else:
+        away_team, home_team = split_game_name(first_row["Game"])
+        first_pick = replace_home_away(first_row["First Inning Pick"], away_team, home_team)
         looks.append({
-            "title": f'1st Inning {first_row["First Inning Pick"]}: {game_matchup_label(first_row["Game"])} ({first_row["First Inning Confidence"]})',
+            "title": f'1st Inning {first_pick}: {game_matchup_label(first_row["Game"])} ({first_row["First Inning Confidence"]})',
             "meta": f'Edge {first_row["Edge Score"]} • Confidence {first_row["First Inning Confidence"]}',
             "why": str(first_row["Agent Notes"]).split(";")[0],
             "link": top_look_link(first_row),
+            "game": first_row["Game"],
         })
 
     f5_rows = games[
@@ -712,13 +907,17 @@ def build_top_looks(games):
             "meta": "No qualified First 5 look on this slate.",
             "why": "",
             "link": "",
+            "game": "",
         })
     else:
+        away_team, home_team = split_game_name(f5_row["Game"])
+        f5_pick = replace_home_away(f5_row["F5 Pick"], away_team, home_team)
         looks.append({
-            "title": f'First 5 {f5_row["F5 Pick"]}: {game_matchup_label(f5_row["Game"])} ({f5_row["F5 Confidence"]})',
+            "title": f'First 5 {f5_pick}: {game_matchup_label(f5_row["Game"])} ({f5_row["F5 Confidence"]})',
             "meta": f'Edge {f5_row["Edge Score"]} • Confidence {f5_row["F5 Confidence"]}',
             "why": str(f5_row["Agent Notes"]).split(";")[0],
             "link": top_look_link(f5_row),
+            "game": f5_row["Game"],
         })
 
     bullpen_rows = games[
@@ -732,6 +931,7 @@ def build_top_looks(games):
             "meta": "No elevated bullpen risk signal on this slate.",
             "why": "",
             "link": "",
+            "game": "",
         })
     else:
         bullpen_rows["_fatigue_max"] = bullpen_rows[
@@ -742,14 +942,24 @@ def build_top_looks(games):
             ascending=False,
             na_position="last",
         ).iloc[0]
+        away_team, home_team = split_game_name(bullpen_row["Game"])
         looks.append({
             "title": f'Bullpen Watch: {game_matchup_label(bullpen_row["Game"])}',
             "meta": f'Edge {bullpen_row["Edge Score"]} • Confidence {bullpen_row["Confidence"]}',
-            "why": f'Bullpen fatigue {bullpen_row["Away Bullpen Status"]} / {bullpen_row["Home Bullpen Status"]}',
+            "why": f'{away_team} bullpen {bullpen_row["Away Bullpen Status"]} / {home_team} bullpen {bullpen_row["Home Bullpen Status"]}',
             "link": top_look_link(bullpen_row),
+            "game": bullpen_row["Game"],
         })
 
     return looks
+
+
+def top_look_games(games):
+    return {
+        look["game"]
+        for look in build_top_looks(games)
+        if look.get("game")
+    }
 
 
 def render_top_looks(games):
@@ -785,11 +995,15 @@ def load_games(selected_date, model_cache_version):
 
 
 st.title("⚾ First Five Edge")
-st.caption("MLB YRFI / NRFI • First 5 • Bullpen Fatigue Intelligence")
 
 st.sidebar.title("Controls")
 st.sidebar.caption(f"Version {APP_VERSION}")
-selected_date = st.sidebar.date_input("Slate Date", value=date.today())
+selected_date = st.date_input(
+    "Slate Date",
+    value=date.today(),
+    format="MM/DD/YYYY",
+    key="header_slate_date",
+)
 st.sidebar.divider()
 st.sidebar.subheader("Data Sources")
 
@@ -817,13 +1031,6 @@ if st.sidebar.button("Refresh Data"):
     st.cache_data.clear()
     st.rerun()
 
-view = st.sidebar.radio(
-    "View",
-    ["All Games", "Model Favorites", "NRFI", "YRFI", "F5", "Bullpen Watch"]
-)
-
-min_edge = st.sidebar.slider("Minimum Edge Score", 0, 100, 0)
-
 games = load_games(selected_date, MODEL_CACHE_VERSION)
 
 if games.empty:
@@ -833,35 +1040,47 @@ if games.empty:
 games = games.copy()
 games["Edge Score"] = games["Edge Score"].fillna(0)
 
-filtered = games[games["Edge Score"] >= min_edge].copy()
+top_look_game_names = top_look_games(games)
+nrfi_count = len(games[games["Lean"].isin(["NRFI", "Strong NRFI"])])
+yrfi_count = len(games[games["Lean"].isin(["YRFI", "Strong YRFI"])])
+f5_count = len(games[games["F5 Edge"] != "F5 Pass"])
+filter_labels = {
+    "All Games": f"Games\n{len(games)}",
+    "Top Looks": f"Top Looks\n{len(top_look_game_names)}",
+    "NRFI": f"NRFI Looks\n{nrfi_count}",
+    "YRFI": f"YRFI Looks\n{yrfi_count}",
+    "F5": f"F5 Edges\n{f5_count}",
+}
 
-if view == "Model Favorites":
-    filtered = filtered[filtered["Recommendation"] != "Pass"]
-elif view == "NRFI":
+selected_filter_label = st.radio(
+    "Game card filter",
+    list(filter_labels.values()),
+    horizontal=True,
+    label_visibility="collapsed",
+    key="game_card_filter",
+)
+selected_filter = {
+    label: key
+    for key, label in filter_labels.items()
+}[selected_filter_label]
+
+filtered = games.copy()
+
+if selected_filter == "Top Looks":
+    filtered = filtered[filtered["Game"].isin(top_look_game_names)]
+elif selected_filter == "NRFI":
     filtered = filtered[filtered["Lean"].isin(["NRFI", "Strong NRFI"])]
-elif view == "YRFI":
+elif selected_filter == "YRFI":
     filtered = filtered[filtered["Lean"].isin(["YRFI", "Strong YRFI"])]
-elif view == "F5":
+elif selected_filter == "F5":
     filtered = filtered[filtered["F5 Edge"] != "F5 Pass"]
-elif view == "Bullpen Watch":
-    filtered = filtered[
-        (filtered["Away Bullpen Fatigue"] >= 8) |
-        (filtered["Home Bullpen Fatigue"] >= 8)
-    ]
 
 filtered = filtered.sort_values("Edge Score", ascending=False, na_position="last")
 
-st.subheader(f"Slate: {selected_date}")
-
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Games", len(games))
-c2.metric("Top Looks", 3)
-c3.metric("NRFI Looks", len(games[games["Lean"].isin(["NRFI", "Strong NRFI"])]))
-c4.metric("F5 Edges", len(games[games["F5 Edge"] != "F5 Pass"]))
-
 st.divider()
 
-st.html(render_top_looks(games))
+if selected_filter in ["All Games", "Top Looks"]:
+    st.html(render_top_looks(games))
 
 model_favorites = games[games["Recommendation"] != "Pass"].sort_values(
     "Edge Score",
@@ -894,8 +1113,8 @@ else:
         away_team, home_team = split_game_name(row["Game"])
         logo_matchup = render_logo_matchup(away_team, home_team)
         market_watch = render_market_watch(row)
-        key_factors = render_key_factors(row)
         card_anchor = game_anchor(row["Game"])
+        key_factors = render_key_factor_panels(row, away_team, home_team)
         first_inning_pick = get_row_value(row, "First Inning Pick")
         first_inning_confidence = get_row_value(row, "First Inning Confidence")
         f5_pick = get_row_value(row, "F5 Pick")
@@ -905,16 +1124,23 @@ else:
         first_inning_display = format_decision_pick(
             first_inning_pick,
             first_inning_confidence,
+            away_team,
+            home_team,
         )
-        f5_display = format_decision_pick(f5_pick, f5_confidence)
+        f5_display = format_decision_pick(
+            f5_pick,
+            f5_confidence,
+            away_team,
+            home_team,
+            market="f5",
+        )
         full_game_display = format_decision_pick(
             full_game_pick,
             full_game_confidence,
+            away_team,
+            home_team,
+            market="full_game",
         )
-        away_pitcher_yrfi = get_row_value(row, "Away Pitcher YRFI %", "N/A")
-        home_pitcher_yrfi = get_row_value(row, "Home Pitcher YRFI %", "N/A")
-        away_offense_yrfi = get_row_value(row, "Away Offense YRFI %", "N/A")
-        home_offense_yrfi = get_row_value(row, "Home Offense YRFI %", "N/A")
         away_pitcher_yrfi_display = format_rank_metric(
             row,
             "Away Pitcher YRFI %",
@@ -959,6 +1185,21 @@ else:
             ],
             "MLB",
         )
+        starter_edge_winner = replace_home_away(
+            get_row_value(row, "Starter Edge Winner", "Pass"),
+            away_team,
+            home_team,
+        )
+        offensive_edge_winner = replace_home_away(
+            get_row_value(row, "Offensive Edge Winner", "Pass"),
+            away_team,
+            home_team,
+        )
+        bullpen_edge_winner = replace_home_away(
+            get_row_value(row, "Bullpen Edge Winner", "Pass"),
+            away_team,
+            home_team,
+        )
 
         st.html(f"""
         <div id="{card_anchor}" class="game-card">
@@ -967,10 +1208,14 @@ else:
             <div class="game-title">{row["Game"]}</div>
             <div class="muted">{row["Game Time"]} • {row["Status"]}</div>
 
+            <input class="edge-view-control edge-view-first" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-first" checked>
+            <input class="edge-view-control edge-view-f5" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-f5">
+            <input class="edge-view-control edge-view-full" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-full">
+
             <div class="decision-stack">
-                <div class="decision-line">🎯 1st Inning: {first_inning_display}</div>
-                <div class="decision-line">⚾ First 5: {f5_display}</div>
-                <div class="decision-line">🏆 Full Game: {full_game_display}</div>
+                <label class="decision-line decision-first" for="{card_anchor}-first">🎯 1st Inning: {first_inning_display}</label>
+                <label class="decision-line decision-f5" for="{card_anchor}-f5">⚾ First 5: {f5_display}</label>
+                <label class="decision-line decision-full" for="{card_anchor}-full">🏆 Full Game: {full_game_display}</label>
             </div>
 
             {key_factors}
@@ -980,38 +1225,15 @@ else:
         """)
 
         with st.expander(f"🔍 Analysis: {row['Game']}"):
-            st.markdown("### Analysis")
-
-            away_col, home_col = st.columns(2)
-
-            with away_col:
-                st.markdown("#### Away")
-                st.markdown(f"""
-                | Field | Value |
-                |---|---|
-                | Team Name | {away_team} |
-                | Record | {row["Away Record"]} |
-                """)
-
-            with home_col:
-                st.markdown("#### Home")
-                st.markdown(f"""
-                | Field | Value |
-                |---|---|
-                | Team Name | {home_team} |
-                | Record | {row["Home Record"]} |
-                """)
-
-            st.markdown("---")
             st.markdown("### Edge Breakdown")
 
             st.markdown("#### Starter Edge")
             st.markdown(f"""
             | Metric | Value |
             |---|---|
-            | Away Starter Edge | {get_row_value(row, "Away Starter Edge", "TBD")} |
-            | Home Starter Edge | {get_row_value(row, "Home Starter Edge", "TBD")} |
-            | Starter Edge Winner | {get_row_value(row, "Starter Edge Winner", "Pass")} |
+            | {away_team} Starter Edge | {get_row_value(row, "Away Starter Edge", "TBD")} |
+            | {home_team} Starter Edge | {get_row_value(row, "Home Starter Edge", "TBD")} |
+            | Starter Edge Winner | {starter_edge_winner} |
             | Starter Edge Margin | {get_row_value(row, "Starter Edge Margin", "TBD")} |
             """)
 
@@ -1019,9 +1241,9 @@ else:
             st.markdown(f"""
             | Metric | Value |
             |---|---|
-            | Away Offensive Edge | {get_row_value(row, "Away Offensive Edge", "TBD")} |
-            | Home Offensive Edge | {get_row_value(row, "Home Offensive Edge", "TBD")} |
-            | Offensive Edge Winner | {get_row_value(row, "Offensive Edge Winner", "Pass")} |
+            | {away_team} Offensive Edge | {get_row_value(row, "Away Offensive Edge", "TBD")} |
+            | {home_team} Offensive Edge | {get_row_value(row, "Home Offensive Edge", "TBD")} |
+            | Offensive Edge Winner | {offensive_edge_winner} |
             | Offensive Edge Margin | {get_row_value(row, "Offensive Edge Margin", "TBD")} |
             """)
 
@@ -1029,104 +1251,49 @@ else:
             st.markdown(f"""
             | Metric | Value |
             |---|---|
-            | Away Bullpen Edge | {get_row_value(row, "Away Bullpen Edge", "TBD")} |
-            | Home Bullpen Edge | {get_row_value(row, "Home Bullpen Edge", "TBD")} |
-            | Bullpen Edge Winner | {get_row_value(row, "Bullpen Edge Winner", "Pass")} |
+            | {away_team} Bullpen Edge | {get_row_value(row, "Away Bullpen Edge", "TBD")} |
+            | {home_team} Bullpen Edge | {get_row_value(row, "Home Bullpen Edge", "TBD")} |
+            | Bullpen Edge Winner | {bullpen_edge_winner} |
             | Bullpen Edge Margin | {get_row_value(row, "Bullpen Edge Margin", "TBD")} |
             """)
 
             st.markdown("---")
             st.markdown("### Pitching Matchup")
-
-            away_pitch_col, home_pitch_col = st.columns(2)
-
-            with away_pitch_col:
-                st.markdown(f"#### {away_team}")
-                st.markdown(f"""
-                | Metric | Value |
-                |---|---|
-                | Pitcher | {row["Away Pitcher"]} |
-                | Record | {row["Away Pitcher Record"]} |
-                | ERA | {row["Away ERA"]} |
-                | WHIP | {row["Away WHIP"]} |
-                | IP | {row["Away IP"]} |
-                | K | {row["Away K"]} |
-                """)
-
-            with home_pitch_col:
-                st.markdown(f"#### {home_team}")
-                st.markdown(f"""
-                | Metric | Value |
-                |---|---|
-                | Pitcher | {row["Home Pitcher"]} |
-                | Record | {row["Home Pitcher Record"]} |
-                | ERA | {row["Home ERA"]} |
-                | WHIP | {row["Home WHIP"]} |
-                | IP | {row["Home IP"]} |
-                | K | {row["Home K"]} |
-                """)
+            st.markdown(f"""
+            | Metric | {away_team} Starter | {home_team} Starter |
+            |---|---|---|
+            | Pitcher | {row["Away Pitcher"]} | {row["Home Pitcher"]} |
+            | Record | {row["Away Pitcher Record"]} | {row["Home Pitcher Record"]} |
+            | IP | {row["Away IP"]} | {row["Home IP"]} |
+            | K | {row["Away K"]} | {row["Home K"]} |
+            | ERA | {row["Away ERA"]} | {row["Home ERA"]} |
+            | WHIP | {row["Away WHIP"]} | {row["Home WHIP"]} |
+            | Pitcher YRFI % | {away_pitcher_yrfi_display} | {home_pitcher_yrfi_display} |
+            """)
 
             st.markdown("---")
-            st.markdown("### 1st Inning")
-
-            away_first_col, home_first_col = st.columns(2)
-
-            with away_first_col:
-                st.markdown(f"#### {away_team}")
-                st.markdown(f"""
-                | Metric | Value |
-                |---|---|
-                | Pitcher YRFI % | {away_pitcher_yrfi_display} |
-                | Offense YRFI % | {away_offense_yrfi_display} |
-                """)
-
-            with home_first_col:
-                st.markdown(f"#### {home_team}")
-                st.markdown(f"""
-                | Metric | Value |
-                |---|---|
-                | Pitcher YRFI % | {home_pitcher_yrfi_display} |
-                | Offense YRFI % | {home_offense_yrfi_display} |
-                """)
-
-            st.markdown("#### First Inning Matchup")
+            st.markdown("### Offensive Matchup")
             st.markdown(f"""
-            | Matchup | YRFI Profile |
-            |---|---|
-            | Away Offense vs Home Pitcher | {away_offense_yrfi}% / {home_pitcher_yrfi}% |
-            | Home Offense vs Away Pitcher | {home_offense_yrfi}% / {away_pitcher_yrfi}% |
+            | Metric | {away_team} | {home_team} |
+            |---|---|---|
+            | Record | {row["Away Record"]} | {row["Home Record"]} |
+            | Runs Per Game | {get_row_value(row, "Away Runs Per Game", "N/A")} | {get_row_value(row, "Home Runs Per Game", "N/A")} |
+            | Offense YRFI % | {away_offense_yrfi_display} | {home_offense_yrfi_display} |
+            | First-Inning Run Avg | {get_row_value(row, "Away 1st Run Avg", "N/A")} | {get_row_value(row, "Home 1st Run Avg", "N/A")} |
             """)
 
             st.markdown("---")
             st.markdown("### Bullpen Usage")
-
-            away_bullpen_col, home_bullpen_col = st.columns(2)
-
-            with away_bullpen_col:
-                st.markdown(f"#### {away_team}")
-                st.markdown(f"""
-                | Metric | Value |
-                |---|---|
-                | Rating | {row["Away Bullpen Status"]} |
-                | Fatigue Score | {row["Away Bullpen Fatigue"]} |
-                | 3-Day Bullpen IP | {row["Away 3 Day Bullpen IP"]} |
-                | 3-Day Bullpen Pitches | {row["Away 3 Day Bullpen Pitches"]} |
-                | 3-Day Relievers Used | {row["Away 3 Day Relievers"]} |
-                | Back-to-Back Arms | {row["Away Back-to-Back Arms"]} |
-                """)
-
-            with home_bullpen_col:
-                st.markdown(f"#### {home_team}")
-                st.markdown(f"""
-                | Metric | Value |
-                |---|---|
-                | Rating | {row["Home Bullpen Status"]} |
-                | Fatigue Score | {row["Home Bullpen Fatigue"]} |
-                | 3-Day Bullpen IP | {row["Home 3 Day Bullpen IP"]} |
-                | 3-Day Bullpen Pitches | {row["Home 3 Day Bullpen Pitches"]} |
-                | 3-Day Relievers Used | {row["Home 3 Day Relievers"]} |
-                | Back-to-Back Arms | {row["Home Back-to-Back Arms"]} |
-                """)
+            st.markdown(f"""
+            | Metric | {away_team} Bullpen | {home_team} Bullpen |
+            |---|---|---|
+            | Rating | {row["Away Bullpen Status"]} | {row["Home Bullpen Status"]} |
+            | Fatigue Score | {row["Away Bullpen Fatigue"]} | {row["Home Bullpen Fatigue"]} |
+            | 3-Day Bullpen IP | {row["Away 3 Day Bullpen IP"]} | {row["Home 3 Day Bullpen IP"]} |
+            | 3-Day Bullpen Pitches | {row["Away 3 Day Bullpen Pitches"]} | {row["Home 3 Day Bullpen Pitches"]} |
+            | 3-Day Relievers Used | {row["Away 3 Day Relievers"]} | {row["Home 3 Day Relievers"]} |
+            | Back-to-Back Arms | {row["Away Back-to-Back Arms"]} | {row["Home Back-to-Back Arms"]} |
+            """)
 
 st.divider()
 

@@ -213,12 +213,25 @@ def get_team_records(season=None):
             team_name = team_record["team"]["name"]
             wins = team_record.get("wins", 0)
             losses = team_record.get("losses", 0)
-            records[team_name] = f"{wins}-{losses}"
+            games_played = wins + losses
+            runs_scored = safe_float(team_record.get("runsScored"))
+            runs_per_game = UNAVAILABLE
+
+            if runs_scored is not None and games_played > 0:
+                runs_per_game = round(runs_scored / games_played, 2)
+
+            records[team_name] = {
+                "record": f"{wins}-{losses}",
+                "runs_per_game": runs_per_game,
+            }
 
     return records
 
 
 def format_team_record(team_side, fallback=UNAVAILABLE):
+    if isinstance(fallback, dict):
+        fallback = fallback.get("record", UNAVAILABLE)
+
     record = team_side.get("leagueRecord", {})
     wins = record.get("wins")
     losses = record.get("losses")
@@ -227,6 +240,24 @@ def format_team_record(team_side, fallback=UNAVAILABLE):
         return fallback
 
     return f"{wins}-{losses}"
+
+
+def get_team_runs_per_game(team_records, team_name):
+    record = team_records.get(team_name, {})
+
+    if not record:
+        for record_team_name, record_data in team_records.items():
+            if (
+                str(record_team_name).lower() in str(team_name).lower()
+                or str(team_name).lower() in str(record_team_name).lower()
+            ):
+                record = record_data
+                break
+
+    if isinstance(record, dict):
+        return record.get("runs_per_game", UNAVAILABLE)
+
+    return UNAVAILABLE
 
 
 def calculate_nrfi_score(
@@ -899,6 +930,8 @@ def get_today_games(selected_date=None):
                 home_side,
                 team_records.get(home_team, UNAVAILABLE),
             )
+            away_runs_per_game = get_team_runs_per_game(team_records, away_team)
+            home_runs_per_game = get_team_runs_per_game(team_records, home_team)
 
             away_offense = get_team_offense_score(away_team)
             home_offense = get_team_offense_score(home_team)
@@ -1071,6 +1104,8 @@ def get_today_games(selected_date=None):
 
                 "Away Record": away_record,
                 "Home Record": home_record,
+                "Away Runs Per Game": away_runs_per_game,
+                "Home Runs Per Game": home_runs_per_game,
 
                 "Away Pitcher": away_pitcher,
                 "Home Pitcher": home_pitcher,
