@@ -182,7 +182,7 @@ st.markdown("""
 }
 .decision-line {
     display: block;
-    min-height: 72px;
+    min-height: 88px;
     border-radius: 14px;
     padding: 14px 16px;
     background: #1e293b;
@@ -194,6 +194,17 @@ st.markdown("""
     text-decoration: none !important;
     cursor: pointer;
     transition: transform 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+}
+.decision-result {
+    display: block;
+    margin-top: 8px;
+    color: #cbd5e1;
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 1.25;
+}
+.decision-result-mobile {
+    display: none;
 }
 .decision-line:hover {
     transform: translateY(-1px);
@@ -223,6 +234,26 @@ st.markdown("""
 }
 .decision-line.is-selected:nth-child(3) {
     box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.4), inset 0 0 28px rgba(249, 115, 22, 0.22);
+}
+@media (max-width: 640px) {
+    .decision-stack {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+
+    .decision-line {
+        min-height: 70px;
+        padding: 12px 14px;
+    }
+
+    .decision-result-full {
+        display: none;
+    }
+
+    .decision-result-mobile {
+        display: block;
+        font-size: 12px;
+    }
 }
 .edge-view-control {
     position: absolute;
@@ -673,6 +704,17 @@ def format_decision_pick(pick, confidence, away_team=None, home_team=None, marke
         return display_pick
 
     return f"{display_pick} ({confidence})"
+
+
+def render_decision_result(result, compact_result=None):
+    if result in [None, "", "N/A", "Pending"]:
+        return ""
+
+    compact_result = compact_result or result
+    return (
+        f'<span class="decision-result decision-result-full">Result: {escape(str(result))}</span>'
+        f'<span class="decision-result decision-result-mobile">{escape(str(compact_result))}</span>'
+    )
 
 
 def get_first_existing_value(row, column_names):
@@ -1190,6 +1232,21 @@ else:
         f5_confidence = get_row_value(row, "F5 Confidence")
         full_game_pick = get_row_value(row, "Full Game Pick")
         full_game_confidence = get_row_value(row, "Full Game Confidence")
+        first_inning_compact_result = get_row_value(row, "First Inning Result Compact", "")
+        if first_inning_compact_result not in [None, "", "N/A", "Pending"]:
+            first_inning_compact_result = f"Result: {first_inning_compact_result}"
+        first_inning_result = render_decision_result(
+            get_row_value(row, "First Inning Result", ""),
+            first_inning_compact_result,
+        )
+        f5_result = render_decision_result(
+            get_row_value(row, "F5 Result", ""),
+            get_row_value(row, "F5 Result Compact", ""),
+        )
+        full_game_result = render_decision_result(
+            get_row_value(row, "Full Game Result", ""),
+            get_row_value(row, "Full Game Result Compact", ""),
+        )
         first_inning_display = format_decision_pick(
             first_inning_pick,
             first_inning_confidence,
@@ -1283,9 +1340,9 @@ else:
             <input class="edge-view-control edge-view-full" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-full">
 
             <div class="decision-stack">
-                <label class="decision-line decision-first" for="{card_anchor}-first">🎯 1st Inning: {first_inning_display}</label>
-                <label class="decision-line decision-f5" for="{card_anchor}-f5">⚾ First 5: {f5_display}</label>
-                <label class="decision-line decision-full" for="{card_anchor}-full">🏆 Full Game: {full_game_display}</label>
+                <label class="decision-line decision-first" for="{card_anchor}-first">🎯 1st Inning: {first_inning_display}{first_inning_result}</label>
+                <label class="decision-line decision-f5" for="{card_anchor}-f5">⚾ First 5: {f5_display}{f5_result}</label>
+                <label class="decision-line decision-full" for="{card_anchor}-full">🏆 Full Game: {full_game_display}{full_game_result}</label>
             </div>
 
             {key_factors}

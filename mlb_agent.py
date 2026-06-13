@@ -7,6 +7,39 @@ from zoneinfo import ZoneInfo
 
 UNAVAILABLE = "N/A"
 
+TEAM_ABBREVIATIONS = {
+    "Arizona Diamondbacks": "ARI",
+    "Athletics": "ATH",
+    "Atlanta Braves": "ATL",
+    "Baltimore Orioles": "BAL",
+    "Boston Red Sox": "BOS",
+    "Chicago Cubs": "CHC",
+    "Chicago White Sox": "CWS",
+    "Cincinnati Reds": "CIN",
+    "Cleveland Guardians": "CLE",
+    "Colorado Rockies": "COL",
+    "Detroit Tigers": "DET",
+    "Houston Astros": "HOU",
+    "Kansas City Royals": "KC",
+    "Los Angeles Angels": "LAA",
+    "Los Angeles Dodgers": "LAD",
+    "Miami Marlins": "MIA",
+    "Milwaukee Brewers": "MIL",
+    "Minnesota Twins": "MIN",
+    "New York Mets": "NYM",
+    "New York Yankees": "NYY",
+    "Philadelphia Phillies": "PHI",
+    "Pittsburgh Pirates": "PIT",
+    "San Diego Padres": "SD",
+    "San Francisco Giants": "SF",
+    "Seattle Mariners": "SEA",
+    "St. Louis Cardinals": "STL",
+    "Tampa Bay Rays": "TB",
+    "Texas Rangers": "TEX",
+    "Toronto Blue Jays": "TOR",
+    "Washington Nationals": "WSH",
+}
+
 
 try:
     from team_stats import get_team_hitting_stats
@@ -179,6 +212,98 @@ def game_status_sort_value(status):
     if any(term in status_text for term in ["in progress", "delayed", "suspended"]):
         return 1
     return 2
+
+
+def is_game_not_started(status):
+    return game_status_sort_value(status) == 0
+
+
+def get_inning_runs(linescore, inning_number):
+    for inning in linescore.get("innings", []):
+        if inning.get("num") == inning_number:
+            away_runs = inning.get("away", {}).get("runs")
+            home_runs = inning.get("home", {}).get("runs")
+
+            if away_runs is None or home_runs is None:
+                return None
+
+            return away_runs, home_runs
+
+    return None
+
+
+def format_score_result(label, away_team, away_score, home_team, home_score):
+    if away_score is None or home_score is None:
+        return "Pending"
+
+    return f"{label}: {away_team} {away_score}, {home_team} {home_score}"
+
+
+def team_abbreviation(team_name):
+    return TEAM_ABBREVIATIONS.get(team_name, str(team_name)[:3].upper())
+
+
+def format_compact_score_result(label, away_team, away_score, home_team, home_score):
+    if away_score is None or home_score is None:
+        return "Pending"
+
+    away_abbr = team_abbreviation(away_team)
+    home_abbr = team_abbreviation(home_team)
+    return f"{label}: {away_abbr} {away_score}, {home_abbr} {home_score}"
+
+
+def build_first_inning_result(linescore, status):
+    if is_game_not_started(status):
+        return "Pending"
+
+    first_inning_runs = get_inning_runs(linescore, 1)
+    if first_inning_runs is None:
+        return "In Progress"
+
+    away_runs, home_runs = first_inning_runs
+    return "YRFI" if (away_runs + home_runs) > 0 else "NRFI"
+
+
+def build_f5_result(linescore, status, away_team, home_team, compact=False):
+    innings = linescore.get("innings", [])
+
+    if is_game_not_started(status):
+        return "Pending"
+
+    completed_first_five = [
+        inning for inning in innings
+        if inning.get("num") in [1, 2, 3, 4, 5]
+        and inning.get("away", {}).get("runs") is not None
+        and inning.get("home", {}).get("runs") is not None
+    ]
+
+    if len(completed_first_five) >= 5:
+        away_score = sum(inning["away"]["runs"] for inning in completed_first_five)
+        home_score = sum(inning["home"]["runs"] for inning in completed_first_five)
+        if compact:
+            return format_compact_score_result("F5", away_team, away_score, home_team, home_score)
+        return format_score_result("After 5", away_team, away_score, home_team, home_score)
+
+    away_score = linescore.get("teams", {}).get("away", {}).get("runs")
+    home_score = linescore.get("teams", {}).get("home", {}).get("runs")
+    if compact:
+        return format_compact_score_result("Live", away_team, away_score, home_team, home_score)
+    return format_score_result("In Progress", away_team, away_score, home_team, home_score)
+
+
+def build_full_game_result(linescore, status, away_team, home_team, compact=False):
+    if is_game_not_started(status):
+        return "Pending"
+
+    away_score = linescore.get("teams", {}).get("away", {}).get("runs")
+    home_score = linescore.get("teams", {}).get("home", {}).get("runs")
+    status_text = str(status).lower()
+    label = "Final" if game_status_sort_value(status) == 2 or "game over" in status_text else "In Progress"
+    if compact:
+        compact_label = "Final" if label == "Final" else "Live"
+        return format_compact_score_result(compact_label, away_team, away_score, home_team, home_score)
+
+    return format_score_result(label, away_team, away_score, home_team, home_score)
 
 
 def get_pitcher_stats(pitcher_id):
@@ -926,7 +1051,7 @@ def get_today_games(selected_date=None):
 
     url = (
         "https://statsapi.mlb.com/api/v1/schedule"
-        f"?sportId=1&date={slate_date}&hydrate=probablePitcher"
+        f"?sportId=1&date={slate_date}&hydrate=probablePitcher,linescore"
     )
 
     try:
@@ -943,6 +1068,7 @@ def get_today_games(selected_date=None):
             home_side = game["teams"]["home"]
             game_date = game.get("gameDate", "")
             game_status = game["status"]["detailedState"]
+            linescore = game.get("linescore", {})
 
             away_team = away_side["team"]["name"]
             home_team = home_side["team"]["name"]
@@ -1115,6 +1241,12 @@ def get_today_games(selected_date=None):
                 "Game Time": format_game_time(game_date),
                 "Game Sort Time": game_date,
                 "Status Sort": game_status_sort_value(game_status),
+                "First Inning Result": build_first_inning_result(linescore, game_status),
+                "First Inning Result Compact": build_first_inning_result(linescore, game_status),
+                "F5 Result": build_f5_result(linescore, game_status, away_team, home_team),
+                "F5 Result Compact": build_f5_result(linescore, game_status, away_team, home_team, compact=True),
+                "Full Game Result": build_full_game_result(linescore, game_status, away_team, home_team),
+                "Full Game Result Compact": build_full_game_result(linescore, game_status, away_team, home_team, compact=True),
                 "Game": f"{away_team} @ {home_team}",
                 "Recommendation": recommendation,
                 "Confidence": confidence,
