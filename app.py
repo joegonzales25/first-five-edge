@@ -4,7 +4,7 @@ from html import escape
 import re
 from mlb_agent import get_today_games
 
-APP_VERSION = "2.2.4"
+APP_VERSION = "2.2.5"
 MODEL_CACHE_VERSION = "edge-confidence-v2"
 
 team_logo_map = {
@@ -354,7 +354,9 @@ div[data-testid="stRadio"] [role="radiogroup"] {
     gap: 12px;
 }
 
-div[data-testid="stRadio"] label {
+div[data-testid="stRadio"] [role="radiogroup"] label {
+    display: flex;
+    align-items: center;
     min-height: 78px;
     padding: 14px 16px;
     border-radius: 14px;
@@ -364,35 +366,90 @@ div[data-testid="stRadio"] label {
     box-shadow: inset 0 0 24px rgba(14, 165, 233, 0.12);
 }
 
-div[data-testid="stRadio"] label:nth-child(1) {
+div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(1) {
     border-color: #22c55e;
 }
 
-div[data-testid="stRadio"] label:nth-child(2) {
+div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(2) {
     border-color: #38bdf8;
 }
 
-div[data-testid="stRadio"] label:nth-child(3) {
+div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(3) {
     border-color: #f97316;
 }
 
-div[data-testid="stRadio"] label:nth-child(4) {
+div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(4) {
     border-color: #a855f7;
 }
 
-div[data-testid="stRadio"] label:nth-child(5) {
+div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(5) {
     border-color: #ef4444;
 }
 
-div[data-testid="stRadio"] label p {
+div[data-testid="stRadio"] [role="radiogroup"] label p {
     color: #f8fafc;
     font-weight: 900;
     line-height: 1.25;
+    white-space: pre-line;
+    word-break: keep-all;
 }
 
-div[data-testid="stRadio"] label:has(input:checked) {
+div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) {
     background: linear-gradient(135deg, #1d4ed8, #0f766e);
     box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.28), inset 0 0 26px rgba(255, 255, 255, 0.08);
+}
+
+@media (max-width: 640px) {
+    div[data-testid="stRadio"] [role="radiogroup"] {
+        grid-template-columns: repeat(5, minmax(48px, 1fr));
+        gap: 6px;
+    }
+
+    div[data-testid="stRadio"] [role="radiogroup"] label {
+        width: 100% !important;
+        box-sizing: border-box;
+        min-height: 44px;
+        padding: 8px 4px !important;
+        border-radius: 12px;
+        justify-content: center;
+        text-align: center;
+    }
+
+    div[data-testid="stRadio"] [role="radiogroup"] label > div:first-child {
+        display: none;
+    }
+
+    div[data-testid="stRadio"] [role="radiogroup"] label p {
+        display: none;
+    }
+
+    div[data-testid="stRadio"] [role="radiogroup"] label::after {
+        color: #f8fafc;
+        font-size: 12px;
+        font-weight: 900;
+        line-height: 1;
+        white-space: nowrap;
+    }
+
+    div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(1)::after {
+        content: "All";
+    }
+
+    div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(2)::after {
+        content: "Top";
+    }
+
+    div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(3)::after {
+        content: "NRFI";
+    }
+
+    div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(4)::after {
+        content: "YRFI";
+    }
+
+    div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(5)::after {
+        content: "F5";
+    }
 }
 
 div[data-testid="stCaptionContainer"]:has(+ div[data-testid="stVerticalBlock"]) {
@@ -605,7 +662,9 @@ def format_decision_pick(pick, confidence, away_team=None, home_team=None, marke
     if away_team and home_team:
         display_pick = replace_home_away(display_pick, away_team, home_team)
 
-    if market == "f5":
+    if market == "first":
+        display_pick = re.sub(r"\s+Yes$", "", display_pick)
+    elif market == "f5":
         display_pick = re.sub(r"\s+F5$", "", display_pick)
     elif market == "full_game":
         display_pick = re.sub(r"\s+Full Game$", "", display_pick)
@@ -888,9 +947,15 @@ def build_top_looks(games):
         })
     else:
         away_team, home_team = split_game_name(first_row["Game"])
-        first_pick = replace_home_away(first_row["First Inning Pick"], away_team, home_team)
+        first_pick = format_decision_pick(
+            first_row["First Inning Pick"],
+            first_row["First Inning Confidence"],
+            away_team,
+            home_team,
+            market="first",
+        )
         looks.append({
-            "title": f'1st Inning {first_pick}: {game_matchup_label(first_row["Game"])} ({first_row["First Inning Confidence"]})',
+            "title": f'1st Inning {first_pick}: {game_matchup_label(first_row["Game"])}',
             "meta": f'Edge {first_row["Edge Score"]} • Confidence {first_row["First Inning Confidence"]}',
             "why": str(first_row["Agent Notes"]).split(";")[0],
             "link": top_look_link(first_row),
@@ -1045,11 +1110,11 @@ nrfi_count = len(games[games["Lean"].isin(["NRFI", "Strong NRFI"])])
 yrfi_count = len(games[games["Lean"].isin(["YRFI", "Strong YRFI"])])
 f5_count = len(games[games["F5 Edge"] != "F5 Pass"])
 filter_labels = {
-    "All Games": f"Games\n{len(games)}",
-    "Top Looks": f"Top Looks\n{len(top_look_game_names)}",
-    "NRFI": f"NRFI Looks\n{nrfi_count}",
-    "YRFI": f"YRFI Looks\n{yrfi_count}",
-    "F5": f"F5 Edges\n{f5_count}",
+    "All Games": f"All\n{len(games)}",
+    "Top Looks": f"Top\n{len(top_look_game_names)}",
+    "NRFI": f"NRFI\n{nrfi_count}",
+    "YRFI": f"YRFI\n{yrfi_count}",
+    "F5": f"F5\n{f5_count}",
 }
 
 selected_filter_label = st.radio(
@@ -1075,7 +1140,11 @@ elif selected_filter == "YRFI":
 elif selected_filter == "F5":
     filtered = filtered[filtered["F5 Edge"] != "F5 Pass"]
 
-filtered = filtered.sort_values("Edge Score", ascending=False, na_position="last")
+filtered = filtered.sort_values(
+    ["Status Sort", "Game Sort Time"],
+    ascending=[True, True],
+    na_position="last",
+)
 
 st.divider()
 
@@ -1126,6 +1195,7 @@ else:
             first_inning_confidence,
             away_team,
             home_team,
+            market="first",
         )
         f5_display = format_decision_pick(
             f5_pick,

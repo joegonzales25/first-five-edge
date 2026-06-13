@@ -2,6 +2,7 @@ import requests
 import pandas as pd
 
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 
 UNAVAILABLE = "N/A"
@@ -146,16 +147,38 @@ def bullpen_label(score):
     return "Extreme"
 
 
-def format_game_time(raw_time):
+def parse_game_datetime(raw_time):
     if not raw_time:
-        return UNAVAILABLE
+        return None
 
     try:
-        utc_dt = datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
-        local_dt = utc_dt.astimezone()
-        return local_dt.strftime("%I:%M %p %Z")
+        return datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
     except Exception:
+        return None
+
+
+def format_game_time(raw_time, timezone_name="America/New_York"):
+    utc_dt = parse_game_datetime(raw_time)
+
+    if utc_dt is None:
         return raw_time
+
+    try:
+        display_dt = utc_dt.astimezone(ZoneInfo(timezone_name))
+    except Exception:
+        display_dt = utc_dt.astimezone(ZoneInfo("America/New_York"))
+
+    return display_dt.strftime("%I:%M %p ET").lstrip("0")
+
+
+def game_status_sort_value(status):
+    status_text = str(status).lower()
+
+    if any(term in status_text for term in ["scheduled", "pre-game", "warmup"]):
+        return 0
+    if any(term in status_text for term in ["in progress", "delayed", "suspended"]):
+        return 1
+    return 2
 
 
 def get_pitcher_stats(pitcher_id):
@@ -918,6 +941,8 @@ def get_today_games(selected_date=None):
         for game in day.get("games", []):
             away_side = game["teams"]["away"]
             home_side = game["teams"]["home"]
+            game_date = game.get("gameDate", "")
+            game_status = game["status"]["detailedState"]
 
             away_team = away_side["team"]["name"]
             home_team = home_side["team"]["name"]
@@ -1087,7 +1112,9 @@ def get_today_games(selected_date=None):
             )
 
             games.append({
-                "Game Time": format_game_time(game.get("gameDate", "")),
+                "Game Time": format_game_time(game_date),
+                "Game Sort Time": game_date,
+                "Status Sort": game_status_sort_value(game_status),
                 "Game": f"{away_team} @ {home_team}",
                 "Recommendation": recommendation,
                 "Confidence": confidence,
@@ -1167,7 +1194,7 @@ def get_today_games(selected_date=None):
                 "Home Back-to-Back Arms": home_bullpen_data["Back-to-Back Arms"],
 
                 "Agent Notes": summary,
-                "Status": game["status"]["detailedState"],
+                "Status": game_status,
             })
 
     return pd.DataFrame(games)
