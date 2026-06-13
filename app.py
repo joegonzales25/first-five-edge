@@ -1,9 +1,11 @@
 import streamlit as st
 from datetime import date
 from html import escape
+import re
 from mlb_agent import get_today_games
 
-APP_VERSION = "2.2"
+APP_VERSION = "2.2.3"
+MODEL_CACHE_VERSION = "edge-confidence-v2"
 
 team_logo_map = {
     "Arizona Diamondbacks": "https://www.mlbstatic.com/team-logos/109.svg",
@@ -48,16 +50,28 @@ st.set_page_config(
 st.markdown("""
 <style>
 .game-card {
-    border-radius: 18px;
+    border-radius: 18px 18px 0 0;
     border: 1px solid #243244;
     border-left: 8px solid #0ea5e9;
     padding: 22px;
-    margin-bottom: 6px;
+    margin-bottom: 0;
     background:
         linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(17, 24, 39, 0.98)),
         #0f172a;
     color: #f8fafc;
     box-shadow: 0 18px 34px rgba(15, 23, 42, 0.22);
+    position: relative;
+}
+
+.game-card::after {
+    content: "";
+    position: absolute;
+    left: -8px;
+    right: 0;
+    bottom: -22px;
+    height: 22px;
+    background: #0f172a;
+    border-left: 8px solid #0ea5e9;
 }
 
 .badge {
@@ -234,24 +248,87 @@ st.markdown("""
     font-weight: 900;
     margin-top: 6px;
 }
+.top-looks {
+    background: linear-gradient(135deg, #064e3b, #0f766e);
+}
+.top-look-list {
+    display: grid;
+    gap: 14px;
+    margin-top: 14px;
+}
+.top-look-item {
+    display: grid;
+    grid-template-columns: 42px 1fr;
+    gap: 12px;
+    align-items: start;
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: rgba(15, 23, 42, 0.38);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.top-look-rank {
+    width: 34px;
+    height: 34px;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0f172a;
+    color: #a7f3d0;
+    font-weight: 900;
+}
+.top-look-title {
+    font-size: 18px;
+    font-weight: 900;
+    color: #ffffff;
+}
+.top-look-meta,
+.top-look-why {
+    margin-top: 4px;
+    color: #d1fae5;
+    font-size: 14px;
+}
+.top-look-link {
+    display: inline-block;
+    margin-top: 8px;
+    color: #bfdbfe;
+    font-weight: 900;
+    text-decoration: none;
+}
+.top-look-link:hover {
+    text-decoration: underline;
+}
 
 div[data-testid="stExpander"] {
-    margin-top: -4px;
-    margin-bottom: 18px;
+    margin-top: -22px;
+    margin-bottom: 22px;
+    position: relative;
+    z-index: 2;
+}
+
+div[data-testid="stHtml"]:has(.game-card) {
+    margin-bottom: -22px;
 }
 
 div[data-testid="stExpander"] details {
     border: 1px solid #243244;
-    border-radius: 14px;
+    border-top: 0;
+    border-left: 8px solid #0ea5e9;
+    border-radius: 0 0 18px 18px;
     overflow: hidden;
     background: #0f172a;
-    box-shadow: 0 16px 28px rgba(15, 23, 42, 0.16);
+    box-shadow: 0 18px 34px rgba(15, 23, 42, 0.22);
+}
+
+div[data-testid="stExpander"] details > summary {
+    min-height: 48px;
 }
 
 div[data-testid="stExpander"] summary {
     background: linear-gradient(90deg, #1e3a8a, #0f766e);
     color: #f8fafc;
     font-weight: 800;
+    border-top: 1px solid #334155;
 }
 
 div[data-testid="stExpander"] div[data-testid="stExpanderDetails"] {
@@ -466,25 +543,26 @@ def build_market_watch(row):
     )
 
     if both_bullpens_tired:
-        return "Over Watch", [
+        return "Scoring Environment Watch", [
             "Both bullpens fatigued",
             "Elevated late-game scoring risk",
         ]
 
     if both_bullpens_fresh and strong_starting_pitching:
-        return "Under Watch", [
+        return "Run Prevention Watch", [
             "Fresh bullpens",
             "Strong starting pitching",
         ]
 
     if starter_margin >= 8 and bullpen_margin < 6:
-        return "Live Betting Watch", [
-            "Strong starter edge",
-            "Weak bullpen edge",
+        return "In-Game Edge Watch", [
+            "Early starter edge detected",
+            "Bullpen edge remains uncertain",
+            "Recheck as pitch counts rise",
         ]
 
-    return "No Market Edge", [
-        "No meaningful market signal detected",
+    return "No Clear Edge", [
+        "No meaningful edge signal detected",
     ]
 
 
@@ -502,7 +580,7 @@ def render_market_watch(row):
 
     return f"""
     <div class="market-watch">
-        <div class="market-heading">📈 Market Watch</div>
+        <div class="market-heading">📈 Edge Watch</div>
         <div class="market-pick">{escape(market_pick)}</div>
         <div class="market-why">Why?</div>
         <div class="reason-stack">{reason_items}</div>
@@ -564,8 +642,145 @@ def render_key_factors(row):
     """
 
 
+def game_anchor(game_name):
+    slug = re.sub(r"[^a-z0-9]+", "-", str(game_name).lower()).strip("-")
+    return f"game-{slug}"
+
+
+def confidence_sort_value(confidence):
+    return {
+        "A+": 5,
+        "A": 4,
+        "B": 3,
+        "C": 2,
+        "D": 1,
+    }.get(str(confidence), 0)
+
+
+def game_matchup_label(game_name):
+    away_team, home_team = split_game_name(game_name)
+    return f"{away_team} at {home_team}"
+
+
+def top_look_link(row):
+    return f'<a class="top-look-link" href="#{game_anchor(row["Game"])}">Review game card</a>'
+
+
+def best_row(rows, confidence_column):
+    if rows.empty:
+        return None
+
+    ranked = rows.copy()
+    ranked["_confidence_rank"] = ranked[confidence_column].map(confidence_sort_value)
+    ranked = ranked.sort_values(
+        ["_confidence_rank", "Edge Score"],
+        ascending=False,
+        na_position="last",
+    )
+    return ranked.iloc[0]
+
+
+def build_top_looks(games):
+    looks = []
+
+    first_rows = games[
+        ~games["First Inning Pick"].apply(is_no_edge_pick)
+    ].copy()
+    first_row = best_row(first_rows, "First Inning Confidence")
+    if first_row is None:
+        looks.append({
+            "title": "1st Inning: No edge found",
+            "meta": "No qualified YRFI or NRFI look on this slate.",
+            "why": "",
+            "link": "",
+        })
+    else:
+        looks.append({
+            "title": f'1st Inning {first_row["First Inning Pick"]}: {game_matchup_label(first_row["Game"])} ({first_row["First Inning Confidence"]})',
+            "meta": f'Edge {first_row["Edge Score"]} • Confidence {first_row["First Inning Confidence"]}',
+            "why": str(first_row["Agent Notes"]).split(";")[0],
+            "link": top_look_link(first_row),
+        })
+
+    f5_rows = games[
+        ~games["F5 Pick"].apply(is_no_edge_pick)
+    ].copy()
+    f5_row = best_row(f5_rows, "F5 Confidence")
+    if f5_row is None:
+        looks.append({
+            "title": "First 5: No edge found",
+            "meta": "No qualified First 5 look on this slate.",
+            "why": "",
+            "link": "",
+        })
+    else:
+        looks.append({
+            "title": f'First 5 {f5_row["F5 Pick"]}: {game_matchup_label(f5_row["Game"])} ({f5_row["F5 Confidence"]})',
+            "meta": f'Edge {f5_row["Edge Score"]} • Confidence {f5_row["F5 Confidence"]}',
+            "why": str(f5_row["Agent Notes"]).split(";")[0],
+            "link": top_look_link(f5_row),
+        })
+
+    bullpen_rows = games[
+        (games["Away Bullpen Fatigue"] >= 8)
+        | (games["Home Bullpen Fatigue"] >= 8)
+        | (~games["Bullpen Edge Winner"].apply(is_no_edge_pick))
+    ].copy()
+    if bullpen_rows.empty:
+        looks.append({
+            "title": "Bullpen Watch: No edges found",
+            "meta": "No elevated bullpen risk signal on this slate.",
+            "why": "",
+            "link": "",
+        })
+    else:
+        bullpen_rows["_fatigue_max"] = bullpen_rows[
+            ["Away Bullpen Fatigue", "Home Bullpen Fatigue"]
+        ].max(axis=1)
+        bullpen_row = bullpen_rows.sort_values(
+            ["_fatigue_max", "Edge Score"],
+            ascending=False,
+            na_position="last",
+        ).iloc[0]
+        looks.append({
+            "title": f'Bullpen Watch: {game_matchup_label(bullpen_row["Game"])}',
+            "meta": f'Edge {bullpen_row["Edge Score"]} • Confidence {bullpen_row["Confidence"]}',
+            "why": f'Bullpen fatigue {bullpen_row["Away Bullpen Status"]} / {bullpen_row["Home Bullpen Status"]}',
+            "link": top_look_link(bullpen_row),
+        })
+
+    return looks
+
+
+def render_top_looks(games):
+    items = []
+    for index, look in enumerate(build_top_looks(games), start=1):
+        why = f'<div class="top-look-why">Why: {escape(look["why"])}</div>' if look["why"] else ""
+        link = look["link"]
+        items.append(
+            '<div class="top-look-item">'
+            f'<div class="top-look-rank">{index}</div>'
+            '<div>'
+            f'<div class="top-look-title">{escape(look["title"])}</div>'
+            f'<div class="top-look-meta">{escape(look["meta"])}</div>'
+            f'{why}'
+            f'{link}'
+            '</div>'
+            '</div>'
+        )
+
+    return (
+        '<div class="model-favorite top-looks">'
+        '<div class="model-label">TOP LOOKS</div>'
+        '<div class="top-look-list">'
+        f'{"".join(items)}'
+        '</div>'
+        '</div>'
+    )
+
+
 @st.cache_data(ttl=900)
-def load_games(selected_date):
+def load_games(selected_date, model_cache_version):
     return get_today_games(selected_date.isoformat())
 
 
@@ -609,7 +824,7 @@ view = st.sidebar.radio(
 
 min_edge = st.sidebar.slider("Minimum Edge Score", 0, 100, 0)
 
-games = load_games(selected_date)
+games = load_games(selected_date, MODEL_CACHE_VERSION)
 
 if games.empty:
     st.warning("No MLB games found for selected date.")
@@ -640,11 +855,13 @@ st.subheader(f"Slate: {selected_date}")
 
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Games", len(games))
-c2.metric("Model Favorites", len(games[games["Recommendation"] != "Pass"]))
+c2.metric("Top Looks", 3)
 c3.metric("NRFI Looks", len(games[games["Lean"].isin(["NRFI", "Strong NRFI"])]))
 c4.metric("F5 Edges", len(games[games["F5 Edge"] != "F5 Pass"]))
 
 st.divider()
+
+st.html(render_top_looks(games))
 
 model_favorites = games[games["Recommendation"] != "Pass"].sort_values(
     "Edge Score",
@@ -652,7 +869,7 @@ model_favorites = games[games["Recommendation"] != "Pass"].sort_values(
     na_position="last"
 )
 
-if not model_favorites.empty:
+if False and not model_favorites.empty:
     top = model_favorites.iloc[0]
 
     st.html(f"""
@@ -678,6 +895,7 @@ else:
         logo_matchup = render_logo_matchup(away_team, home_team)
         market_watch = render_market_watch(row)
         key_factors = render_key_factors(row)
+        card_anchor = game_anchor(row["Game"])
         first_inning_pick = get_row_value(row, "First Inning Pick")
         first_inning_confidence = get_row_value(row, "First Inning Confidence")
         f5_pick = get_row_value(row, "F5 Pick")
@@ -743,7 +961,7 @@ else:
         )
 
         st.html(f"""
-        <div class="game-card">
+        <div id="{card_anchor}" class="game-card">
             {logo_matchup}
 
             <div class="game-title">{row["Game"]}</div>

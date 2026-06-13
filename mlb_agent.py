@@ -53,6 +53,32 @@ def safe_float(value):
         return None
 
 
+def calculate_factor_confidence(nrfi_signals, yrfi_signals):
+    dominant_signals = max(nrfi_signals, yrfi_signals)
+    opposing_signals = min(nrfi_signals, yrfi_signals)
+
+    if dominant_signals == 0:
+        return "D"
+
+    if opposing_signals == 0:
+        if dominant_signals >= 5:
+            return "A+"
+        if dominant_signals >= 4:
+            return "A"
+        if dominant_signals >= 3:
+            return "B"
+        if dominant_signals >= 2:
+            return "C"
+        return "D"
+
+    net_agreement = dominant_signals - opposing_signals
+    if dominant_signals >= 5 and net_agreement >= 3:
+        return "B"
+    if dominant_signals >= 3 and net_agreement >= 2:
+        return "C"
+    return "D"
+
+
 def get_team_offense_score(team_name):
     return TEAM_OFFENSE.get(team_name, 5)
 
@@ -233,36 +259,46 @@ def calculate_nrfi_score(
 
     score = 50
     reasons = []
+    nrfi_signals = 0
+    yrfi_signals = 0
 
     if avg_era <= 3.25:
         score += 5
         reasons.append("Strong starter ERA profile")
+        nrfi_signals += 1
     elif avg_era >= 5.00:
         score -= 5
         reasons.append("High starter ERA creates YRFI risk")
+        yrfi_signals += 1
 
     if avg_whip <= 1.10:
         score += 4
         reasons.append("Low WHIP limits early baserunners")
+        nrfi_signals += 1
     elif avg_whip >= 1.45:
         score -= 4
         reasons.append("High WHIP creates traffic risk")
+        yrfi_signals += 1
 
     combined_offense = away_offense + home_offense
     if combined_offense >= 17:
         score -= 4
         reasons.append("Elite offense profile increases YRFI risk")
+        yrfi_signals += 1
     elif combined_offense <= 8:
         score += 3
         reasons.append("Weak offensive matchup supports NRFI")
+        nrfi_signals += 1
 
     combined_first_inning = away_first_inning + home_first_inning
     if combined_first_inning >= 15:
         score -= 4
         reasons.append("High first-inning scoring risk")
+        yrfi_signals += 1
     elif combined_first_inning <= 8:
         score += 3
         reasons.append("Low first-inning scoring risk")
+        nrfi_signals += 1
 
     pitcher_yrfi_values = [
         value for value in [
@@ -275,9 +311,11 @@ def calculate_nrfi_score(
         if avg_pitcher_yrfi <= 18:
             score += 6
             reasons.append("Low pitcher YRFI rate supports NRFI")
+            nrfi_signals += 1
         elif avg_pitcher_yrfi >= 38:
             score -= 6
             reasons.append("High pitcher YRFI rate increases early scoring risk")
+            yrfi_signals += 1
 
     offense_yrfi_values = [
         value for value in [
@@ -290,9 +328,11 @@ def calculate_nrfi_score(
         if avg_offense_yrfi <= 20:
             score += 5
             reasons.append("Low offense YRFI rate supports NRFI")
+            nrfi_signals += 1
         elif avg_offense_yrfi >= 35:
             score -= 5
             reasons.append("High offense YRFI rate creates YRFI risk")
+            yrfi_signals += 1
 
     first_era_values = [
         value for value in [
@@ -305,9 +345,11 @@ def calculate_nrfi_score(
         if avg_first_era <= 3.00:
             score += 5
             reasons.append("Low first-inning ERA supports NRFI")
+            nrfi_signals += 1
         elif avg_first_era >= 6.00:
             score -= 5
             reasons.append("High first-inning ERA creates YRFI risk")
+            yrfi_signals += 1
 
     first_whip_values = [
         value for value in [
@@ -320,9 +362,11 @@ def calculate_nrfi_score(
         if avg_first_whip <= 1.00:
             score += 5
             reasons.append("Low first-inning WHIP limits traffic")
+            nrfi_signals += 1
         elif avg_first_whip >= 1.60:
             score -= 5
             reasons.append("High first-inning WHIP creates traffic risk")
+            yrfi_signals += 1
 
     first_run_values = [
         value for value in [
@@ -335,9 +379,11 @@ def calculate_nrfi_score(
         if avg_first_run <= 0.30:
             score += 5
             reasons.append("Low first-run average supports NRFI")
+            nrfi_signals += 1
         elif avg_first_run >= 0.60:
             score -= 5
             reasons.append("High first-run average creates YRFI risk")
+            yrfi_signals += 1
 
     score = max(20, min(90, score))
 
@@ -359,16 +405,7 @@ def calculate_nrfi_score(
     else:
         f5_edge = "F5 Pass"
 
-    if score >= 80:
-        confidence = "A+"
-    elif score >= 75:
-        confidence = "A"
-    elif score >= 65:
-        confidence = "B"
-    elif score >= 50:
-        confidence = "C"
-    else:
-        confidence = "D"
+    confidence = calculate_factor_confidence(nrfi_signals, yrfi_signals)
 
     summary = "; ".join(reasons) if reasons else "Neutral profile"
 
@@ -388,10 +425,10 @@ def generate_recommendation(lean, f5_edge, away_bullpen, home_bullpen):
         notes.append(f5_edge)
 
     if away_bullpen >= 8:
-        notes.append("Fade Away Bullpen")
+        notes.append("Away Bullpen Risk")
 
     if home_bullpen >= 8:
-        notes.append("Fade Home Bullpen")
+        notes.append("Home Bullpen Risk")
 
     return " / ".join(notes) if notes else "Pass"
 
@@ -401,13 +438,6 @@ def calculate_edge_score(nrfi_score, confidence, away_bullpen, home_bullpen):
         return None
 
     edge_score = nrfi_score
-
-    if confidence == "A+":
-        edge_score += 10
-    elif confidence == "A":
-        edge_score += 7
-    elif confidence == "B":
-        edge_score += 3
 
     if away_bullpen >= 8:
         edge_score += 2
