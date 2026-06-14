@@ -1,7 +1,7 @@
 import requests
 import pandas as pd
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 
@@ -85,6 +85,62 @@ def safe_float(value):
         return float(value)
     except Exception:
         return None
+
+
+def average_metric(records, metric_name):
+    values = []
+
+    for record in records.values():
+        value = safe_float(record.get(metric_name))
+        if value is not None:
+            values.append(value)
+
+    if not values:
+        return UNAVAILABLE
+
+    return round(sum(values) / len(values), 1)
+
+
+LEAGUE_YRFI_AVG = average_metric(FIRST_INNING_LIVE, "Offense YRFI %")
+
+
+def parse_baseball_innings(value):
+    if value in [None, "", UNAVAILABLE]:
+        return None
+
+    text = str(value)
+    whole, _, partial = text.partition(".")
+
+    try:
+        innings = int(whole)
+    except ValueError:
+        return None
+
+    if partial == "1":
+        innings += 1 / 3
+    elif partial == "2":
+        innings += 2 / 3
+    elif partial:
+        try:
+            innings += float(f"0.{partial}")
+        except ValueError:
+            return None
+
+    return innings
+
+
+def format_ip_per_start(innings_pitched, starts):
+    innings = parse_baseball_innings(innings_pitched)
+
+    try:
+        starts = int(starts)
+    except Exception:
+        return UNAVAILABLE
+
+    if innings is None or starts <= 0:
+        return UNAVAILABLE
+
+    return round(innings / starts, 1)
 
 
 def calculate_factor_confidence(nrfi_signals, yrfi_signals):
@@ -306,6 +362,76 @@ def build_full_game_result(linescore, status, away_team, home_team, compact=Fals
     return format_score_result(label, away_team, away_score, home_team, home_score)
 
 
+def parse_slate_date(slate_date):
+    try:
+        return datetime.strptime(str(slate_date), "%Y-%m-%d").date()
+    except ValueError:
+        return date.today()
+
+
+def format_recent_game_date(game_date):
+    try:
+        return datetime.fromisoformat(game_date.replace("Z", "+00:00")).strftime("%m/%d")
+    except Exception:
+        return UNAVAILABLE
+
+
+def get_team_last_5_results(team_id, team_name, slate_date):
+    if not team_id:
+        return []
+
+    end_date = parse_slate_date(slate_date) - timedelta(days=1)
+    start_date = end_date - timedelta(days=30)
+    url = (
+        "https://statsapi.mlb.com/api/v1/schedule"
+        f"?sportId=1&teamId={team_id}&startDate={start_date.isoformat()}"
+        f"&endDate={end_date.isoformat()}&hydrate=linescore"
+    )
+
+    try:
+        data = requests.get(url, timeout=15).json()
+    except Exception:
+        return []
+
+    results = []
+
+    for day in data.get("dates", []):
+        for game in day.get("games", []):
+            status = game.get("status", {}).get("detailedState", "")
+            if game_status_sort_value(status) != 2:
+                continue
+
+            teams = game.get("teams", {})
+            away = teams.get("away", {})
+            home = teams.get("home", {})
+            away_team = away.get("team", {})
+            home_team = home.get("team", {})
+            away_score = away.get("score")
+            home_score = home.get("score")
+
+            if away_score is None or home_score is None:
+                continue
+
+            is_away = away_team.get("id") == team_id
+            opponent = home_team.get("name") if is_away else away_team.get("name")
+            team_score = away_score if is_away else home_score
+            opponent_score = home_score if is_away else away_score
+            location = "@" if is_away else "vs"
+            opponent_label = team_abbreviation(opponent)
+
+            results.append({
+                "Team": team_name,
+                "Date": format_recent_game_date(game.get("gameDate", "")),
+                "Sort Date": game.get("gameDate", ""),
+                "Opponent": f"{location} {opponent_label}",
+                "Result": "W" if team_score > opponent_score else "L",
+                "Score": f"{team_score}-{opponent_score}",
+            })
+
+    results = sorted(results, key=lambda result: result.get("Sort Date", ""), reverse=True)
+    return results[:5]
+
+
 def get_pitcher_stats(pitcher_id):
     fallback = {
         "ERA": None,
@@ -313,6 +439,7 @@ def get_pitcher_stats(pitcher_id):
         "W": UNAVAILABLE,
         "L": UNAVAILABLE,
         "IP": UNAVAILABLE,
+        "GS": 0,
         "K": UNAVAILABLE,
     }
 
@@ -334,6 +461,7 @@ def get_pitcher_stats(pitcher_id):
             "W": stats.get("wins", UNAVAILABLE),
             "L": stats.get("losses", UNAVAILABLE),
             "IP": stats.get("inningsPitched", UNAVAILABLE),
+            "GS": stats.get("gamesStarted", 0),
             "K": stats.get("strikeOuts", UNAVAILABLE),
         }
 
@@ -1060,6 +1188,7 @@ def get_today_games(selected_date=None):
         return pd.DataFrame()
 
     team_records = get_team_records(season)
+    last_5_cache = {}
     games = []
 
     for day in data.get("dates", []):
@@ -1072,6 +1201,13 @@ def get_today_games(selected_date=None):
 
             away_team = away_side["team"]["name"]
             home_team = home_side["team"]["name"]
+            away_team_id = away_side["team"].get("id")
+            home_team_id = home_side["team"].get("id")
+
+            if away_team_id not in last_5_cache:
+                last_5_cache[away_team_id] = get_team_last_5_results(away_team_id, away_team, slate_date)
+            if home_team_id not in last_5_cache:
+                last_5_cache[home_team_id] = get_team_last_5_results(home_team_id, home_team, slate_date)
 
             away_record = format_team_record(
                 away_side,
@@ -1276,6 +1412,8 @@ def get_today_games(selected_date=None):
                 "Home WHIP": home_stats["WHIP"],
                 "Away IP": away_stats["IP"],
                 "Home IP": home_stats["IP"],
+                "Away IP/Start": format_ip_per_start(away_stats["IP"], away_stats["GS"]),
+                "Home IP/Start": format_ip_per_start(home_stats["IP"], home_stats["GS"]),
                 "Away K": away_stats["K"],
                 "Home K": home_stats["K"],
                 "Away Starter Edge": away_starter_edge,
@@ -1299,6 +1437,7 @@ def get_today_games(selected_date=None):
 
                 "Away Pitcher YRFI %": away_pitcher_first["Pitcher YRFI %"],
                 "Home Pitcher YRFI %": home_pitcher_first["Pitcher YRFI %"],
+                "League YRFI %": LEAGUE_YRFI_AVG,
                 "Away 1st ERA": away_pitcher_first["1st ERA"],
                 "Home 1st ERA": home_pitcher_first["1st ERA"],
                 "Away 1st WHIP": away_pitcher_first["1st WHIP"],
@@ -1310,6 +1449,8 @@ def get_today_games(selected_date=None):
                 "Home Bullpen Edge": home_bullpen_edge,
                 "Bullpen Edge Winner": bullpen_edge_winner,
                 "Bullpen Edge Margin": bullpen_edge_margin,
+                "Away Last 5 Results": last_5_cache.get(away_team_id, []),
+                "Home Last 5 Results": last_5_cache.get(home_team_id, []),
                 "Away Bullpen Status": bullpen_label(away_bullpen),
                 "Home Bullpen Status": bullpen_label(home_bullpen),
                 "Away Yesterday Relievers": away_bullpen_data["Yesterday Relievers"],

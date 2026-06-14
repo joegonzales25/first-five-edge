@@ -4,8 +4,8 @@ from html import escape
 import re
 from mlb_agent import get_today_games
 
-APP_VERSION = "2.2.5"
-MODEL_CACHE_VERSION = "edge-confidence-v2"
+APP_VERSION = "2.2.6"
+MODEL_CACHE_VERSION = "edge-confidence-v3"
 
 team_logo_map = {
     "Arizona Diamondbacks": "https://www.mlbstatic.com/team-logos/109.svg",
@@ -379,6 +379,52 @@ st.markdown("""
     text-decoration: underline;
 }
 
+.last-five-team {
+    margin: 10px 0 18px;
+}
+.last-five-team-label {
+    margin: 0 0 6px;
+    color: #f8fafc;
+    font-size: 16px;
+    font-weight: 900;
+}
+.last-five-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0;
+    font-size: 13px;
+}
+.last-five-table th,
+.last-five-table td {
+    border-bottom: 1px solid rgba(148, 163, 184, 0.28);
+    padding: 7px 8px;
+    text-align: left;
+    vertical-align: middle;
+}
+.last-five-table th {
+    color: #cbd5e1;
+    font-weight: 900;
+}
+.last-five-table td {
+    color: #e2e8f0;
+}
+.result-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    border-radius: 999px;
+    padding: 2px 8px;
+    color: white;
+    font-weight: 900;
+}
+.result-win {
+    background: #16a34a;
+}
+.result-loss {
+    background: #dc2626;
+}
+
 div[data-testid="stRadio"] [role="radiogroup"] {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -398,6 +444,7 @@ div[data-testid="stRadio"] [role="radiogroup"] label {
 }
 
 div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(1) {
+    grid-column: 1 / -1;
     border-color: #22c55e;
 }
 
@@ -415,6 +462,10 @@ div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(4) {
 
 div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(5) {
     border-color: #ef4444;
+}
+
+div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(6) {
+    border-color: #f59e0b;
 }
 
 div[data-testid="stRadio"] [role="radiogroup"] label p {
@@ -480,6 +531,10 @@ div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) {
 
     div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(5)::after {
         content: "F5";
+    }
+
+    div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(6)::after {
+        content: "Game";
     }
 }
 
@@ -735,6 +790,61 @@ def format_rank_metric(row, value_column, rank_columns, rank_scope):
     return f"{value} (#{rank} {rank_scope})"
 
 
+def format_yrfi_vs_league(row, value_column):
+    value = get_numeric_value(row, value_column)
+    league_avg = get_numeric_value(row, "League YRFI %")
+
+    if value is None:
+        return get_row_value(row, value_column, "N/A")
+
+    if league_avg is None:
+        return f"{value:.1f}%"
+
+    difference = value - league_avg
+    return f"{value:.1f}% ({difference:+.1f}%)"
+
+
+def render_last_five_results(row):
+    sections = []
+
+    for column_name in ["Away Last 5 Results", "Home Last 5 Results"]:
+        results = get_row_value(row, column_name, [])
+        if not isinstance(results, list) or not results:
+            continue
+
+        results = sorted(
+            results,
+            key=lambda result: result.get("Sort Date", ""),
+            reverse=True,
+        )
+        team_name = results[0].get("Team", "Team")
+        rows = []
+
+        for result in results:
+            outcome = str(result.get("Result", "")).upper()
+            badge_class = "result-win" if outcome == "W" else "result-loss"
+            rows.append(
+                "<tr>"
+                f"<td>{escape(str(result.get('Date', '')))}</td>"
+                f"<td>{escape(str(result.get('Opponent', '')))}</td>"
+                f'<td><span class="result-badge {badge_class}">{escape(outcome)}</span></td>'
+                f"<td>{escape(str(result.get('Score', '')))}</td>"
+                "</tr>"
+            )
+
+        sections.append(
+            '<div class="last-five-team">'
+            f'<div class="last-five-team-label">{escape(str(team_name))}</div>'
+            '<table class="last-five-table">'
+            "<thead><tr><th>Date</th><th>Opponent</th><th>Result</th><th>Score</th></tr></thead>"
+            f"<tbody>{''.join(rows)}</tbody>"
+            "</table>"
+            "</div>"
+        )
+
+    return "".join(sections) if sections else "<p>No recent completed games found.</p>"
+
+
 def get_numeric_value(row, column_name):
     value = get_row_value(row, column_name, "")
     try:
@@ -825,78 +935,154 @@ def format_edge_factor(row, winner_column, margin_column, label, away_team=None,
     return f"{label}: {winner} +{margin:g}"
 
 
+def agent_note_list(row):
+    return [
+        note.strip()
+        for note in str(get_row_value(row, "Agent Notes", "")).split(";")
+        if note.strip()
+    ]
+
+
+def summarize_notes(notes, fallback, limit=2):
+    if not notes:
+        return fallback
+
+    return "; ".join(notes[:limit])
+
+
+def edge_signal_text(row, winner_column, margin_column, label, away_team=None, home_team=None):
+    signal = format_edge_factor(row, winner_column, margin_column, label, away_team, home_team)
+    if signal.endswith("no clear edge"):
+        return f"{label}: no clear confirmation"
+
+    return signal
+
+
 def build_key_factors(row, view="first", away_team=None, home_team=None):
     factors = []
 
     if view == "first":
         pick = get_row_value(row, "First Inning Pick", "Pass")
         confidence = get_row_value(row, "First Inning Confidence", "Pass")
-        if is_no_edge_pick(pick):
-            factors.append("No clear first-inning edge")
+        notes = agent_note_list(row)
 
-        notes = [
-            note.strip()
-            for note in str(get_row_value(row, "Agent Notes", "")).split(";")
-            if note.strip()
-        ]
-        factors.extend(notes[:2])
+        if is_no_edge_pick(pick):
+            factors.append("Decision: no clean YRFI/NRFI edge")
+            factors.append(f"YRFI pressure: {summarize_notes(notes, 'some early-run warning signs')}")
+            factors.append("Offset: offense profile does not fully confirm the early scoring risk")
+            factors.append("Read: watch only, no model edge")
+        else:
+            pick_label = format_decision_pick(pick, confidence, away_team, home_team, market="first")
+            factors.append(f"Decision: {pick_label} edge")
+            factors.append(f"Main signal: {summarize_notes(notes, 'first-inning profile supports the pick')}")
+            factors.append("Confirmation: first-inning model threshold cleared")
+            factors.append(f"Read: model supports {pick_label}")
 
     elif view == "f5":
         pick = get_row_value(row, "F5 Pick", "Pass")
         confidence = get_row_value(row, "F5 Confidence", "Pass")
         if is_no_edge_pick(pick):
-            factors.append("No qualified First 5 edge")
-
-        factors.append(format_edge_factor(
-            row,
-            "Starter Edge Winner",
-            "Starter Edge Margin",
-            "Starter edge",
-            away_team,
-            home_team,
-        ))
-        factors.append(format_edge_factor(
-            row,
-            "Offensive Edge Winner",
-            "Offensive Edge Margin",
-            "Offensive edge",
-            away_team,
-            home_team,
-        ))
+            factors.append("Decision: no qualified First 5 edge")
+            factors.append(edge_signal_text(
+                row,
+                "Starter Edge Winner",
+                "Starter Edge Margin",
+                "Starter edge",
+                away_team,
+                home_team,
+            ))
+            factors.append(edge_signal_text(
+                row,
+                "Offensive Edge Winner",
+                "Offensive Edge Margin",
+                "Offensive edge",
+                away_team,
+                home_team,
+            ))
+            factors.append("Read: watch only, no model edge")
+        else:
+            pick_label = format_decision_pick(pick, confidence, away_team, home_team, market="f5")
+            factors.append(f"Decision: {pick_label} edge")
+            factors.append(edge_signal_text(
+                row,
+                "Starter Edge Winner",
+                "Starter Edge Margin",
+                "Starter edge",
+                away_team,
+                home_team,
+            ))
+            factors.append(edge_signal_text(
+                row,
+                "Offensive Edge Winner",
+                "Offensive Edge Margin",
+                "Offensive edge",
+                away_team,
+                home_team,
+            ))
+            factors.append("Read: first-five profile has enough model support")
 
     elif view == "full":
         pick = get_row_value(row, "Full Game Pick", "Pass")
         confidence = get_row_value(row, "Full Game Confidence", "Pass")
         if is_no_edge_pick(pick):
-            factors.append("No qualified full-game edge")
-
-        factors.append(format_edge_factor(
-            row,
-            "Starter Edge Winner",
-            "Starter Edge Margin",
-            "Starter edge",
-            away_team,
-            home_team,
-        ))
-        factors.append(format_edge_factor(
-            row,
-            "Offensive Edge Winner",
-            "Offensive Edge Margin",
-            "Offensive edge",
-            away_team,
-            home_team,
-        ))
-        factors.append(format_edge_factor(
-            row,
-            "Bullpen Edge Winner",
-            "Bullpen Edge Margin",
-            "Bullpen edge",
-            away_team,
-            home_team,
-        ))
+            factors.append("Decision: no qualified full-game edge")
+            factors.append(edge_signal_text(
+                row,
+                "Starter Edge Winner",
+                "Starter Edge Margin",
+                "Starter edge",
+                away_team,
+                home_team,
+            ))
+            factors.append(edge_signal_text(
+                row,
+                "Offensive Edge Winner",
+                "Offensive Edge Margin",
+                "Offensive edge",
+                away_team,
+                home_team,
+            ))
+            factors.append("Read: full-game signals do not align enough")
+        else:
+            pick_label = format_decision_pick(pick, confidence, away_team, home_team, market="full_game")
+            starter_signal = edge_signal_text(
+                row,
+                "Starter Edge Winner",
+                "Starter Edge Margin",
+                "Starter edge",
+                away_team,
+                home_team,
+            )
+            offensive_signal = edge_signal_text(
+                row,
+                "Offensive Edge Winner",
+                "Offensive Edge Margin",
+                "Offensive edge",
+                away_team,
+                home_team,
+            )
+            bullpen_signal = edge_signal_text(
+                row,
+                "Bullpen Edge Winner",
+                "Bullpen Edge Margin",
+                "Bullpen edge",
+                away_team,
+                home_team,
+            )
+            secondary_signals = [
+                signal for signal in [offensive_signal, bullpen_signal]
+                if not signal.endswith("no clear confirmation")
+            ]
+            factors.append(f"Decision: {pick_label} edge")
+            factors.append(starter_signal)
+            if secondary_signals:
+                factors.append(f"Secondary signals: {'; '.join(secondary_signals[:2])}")
+            else:
+                factors.append("Secondary signals: no clear confirmation")
+            factors.append("Read: full-game profile has enough model support")
 
     if not factors:
-        factors.append("No major model imbalance detected")
+        factors.append("Decision: no major model imbalance detected")
 
     return factors[:4]
 
@@ -1148,15 +1334,21 @@ games = games.copy()
 games["Edge Score"] = games["Edge Score"].fillna(0)
 
 top_look_game_names = top_look_games(games)
-nrfi_count = len(games[games["Lean"].isin(["NRFI", "Strong NRFI"])])
-yrfi_count = len(games[games["Lean"].isin(["YRFI", "Strong YRFI"])])
+first_inning_pick_text = games["First Inning Pick"].fillna("").astype(str)
+nrfi_mask = first_inning_pick_text.str.contains("NRFI", case=False, na=False)
+yrfi_mask = first_inning_pick_text.str.contains("YRFI", case=False, na=False)
+game_mask = ~games["Full Game Pick"].apply(is_no_edge_pick)
+nrfi_count = int(nrfi_mask.sum())
+yrfi_count = int(yrfi_mask.sum())
 f5_count = len(games[games["F5 Edge"] != "F5 Pass"])
+game_count = int(game_mask.sum())
 filter_labels = {
     "All Games": f"All\n{len(games)}",
     "Top Looks": f"Top\n{len(top_look_game_names)}",
     "NRFI": f"NRFI\n{nrfi_count}",
     "YRFI": f"YRFI\n{yrfi_count}",
     "F5": f"F5\n{f5_count}",
+    "Game": f"Game\n{game_count}",
 }
 
 selected_filter_label = st.radio(
@@ -1176,11 +1368,13 @@ filtered = games.copy()
 if selected_filter == "Top Looks":
     filtered = filtered[filtered["Game"].isin(top_look_game_names)]
 elif selected_filter == "NRFI":
-    filtered = filtered[filtered["Lean"].isin(["NRFI", "Strong NRFI"])]
+    filtered = filtered[nrfi_mask]
 elif selected_filter == "YRFI":
-    filtered = filtered[filtered["Lean"].isin(["YRFI", "Strong YRFI"])]
+    filtered = filtered[yrfi_mask]
 elif selected_filter == "F5":
     filtered = filtered[filtered["F5 Edge"] != "F5 Pass"]
+elif selected_filter == "Game":
+    filtered = filtered[game_mask]
 
 filtered = filtered.sort_values(
     ["Status Sort", "Game Sort Time"],
@@ -1268,50 +1462,10 @@ else:
             home_team,
             market="full_game",
         )
-        away_pitcher_yrfi_display = format_rank_metric(
-            row,
-            "Away Pitcher YRFI %",
-            [
-                "Away Pitcher YRFI Rank",
-                "Away Pitcher YRFI % Rank",
-                "Away Pitcher YRFI SP Rank",
-                "Away Pitcher YRFI % SP Rank",
-            ],
-            "SP",
-        )
-        home_pitcher_yrfi_display = format_rank_metric(
-            row,
-            "Home Pitcher YRFI %",
-            [
-                "Home Pitcher YRFI Rank",
-                "Home Pitcher YRFI % Rank",
-                "Home Pitcher YRFI SP Rank",
-                "Home Pitcher YRFI % SP Rank",
-            ],
-            "SP",
-        )
-        away_offense_yrfi_display = format_rank_metric(
-            row,
-            "Away Offense YRFI %",
-            [
-                "Away Offense YRFI Rank",
-                "Away Offense YRFI % Rank",
-                "Away Offense YRFI MLB Rank",
-                "Away Offense YRFI % MLB Rank",
-            ],
-            "MLB",
-        )
-        home_offense_yrfi_display = format_rank_metric(
-            row,
-            "Home Offense YRFI %",
-            [
-                "Home Offense YRFI Rank",
-                "Home Offense YRFI % Rank",
-                "Home Offense YRFI MLB Rank",
-                "Home Offense YRFI % MLB Rank",
-            ],
-            "MLB",
-        )
+        away_pitcher_yrfi_display = format_yrfi_vs_league(row, "Away Pitcher YRFI %")
+        home_pitcher_yrfi_display = format_yrfi_vs_league(row, "Home Pitcher YRFI %")
+        away_offense_yrfi_display = format_yrfi_vs_league(row, "Away Offense YRFI %")
+        home_offense_yrfi_display = format_yrfi_vs_league(row, "Home Offense YRFI %")
         starter_edge_winner = replace_home_away(
             get_row_value(row, "Starter Edge Winner", "Pass"),
             away_team,
@@ -1391,11 +1545,12 @@ else:
             |---|---|---|
             | Pitcher | {row["Away Pitcher"]} | {row["Home Pitcher"]} |
             | Record | {row["Away Pitcher Record"]} | {row["Home Pitcher Record"]} |
+            | IP/Start | {get_row_value(row, "Away IP/Start", "N/A")} | {get_row_value(row, "Home IP/Start", "N/A")} |
             | IP | {row["Away IP"]} | {row["Home IP"]} |
             | K | {row["Away K"]} | {row["Home K"]} |
             | ERA | {row["Away ERA"]} | {row["Home ERA"]} |
             | WHIP | {row["Away WHIP"]} | {row["Home WHIP"]} |
-            | Pitcher YRFI % | {away_pitcher_yrfi_display} | {home_pitcher_yrfi_display} |
+            | YRFI% vs Lg Avg | {away_pitcher_yrfi_display} | {home_pitcher_yrfi_display} |
             """)
 
             st.markdown("---")
@@ -1405,7 +1560,7 @@ else:
             |---|---|---|
             | Record | {row["Away Record"]} | {row["Home Record"]} |
             | Runs Per Game | {get_row_value(row, "Away Runs Per Game", "N/A")} | {get_row_value(row, "Home Runs Per Game", "N/A")} |
-            | Offense YRFI % | {away_offense_yrfi_display} | {home_offense_yrfi_display} |
+            | YRFI% vs Lg Avg | {away_offense_yrfi_display} | {home_offense_yrfi_display} |
             | First-Inning Run Avg | {get_row_value(row, "Away 1st Run Avg", "N/A")} | {get_row_value(row, "Home 1st Run Avg", "N/A")} |
             """)
 
@@ -1421,6 +1576,10 @@ else:
             | 3-Day Relievers Used | {row["Away 3 Day Relievers"]} | {row["Home 3 Day Relievers"]} |
             | Back-to-Back Arms | {row["Away Back-to-Back Arms"]} | {row["Home Back-to-Back Arms"]} |
             """)
+
+            st.markdown("---")
+            st.markdown("### Last 5 Game Results")
+            st.html(render_last_five_results(row))
 
 st.divider()
 
