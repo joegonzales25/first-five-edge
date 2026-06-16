@@ -253,11 +253,14 @@ def format_game_time(raw_time, timezone_name="America/New_York"):
         return raw_time
 
     try:
-        display_dt = utc_dt.astimezone(ZoneInfo(timezone_name))
+        display_tz = ZoneInfo(timezone_name)
     except Exception:
-        display_dt = utc_dt.astimezone(ZoneInfo("America/New_York"))
+        display_tz = ZoneInfo("America/New_York")
 
-    return display_dt.strftime("%I:%M %p ET").lstrip("0")
+    display_dt = utc_dt.astimezone(display_tz)
+    timezone_label = display_dt.tzname() or "Local"
+
+    return f'{display_dt.strftime("%I:%M %p").lstrip("0")} {timezone_label}'
 
 
 def game_status_sort_value(status):
@@ -1053,6 +1056,29 @@ def confidence_from_margin(margin):
     return "Pass"
 
 
+def average_available(values):
+    available = [safe_float(value) for value in values]
+    available = [value for value in available if value is not None]
+
+    if not available:
+        return None
+
+    return sum(available) / len(available)
+
+
+def weighted_relative_impact(value, neutral, factor_weight, cap):
+    value = safe_float(value)
+    neutral = safe_float(neutral)
+
+    if value is None or neutral in [None, 0]:
+        return 0
+
+    return max(
+        -cap,
+        min(cap, round(((value - neutral) / neutral) * factor_weight, 1)),
+    )
+
+
 def calculate_first_inning_decision(
     away_pitcher_yrfi,
     home_pitcher_yrfi,
@@ -1064,37 +1090,56 @@ def calculate_first_inning_decision(
     home_first_whip,
     away_first_run_avg,
     home_first_run_avg,
+    league_yrfi=LEAGUE_YRFI_AVG,
 ):
     score = 50
+    league_yrfi = safe_float(league_yrfi) or 32
 
-    for away_value, home_value, neutral, weight, cap in [
-        (away_pitcher_yrfi, home_pitcher_yrfi, 32, 0.35, 12),
-        (away_offense_yrfi, home_offense_yrfi, 35, 0.25, 10),
-        (away_first_era, home_first_era, 3.75, 3, 10),
-        (away_first_whip, home_first_whip, 1.15, 16, 10),
-        (away_first_run_avg, home_first_run_avg, 0.45, 18, 10),
-    ]:
-        values = [safe_float(away_value), safe_float(home_value)]
-        available = [value for value in values if value is not None]
+    # Primary drivers: observed first-inning scoring and prevention outcomes.
+    score += weighted_relative_impact(
+        average_available([away_pitcher_yrfi, home_pitcher_yrfi]),
+        league_yrfi,
+        40,
+        16,
+    )
+    score += weighted_relative_impact(
+        average_available([away_offense_yrfi, home_offense_yrfi]),
+        league_yrfi,
+        35,
+        14,
+    )
 
-        if not available:
-            continue
+    # Supporting validation only.
+    score += weighted_relative_impact(
+        average_available([away_first_era, home_first_era]),
+        3.75,
+        10,
+        4,
+    )
+    score += weighted_relative_impact(
+        average_available([away_first_whip, home_first_whip]),
+        1.15,
+        10,
+        4,
+    )
+    score += weighted_relative_impact(
+        average_available([away_first_run_avg, home_first_run_avg]),
+        0.45,
+        5,
+        2,
+    )
 
-        avg_value = sum(available) / len(available)
-        impact = max(-cap, min(cap, round((avg_value - neutral) * weight, 1)))
-        score += impact
+    score = max(20, min(90, round(score, 1)))
 
     distance = abs(score - 50)
     confidence = confidence_from_margin(distance * 2)
 
-    if confidence == "Pass":
-        return "Pass", "Pass"
-    if score >= 56:
-        return "YRFI Yes", confidence
-    if score <= 44:
-        return "NRFI Yes", confidence
+    if score >= 58 and confidence != "Pass":
+        return "YRFI", confidence, score
+    if score <= 42 and confidence != "Pass":
+        return "NRFI", confidence, score
 
-    return "Pass", "Pass"
+    return "No Edge", "No Edge", score
 
 
 def calculate_f5_decision(
@@ -1102,36 +1147,50 @@ def calculate_f5_decision(
     starter_margin,
     offensive_winner,
     offensive_margin,
+    away_team,
+    home_team,
 ):
     starter_margin = safe_float(starter_margin) or 0
     offensive_margin = safe_float(offensive_margin) or 0
+    pick_side = None
+    margin = 0
+
+    def is_no_edge_winner(winner):
+        return winner in ["Even", "No Edge", "Pass", None, ""]
+
+    def team_for_side(side):
+        if side == "Away":
+            return away_team
+        if side == "Home":
+            return home_team
+        return "No Edge"
 
     if starter_winner == offensive_winner and starter_winner in ["Away", "Home"]:
-        margin = starter_margin + offensive_margin
-        confidence = confidence_from_margin(margin)
+        pick_side = starter_winner
+        margin = round((starter_margin * 0.60) + (offensive_margin * 0.40), 1)
+    elif starter_winner in ["Away", "Home"] and is_no_edge_winner(offensive_winner):
+        if starter_margin >= 12:
+            pick_side = starter_winner
+            margin = starter_margin
+    elif offensive_winner in ["Away", "Home"] and is_no_edge_winner(starter_winner):
+        if offensive_margin >= 16:
+            pick_side = offensive_winner
+            margin = offensive_margin
+    elif starter_winner in ["Away", "Home"] and offensive_winner in ["Away", "Home"]:
+        if starter_margin >= 20 and offensive_margin < 7:
+            pick_side = starter_winner
+            margin = starter_margin
+        elif offensive_margin >= 20 and starter_margin < 7:
+            pick_side = offensive_winner
+            margin = offensive_margin
 
-        if confidence == "Pass":
-            return "Pass", "Pass"
+    margin = round(max(0, margin), 1)
+    confidence = confidence_from_margin(margin)
 
-        return f"{starter_winner} F5", confidence
+    if pick_side is None or confidence == "Pass":
+        return "No Edge", "No Edge", margin
 
-    if starter_winner in ["Away", "Home"] and offensive_winner == "Even":
-        confidence = confidence_from_margin(starter_margin)
-
-        if confidence == "Pass":
-            return "Pass", "Pass"
-
-        return f"{starter_winner} F5", confidence
-
-    if offensive_winner in ["Away", "Home"] and starter_winner == "Even":
-        confidence = confidence_from_margin(offensive_margin)
-
-        if confidence == "Pass":
-            return "Pass", "Pass"
-
-        return f"{offensive_winner} F5", confidence
-
-    return "Pass", "Pass"
+    return team_for_side(pick_side), confidence, margin
 
 
 def calculate_full_game_decision(
@@ -1141,39 +1200,65 @@ def calculate_full_game_decision(
     offensive_margin,
     bullpen_winner,
     bullpen_margin,
+    away_starter_edge,
+    home_starter_edge,
+    away_offensive_edge,
+    home_offensive_edge,
+    away_bullpen_edge,
+    home_bullpen_edge,
+    away_team,
+    home_team,
 ):
-    away_score = 0
-    home_score = 0
-    agreement = {"Away": 0, "Home": 0}
+    away_starter_edge = safe_float(away_starter_edge) or 50
+    home_starter_edge = safe_float(home_starter_edge) or 50
+    away_offensive_edge = safe_float(away_offensive_edge) or 50
+    home_offensive_edge = safe_float(home_offensive_edge) or 50
+    away_bullpen_edge = safe_float(away_bullpen_edge) or 50
+    home_bullpen_edge = safe_float(home_bullpen_edge) or 50
 
-    for winner, margin in [
-        (starter_winner, starter_margin),
-        (offensive_winner, offensive_margin),
-        (bullpen_winner, bullpen_margin),
-    ]:
-        margin = safe_float(margin) or 0
+    away_score = round(
+        (away_starter_edge * 0.35)
+        + (away_offensive_edge * 0.30)
+        + (away_bullpen_edge * 0.30),
+        1,
+    )
+    home_score = round(
+        (home_starter_edge * 0.35)
+        + (home_offensive_edge * 0.30)
+        + (home_bullpen_edge * 0.30),
+        1,
+    )
 
-        if winner == "Away":
-            away_score += margin
-            agreement["Away"] += 1
-        elif winner == "Home":
-            home_score += margin
-            agreement["Home"] += 1
+    if away_score > home_score:
+        winner = "Away"
+        winner_name = away_team
+        margin = round(away_score - home_score, 1)
+    elif home_score > away_score:
+        winner = "Home"
+        winner_name = home_team
+        margin = round(home_score - away_score, 1)
+    else:
+        return "No Edge", "No Edge", 0, 0, "No Edge"
 
-    margin = round(abs(away_score - home_score), 1)
+    agreement = sum(
+        1
+        for pillar_winner in [starter_winner, offensive_winner, bullpen_winner]
+        if pillar_winner == winner
+    )
+    edge_label = f"{winner_name} +{margin:g}"
     confidence = confidence_from_margin(margin)
 
     if confidence == "Pass":
-        return "Pass", "Pass"
-    if away_score > home_score and agreement["Away"] >= 2:
-        return "Away Full Game", confidence
-    if home_score > away_score and agreement["Home"] >= 2:
-        return "Home Full Game", confidence
+        return "No Edge", "No Edge", margin, agreement, edge_label
+    if agreement >= 2:
+        return winner_name, confidence, margin, agreement, edge_label
+    if agreement == 1 and margin >= 20:
+        return winner_name, confidence, margin, agreement, edge_label
 
-    return "Pass", "Pass"
+    return "No Edge", "No Edge", margin, agreement, edge_label
 
 
-def get_today_games(selected_date=None):
+def get_today_games(selected_date=None, timezone_name="America/New_York"):
     slate_date = selected_date or date.today().isoformat()
     season = int(str(slate_date)[0:4])
 
@@ -1344,7 +1429,7 @@ def get_today_games(selected_date=None):
                 home_bullpen_data["Back-to-Back Arms"],
             )
 
-            first_inning_pick, first_inning_confidence = calculate_first_inning_decision(
+            first_inning_pick, first_inning_confidence, first_inning_score = calculate_first_inning_decision(
                 away_pitcher_first["Pitcher YRFI %"],
                 home_pitcher_first["Pitcher YRFI %"],
                 away_first_live["Offense YRFI %"],
@@ -1355,26 +1440,43 @@ def get_today_games(selected_date=None):
                 home_pitcher_first["1st WHIP"],
                 away_first_live["1st Run Avg"],
                 home_first_live["1st Run Avg"],
+                LEAGUE_YRFI_AVG,
             )
 
-            f5_pick, f5_confidence = calculate_f5_decision(
+            f5_pick, f5_confidence, f5_score = calculate_f5_decision(
                 starter_edge_winner,
                 starter_edge_margin,
                 offensive_edge_winner,
                 offensive_edge_margin,
+                away_team,
+                home_team,
             )
 
-            full_game_pick, full_game_confidence = calculate_full_game_decision(
+            (
+                full_game_pick,
+                full_game_confidence,
+                full_game_score,
+                full_game_agreement,
+                full_game_edge,
+            ) = calculate_full_game_decision(
                 starter_edge_winner,
                 starter_edge_margin,
                 offensive_edge_winner,
                 offensive_edge_margin,
                 bullpen_edge_winner,
                 bullpen_edge_margin,
+                away_starter_edge,
+                home_starter_edge,
+                away_offensive_edge,
+                home_offensive_edge,
+                away_bullpen_edge,
+                home_bullpen_edge,
+                away_team,
+                home_team,
             )
 
             games.append({
-                "Game Time": format_game_time(game_date),
+                "Game Time": format_game_time(game_date, timezone_name),
                 "Game Sort Time": game_date,
                 "Status Sort": game_status_sort_value(game_status),
                 "First Inning Result": build_first_inning_result(linescore, game_status),
@@ -1392,10 +1494,15 @@ def get_today_games(selected_date=None):
                 "F5 Edge": f5_edge,
                 "First Inning Pick": first_inning_pick,
                 "First Inning Confidence": first_inning_confidence,
+                "First Inning Score": first_inning_score,
                 "F5 Pick": f5_pick,
                 "F5 Confidence": f5_confidence,
+                "F5 Score": f5_score,
                 "Full Game Pick": full_game_pick,
                 "Full Game Confidence": full_game_confidence,
+                "Full Game Score": full_game_score,
+                "Full Game Agreement": full_game_agreement,
+                "Full Game Edge": full_game_edge,
 
                 "Away Record": away_record,
                 "Home Record": home_record,
