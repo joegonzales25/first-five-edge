@@ -4,8 +4,12 @@ from html import escape
 import re
 from zoneinfo import ZoneInfo
 from mlb_agent import get_today_games
+from model_history import (
+    load_performance_summary,
+    record_model_history,
+)
 
-APP_VERSION = "2.2.6"
+APP_VERSION = "2.2.7"
 MODEL_CACHE_VERSION = "edge-v2-local-time-v1"
 FALLBACK_TIMEZONE = "America/New_York"
 
@@ -420,6 +424,41 @@ st.markdown("""
     text-decoration: underline;
 }
 
+.performance-results {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+    margin-top: 14px;
+}
+.performance-card {
+    border-radius: 16px;
+    padding: 18px;
+    background: rgba(15, 23, 42, 0.46);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+}
+.performance-market {
+    color: #bfdbfe;
+    font-weight: 900;
+    font-size: 16px;
+}
+.performance-hit-rate {
+    margin-top: 8px;
+    color: #ffffff;
+    font-size: 36px;
+    font-weight: 950;
+    line-height: 1;
+}
+.performance-record {
+    margin-top: 8px;
+    color: #d1fae5;
+    font-weight: 800;
+}
+.performance-meta {
+    margin-top: 4px;
+    color: #cbd5e1;
+    font-size: 13px;
+}
+
 .last-five-team {
     margin: 10px 0 18px;
 }
@@ -468,7 +507,7 @@ st.markdown("""
 
 div[data-testid="stRadio"] [role="radiogroup"] {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 12px;
 }
 
@@ -509,6 +548,10 @@ div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(6) {
     border-color: #f59e0b;
 }
 
+div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(7) {
+    border-color: #14b8a6;
+}
+
 div[data-testid="stRadio"] [role="radiogroup"] label p {
     color: #f8fafc;
     font-weight: 900;
@@ -524,8 +567,12 @@ div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) {
 
 @media (max-width: 640px) {
     div[data-testid="stRadio"] [role="radiogroup"] {
-        grid-template-columns: repeat(5, minmax(48px, 1fr));
+        grid-template-columns: repeat(6, minmax(44px, 1fr));
         gap: 6px;
+    }
+
+    .performance-results {
+        grid-template-columns: 1fr;
     }
 
     div[data-testid="stRadio"] [role="radiogroup"] label {
@@ -576,6 +623,10 @@ div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) {
 
     div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(6)::after {
         content: "Game";
+    }
+
+    div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(7)::after {
+        content: "Perf";
     }
 }
 
@@ -1335,6 +1386,154 @@ def render_top_looks(games):
     )
 
 
+def performance_hit_rate(row):
+    completed = (row.get("hits") or 0) + (row.get("misses") or 0) + (row.get("pushes") or 0)
+    if completed == 0:
+        return "N/A"
+
+    return f"{((row.get('hits') or 0) / completed) * 100:.0f}%"
+
+
+def render_model_performance_legacy_unused():
+    summary_cols = []
+    for index, row in enumerate(summary_rows):
+        completed = (row.get("hits") or 0) + (row.get("misses") or 0) + (row.get("pushes") or 0)
+        pending = row.get("pending") or 0
+        record = f"{row.get('hits') or 0}-{row.get('misses') or 0}"
+        if row.get("pushes"):
+            record = f"{record}-{row.get('pushes')}"
+        with summary_cols[index]:
+            st.metric(
+                row["market"],
+                performance_hit_rate(row),
+                f"{record} • {pending} pending",
+            )
+            st.caption(f"{completed} completed")
+
+    if not detail_rows:
+        st.info("No detailed rows match the selected filters.")
+        return
+
+    detail_df = pd.DataFrame(detail_rows)
+    detail_df = detail_df.rename(columns={
+        "slate_date": "Slate",
+        "market": "Market",
+        "game": "Game",
+        "pick": "Pick",
+        "confidence": "Confidence",
+        "score": "Score",
+        "result": "Result",
+        "outcome": "Outcome",
+        "status": "Status",
+        "created_at": "Snapshot",
+        "updated_at": "Updated",
+    })
+    st.dataframe(
+        detail_df[
+            [
+                "Slate",
+                "Market",
+                "Game",
+                "Pick",
+                "Confidence",
+                "Score",
+                "Result",
+                "Outcome",
+                "Status",
+            ]
+        ],
+        hide_index=True,
+        use_container_width=True,
+    )
+
+
+def render_model_performance(model_version, slate_date):
+    st.markdown("### Model Performance")
+
+    filter_cols = st.columns([1, 1, 1])
+    with filter_cols[0]:
+        market_filter = st.selectbox(
+            "Market",
+            ["All", "1st Inning", "First 5", "Full Game"],
+            key="performance_market_filter",
+        )
+    with filter_cols[1]:
+        window_filter = st.selectbox(
+            "Day(s)",
+            ["Today", "Yesterday", "Last 7", "Last 30", "All"],
+            key="performance_window_filter",
+        )
+    with filter_cols[2]:
+        confidence_filter = st.selectbox(
+            "Confidence",
+            ["All", "A+", "A", "B", "C"],
+            key="performance_confidence_filter",
+        )
+
+    day_filters = {
+        "Today": {"exact_date": slate_date, "label": "Today"},
+        "Yesterday": {
+            "exact_date": slate_date - timedelta(days=1),
+            "label": "Yesterday",
+        },
+        "Last 7": 7,
+        "Last 30": 30,
+        "All": {"days": None, "exact_date": None, "label": "All history"},
+    }[window_filter]
+    if isinstance(day_filters, dict):
+        days = day_filters.get("days")
+        exact_date = day_filters.get("exact_date")
+        day_label = day_filters["label"]
+    else:
+        days = day_filters
+        exact_date = None
+        day_label = f"{window_filter} days"
+
+    summary_rows = load_performance_summary(
+        model_version,
+        market=market_filter,
+        days=days,
+        confidence=confidence_filter,
+        exact_date=exact_date,
+    )
+
+    if not summary_rows:
+        st.info("No graded model history found yet.")
+        return
+
+    result_cards = []
+    for row in summary_rows:
+        completed = (row.get("hits") or 0) + (row.get("misses") or 0) + (row.get("pushes") or 0)
+        pending = row.get("pending") or 0
+        record = f"{row.get('hits') or 0}-{row.get('misses') or 0}"
+        if row.get("pushes"):
+            record = f"{record}-{row.get('pushes')}"
+        result_cards.append(
+            '<div class="performance-card">'
+            f'<div class="performance-market">{escape(row["market"])}</div>'
+            f'<div class="performance-hit-rate">{performance_hit_rate(row)}</div>'
+            f'<div class="performance-record">{escape(record)} record</div>'
+            f'<div class="performance-meta">{completed} completed &bull; {pending} pending</div>'
+            '</div>'
+        )
+
+    filter_text = day_label
+    if market_filter != "All":
+        filter_text += f" • {market_filter}"
+    if confidence_filter != "All":
+        filter_text += f" • {confidence_filter} confidence"
+
+    st.html(
+        '<div class="model-favorite top-looks">'
+        '<div class="model-label">MODEL PERFORMANCE</div>'
+        f'<div class="top-look-meta">{escape(filter_text)}</div>'
+        '<div class="performance-results">'
+        f'{"".join(result_cards)}'
+        '</div>'
+        '</div>'
+    )
+
+
 @st.cache_data(ttl=900)
 def load_games(selected_date, model_cache_version, display_timezone):
     return get_today_games(selected_date.isoformat(), display_timezone)
@@ -1397,6 +1596,7 @@ if games.empty:
     st.stop()
 
 games = games.copy()
+record_model_history(games, selected_date, APP_VERSION)
 
 top_look_game_names = top_look_games(games)
 first_inning_pick_text = games["First Inning Pick"].fillna("").astype(str)
@@ -1415,6 +1615,7 @@ filter_labels = {
     "YRFI": f"YRFI\n{yrfi_count}",
     "F5": f"F5\n{f5_count}",
     "Game": f"Game\n{game_count}",
+    "Performance": "Perf",
 }
 
 selected_filter_label = st.radio(
@@ -1448,7 +1649,20 @@ filtered = filtered.sort_values(
     na_position="last",
 )
 
+if selected_filter == "Performance":
+    performance_total = sum(
+        row.get("total") or 0
+        for row in load_performance_summary(APP_VERSION, exact_date=selected_date)
+    )
+    st.caption(f"{performance_total} results")
+else:
+    st.caption(f"{len(filtered)} of {len(games)}")
+
 st.divider()
+
+if selected_filter == "Performance":
+    render_model_performance(APP_VERSION, selected_date)
+    st.stop()
 
 if selected_filter in ["All Games", "Top Looks"]:
     st.html(render_top_looks(games))
