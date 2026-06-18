@@ -902,6 +902,230 @@ def get_numeric_value(row, column_name):
         return None
 
 
+def average_available_values(values):
+    numbers = [
+        value
+        for value in values
+        if value is not None
+    ]
+    if not numbers:
+        return None
+
+    return sum(numbers) / len(numbers)
+
+
+def direction_alignment(pick_direction, signal_direction):
+    if pick_direction is None or signal_direction is None:
+        return "Neutral"
+
+    return "Confirms" if pick_direction == signal_direction else "Warning"
+
+
+def team_alignment(pick, signal_team):
+    if is_no_edge_pick(pick) or signal_team in [None, "", "No Edge", "Pass", "Away", "Home"]:
+        return "Neutral"
+
+    return "Confirms" if str(pick) == str(signal_team) else "Warning"
+
+
+def signal_review_row(market, signal, data_read, alignment):
+    return {
+        "Market": market,
+        "Signal": signal,
+        "Read": data_read,
+        "Alignment": alignment,
+    }
+
+
+def first_inning_signal_review(row):
+    pick_direction = first_inning_signal_direction(row)
+    league = get_numeric_value(row, "League YRFI %")
+    rows = []
+
+    pitcher_yrfi = average_available_values([
+        get_numeric_value(row, "Away Pitcher YRFI %"),
+        get_numeric_value(row, "Home Pitcher YRFI %"),
+    ])
+    if pitcher_yrfi is not None and league is not None:
+        diff = pitcher_yrfi - league
+        signal_direction = "high" if diff >= 3 else "low" if diff <= -3 else None
+        rows.append(signal_review_row(
+            "1st Inning",
+            "Pitcher YRFI vs Lg Avg",
+            f"{pitcher_yrfi:.1f}% ({diff:+.1f}%)",
+            direction_alignment(pick_direction, signal_direction),
+        ))
+
+    offense_yrfi = average_available_values([
+        get_numeric_value(row, "Away Offense YRFI %"),
+        get_numeric_value(row, "Home Offense YRFI %"),
+    ])
+    if offense_yrfi is not None and league is not None:
+        diff = offense_yrfi - league
+        signal_direction = "high" if diff >= 3 else "low" if diff <= -3 else None
+        rows.append(signal_review_row(
+            "1st Inning",
+            "Offense YRFI vs Lg Avg",
+            f"{offense_yrfi:.1f}% ({diff:+.1f}%)",
+            direction_alignment(pick_direction, signal_direction),
+        ))
+
+    first_era = average_available_values([
+        get_numeric_value(row, "Away 1st ERA"),
+        get_numeric_value(row, "Home 1st ERA"),
+    ])
+    if first_era is not None:
+        signal_direction = "high" if first_era >= 5 else "low" if first_era <= 3.25 else None
+        rows.append(signal_review_row(
+            "1st Inning",
+            "1st Inning ERA",
+            f"{first_era:.2f}",
+            direction_alignment(pick_direction, signal_direction),
+        ))
+
+    first_whip = average_available_values([
+        get_numeric_value(row, "Away 1st WHIP"),
+        get_numeric_value(row, "Home 1st WHIP"),
+    ])
+    if first_whip is not None:
+        signal_direction = "high" if first_whip >= 1.45 else "low" if first_whip <= 1.10 else None
+        rows.append(signal_review_row(
+            "1st Inning",
+            "1st Inning WHIP",
+            f"{first_whip:.2f}",
+            direction_alignment(pick_direction, signal_direction),
+        ))
+
+    first_run_avg = average_available_values([
+        get_numeric_value(row, "Away 1st Run Avg"),
+        get_numeric_value(row, "Home 1st Run Avg"),
+    ])
+    if first_run_avg is not None:
+        signal_direction = "high" if first_run_avg >= 0.55 else "low" if first_run_avg <= 0.30 else None
+        rows.append(signal_review_row(
+            "1st Inning",
+            "Offense 1st Run Avg",
+            f"{first_run_avg:.2f}",
+            direction_alignment(pick_direction, signal_direction),
+        ))
+
+    return rows
+
+
+def edge_winner_team(row, winner_column, away_team, home_team):
+    winner = get_row_value(row, winner_column, "No Edge")
+    if winner == "Away":
+        return away_team
+    if winner == "Home":
+        return home_team
+    if winner in [away_team, home_team]:
+        return winner
+    return None
+
+
+def lower_metric_team(row, away_column, home_column, away_team, home_team, min_gap):
+    away_value = get_numeric_value(row, away_column)
+    home_value = get_numeric_value(row, home_column)
+    if away_value is None or home_value is None:
+        return None, "N/A"
+
+    gap = abs(away_value - home_value)
+    read = f"{away_value:g} / {home_value:g}"
+    if gap < min_gap:
+        return None, read
+
+    return (away_team if away_value < home_value else home_team), read
+
+
+def build_signal_review(row, away_team, home_team):
+    rows = first_inning_signal_review(row)
+
+    f5_pick = get_row_value(row, "F5 Pick", "No Edge")
+    starter_team = edge_winner_team(row, "Starter Edge Winner", away_team, home_team)
+    rows.append(signal_review_row(
+        "First 5",
+        "Starter Edge",
+        format_edge_factor(row, "Starter Edge Winner", "Starter Edge Margin", "Starter edge", away_team, home_team),
+        team_alignment(f5_pick, starter_team),
+    ))
+
+    offense_team = edge_winner_team(row, "Offensive Edge Winner", away_team, home_team)
+    rows.append(signal_review_row(
+        "First 5",
+        "Offensive Edge",
+        format_edge_factor(row, "Offensive Edge Winner", "Offensive Edge Margin", "Offensive edge", away_team, home_team),
+        team_alignment(f5_pick, offense_team),
+    ))
+
+    recent_team, recent_read = lower_metric_team(
+        row,
+        "Away Last 7 ERA",
+        "Home Last 7 ERA",
+        away_team,
+        home_team,
+        1.0,
+    )
+    rows.append(signal_review_row(
+        "First 5",
+        "Last 7 Starter ERA",
+        recent_read,
+        team_alignment(f5_pick, recent_team),
+    ))
+
+    full_pick = get_row_value(row, "Full Game Pick", "No Edge")
+    rows.append(signal_review_row(
+        "Full Game",
+        "Starter Edge",
+        format_edge_factor(row, "Starter Edge Winner", "Starter Edge Margin", "Starter edge", away_team, home_team),
+        team_alignment(full_pick, starter_team),
+    ))
+    rows.append(signal_review_row(
+        "Full Game",
+        "Offensive Edge",
+        format_edge_factor(row, "Offensive Edge Winner", "Offensive Edge Margin", "Offensive edge", away_team, home_team),
+        team_alignment(full_pick, offense_team),
+    ))
+
+    bullpen_team = edge_winner_team(row, "Bullpen Edge Winner", away_team, home_team)
+    rows.append(signal_review_row(
+        "Full Game",
+        "Bullpen Edge",
+        format_edge_factor(row, "Bullpen Edge Winner", "Bullpen Edge Margin", "Bullpen edge", away_team, home_team),
+        team_alignment(full_pick, bullpen_team),
+    ))
+
+    return rows
+
+
+def render_signal_review(row, away_team, home_team):
+    rows = build_signal_review(row, away_team, home_team)
+    if not rows:
+        return
+
+    counts = {
+        "Confirms": 0,
+        "Warning": 0,
+        "Neutral": 0,
+    }
+    for review_row in rows:
+        counts[review_row["Alignment"]] = counts.get(review_row["Alignment"], 0) + 1
+
+    st.markdown("### Signal Review")
+    st.caption(
+        f'{counts["Confirms"]} confirm • {counts["Warning"]} warning • '
+        f'{counts["Neutral"]} neutral'
+    )
+    st.markdown(
+        "| Market | Signal | Read | Alignment |\n"
+        "|---|---|---|---|\n"
+        + "\n".join(
+            f"| {review_row['Market']} | {review_row['Signal']} | "
+            f"{review_row['Read']} | {review_row['Alignment']} |"
+            for review_row in rows
+        )
+    )
+
+
 def signal_label(label, is_signal):
     text = str(label).replace("|", "\\|")
     if not is_signal:
@@ -1539,6 +1763,43 @@ def load_games(selected_date, model_cache_version, display_timezone):
     return get_today_games(selected_date.isoformat(), display_timezone)
 
 
+def apply_model_view(games, model_view):
+    if model_view != "Baseline 2.2.7":
+        return games
+
+    games = games.copy()
+    baseline_column_map = {
+        "First Inning Pick": "Baseline First Inning Pick",
+        "First Inning Confidence": "Baseline First Inning Confidence",
+        "First Inning Score": "Baseline First Inning Score",
+        "F5 Pick": "Baseline F5 Pick",
+        "F5 Confidence": "Baseline F5 Confidence",
+        "F5 Score": "Baseline F5 Score",
+        "Full Game Pick": "Baseline Full Game Pick",
+        "Full Game Confidence": "Baseline Full Game Confidence",
+        "Full Game Score": "Baseline Full Game Score",
+        "Full Game Agreement": "Baseline Full Game Agreement",
+        "Full Game Edge": "Baseline Full Game Edge",
+        "Away Starter Edge": "Baseline Away Starter Edge",
+        "Home Starter Edge": "Baseline Home Starter Edge",
+        "Starter Edge Winner": "Baseline Starter Edge Winner",
+        "Starter Edge Margin": "Baseline Starter Edge Margin",
+        "Away Pitcher YRFI %": "Baseline Away Pitcher YRFI %",
+        "Home Pitcher YRFI %": "Baseline Home Pitcher YRFI %",
+        "Away 1st ERA": "Baseline Away 1st ERA",
+        "Home 1st ERA": "Baseline Home 1st ERA",
+        "Away 1st WHIP": "Baseline Away 1st WHIP",
+        "Home 1st WHIP": "Baseline Home 1st WHIP",
+    }
+
+    for active_column, baseline_column in baseline_column_map.items():
+        if baseline_column in games.columns:
+            games[active_column] = games[baseline_column]
+
+    games["Model View"] = model_view
+    return games
+
+
 st.title("⚾ First Five Edge")
 
 display_timezone, timezone_detected = detect_browser_timezone()
@@ -1559,6 +1820,12 @@ selected_date = st.date_input(
     max_value=max_slate_date,
     format="MM/DD/YYYY",
     key="header_slate_date",
+)
+model_view = st.selectbox(
+    "Model View",
+    ["Proposed Model", "Baseline 2.2.7"],
+    index=0,
+    key="model_view_selector_v3",
 )
 timezone_label = "local" if timezone_detected else "Eastern fallback"
 st.sidebar.caption(f"Times shown in {display_timezone} ({timezone_label})")
@@ -1596,7 +1863,10 @@ if games.empty:
     st.stop()
 
 games = games.copy()
-record_model_history(games, selected_date, APP_VERSION)
+if model_view == "Proposed Model":
+    record_model_history(games, selected_date, APP_VERSION)
+games = apply_model_view(games, model_view)
+st.caption(f"Model view: {model_view}")
 
 top_look_game_names = top_look_games(games)
 first_inning_pick_text = games["First Inning Pick"].fillna("").astype(str)
@@ -1845,6 +2115,9 @@ else:
         """)
 
         with st.expander(f"🔍 Analysis: {row['Game']}"):
+            render_signal_review(row, away_team, home_team)
+
+            st.markdown("---")
             st.markdown("### Edge Breakdown")
 
             st.markdown("#### Starter Edge")
@@ -1892,9 +2165,24 @@ else:
             | {signal_label("Pitcher YRFI% vs Lg Avg", first_signal_active)} | {away_pitcher_yrfi_cell} | {home_pitcher_yrfi_cell} |
             | {signal_label("1st Inning ERA", first_signal_active)} | {away_first_era_cell} | {home_first_era_cell} |
             | {signal_label("1st Inning WHIP", first_signal_active)} | {away_first_whip_cell} | {home_first_whip_cell} |
+            | 1st Inning Source | {get_row_value(row, "Away 1st Split Source", "N/A")} | {get_row_value(row, "Home 1st Split Source", "N/A")} |
+            | 1st Inning Sample | {get_row_value(row, "Away 1st Games", "N/A")} G / {get_row_value(row, "Away 1st IP", "N/A")} IP | {get_row_value(row, "Home 1st Games", "N/A")} G / {get_row_value(row, "Home 1st IP", "N/A")} IP |
+            | 1st Inning R / ER | {get_row_value(row, "Away 1st R", "N/A")} / {get_row_value(row, "Away 1st ER", "N/A")} | {get_row_value(row, "Home 1st R", "N/A")} / {get_row_value(row, "Home 1st ER", "N/A")} |
+            | 1st Inning H / BB / HR | {get_row_value(row, "Away 1st H", "N/A")} / {get_row_value(row, "Away 1st BB", "N/A")} / {get_row_value(row, "Away 1st HR", "N/A")} | {get_row_value(row, "Home 1st H", "N/A")} / {get_row_value(row, "Home 1st BB", "N/A")} / {get_row_value(row, "Home 1st HR", "N/A")} |
             """)
             if first_signal_active:
                 st.caption("\\* - Edge Signal")
+
+            st.markdown("#### Recent Pitching Form")
+            st.markdown(f"""
+            | Metric | {away_team} Starter | {home_team} Starter |
+            |---|---|---|
+            | Last 7 ERA / WHIP | {get_row_value(row, "Away Last 7 ERA", "N/A")} / {get_row_value(row, "Away Last 7 WHIP", "N/A")} | {get_row_value(row, "Home Last 7 ERA", "N/A")} / {get_row_value(row, "Home Last 7 WHIP", "N/A")} |
+            | Last 7 K/BB / P-IP | {get_row_value(row, "Away Last 7 K/BB", "N/A")} / {get_row_value(row, "Away Last 7 P/IP", "N/A")} | {get_row_value(row, "Home Last 7 K/BB", "N/A")} / {get_row_value(row, "Home Last 7 P/IP", "N/A")} |
+            | Last 15 ERA / WHIP | {get_row_value(row, "Away Last 15 ERA", "N/A")} / {get_row_value(row, "Away Last 15 WHIP", "N/A")} | {get_row_value(row, "Home Last 15 ERA", "N/A")} / {get_row_value(row, "Home Last 15 WHIP", "N/A")} |
+            | Last 15 K/BB / P-IP | {get_row_value(row, "Away Last 15 K/BB", "N/A")} / {get_row_value(row, "Away Last 15 P/IP", "N/A")} | {get_row_value(row, "Home Last 15 K/BB", "N/A")} / {get_row_value(row, "Home Last 15 P/IP", "N/A")} |
+            | Last 30 OPS Allowed | {get_row_value(row, "Away Last 30 OPS", "N/A")} | {get_row_value(row, "Home Last 30 OPS", "N/A")} |
+            """)
 
             st.markdown("---")
             st.markdown("### Offensive Matchup")

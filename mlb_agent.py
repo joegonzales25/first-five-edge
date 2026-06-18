@@ -75,8 +75,12 @@ except Exception:
 
 
 try:
-    from pitcher_first_inning_stats import get_pitcher_first_inning_stats
+    from pitcher_first_inning_stats import (
+        estimate_pitcher_first_inning_stats,
+        get_pitcher_first_inning_stats,
+    )
 except Exception:
+    estimate_pitcher_first_inning_stats = None
     get_pitcher_first_inning_stats = None
 
 
@@ -189,6 +193,15 @@ def get_pitcher_first_stats(pitcher_id, season=None):
         "Pitcher YRFI %": UNAVAILABLE,
         "1st ERA": UNAVAILABLE,
         "1st WHIP": UNAVAILABLE,
+        "1st IP": UNAVAILABLE,
+        "1st Games": 0,
+        "1st R": UNAVAILABLE,
+        "1st ER": UNAVAILABLE,
+        "1st H": UNAVAILABLE,
+        "1st BB": UNAVAILABLE,
+        "1st HR": UNAVAILABLE,
+        "1st BF": UNAVAILABLE,
+        "1st Split Source": "Unavailable",
         "Starts": 0,
     }
 
@@ -199,6 +212,25 @@ def get_pitcher_first_stats(pitcher_id, season=None):
         return get_pitcher_first_inning_stats(pitcher_id, season)
     except Exception:
         return fallback
+
+
+def get_pitcher_first_baseline_stats(pitcher_id, season=None):
+    fallback = {
+        "Pitcher YRFI %": UNAVAILABLE,
+        "1st ERA": UNAVAILABLE,
+        "1st WHIP": UNAVAILABLE,
+        "Starts": 0,
+    }
+
+    if estimate_pitcher_first_inning_stats is None:
+        return fallback
+
+    try:
+        stats = estimate_pitcher_first_inning_stats(pitcher_id, season)
+    except Exception:
+        return fallback
+
+    return {**fallback, **stats}
 
 
 def get_bullpen_data(team_name):
@@ -444,6 +476,21 @@ def get_pitcher_stats(pitcher_id):
         "IP": UNAVAILABLE,
         "GS": 0,
         "K": UNAVAILABLE,
+        "Last 7 ERA": UNAVAILABLE,
+        "Last 7 WHIP": UNAVAILABLE,
+        "Last 7 K/BB": UNAVAILABLE,
+        "Last 7 P/IP": UNAVAILABLE,
+        "Last 7 OPS": UNAVAILABLE,
+        "Last 15 ERA": UNAVAILABLE,
+        "Last 15 WHIP": UNAVAILABLE,
+        "Last 15 K/BB": UNAVAILABLE,
+        "Last 15 P/IP": UNAVAILABLE,
+        "Last 15 OPS": UNAVAILABLE,
+        "Last 30 ERA": UNAVAILABLE,
+        "Last 30 WHIP": UNAVAILABLE,
+        "Last 30 K/BB": UNAVAILABLE,
+        "Last 30 P/IP": UNAVAILABLE,
+        "Last 30 OPS": UNAVAILABLE,
     }
 
     if not pitcher_id:
@@ -458,7 +505,7 @@ def get_pitcher_stats(pitcher_id):
         data = requests.get(url, timeout=10).json()
         stats = data["stats"][0]["splits"][0]["stat"]
 
-        return {
+        pitcher_stats = {
             "ERA": safe_float(stats.get("era")),
             "WHIP": safe_float(stats.get("whip")),
             "W": stats.get("wins", UNAVAILABLE),
@@ -467,9 +514,40 @@ def get_pitcher_stats(pitcher_id):
             "GS": stats.get("gamesStarted", 0),
             "K": stats.get("strikeOuts", UNAVAILABLE),
         }
+        return {**fallback, **pitcher_stats, **get_pitcher_recent_form(pitcher_id)}
 
     except Exception:
         return fallback
+
+
+def get_pitcher_recent_form(pitcher_id, season=None):
+    if not pitcher_id:
+        return {}
+
+    season = season or date.today().year
+    recent = {}
+
+    for games in [7, 15, 30]:
+        url = (
+            f"https://statsapi.mlb.com/api/v1/people/{pitcher_id}/stats"
+            f"?stats=lastXGames&group=pitching&season={season}&limit={games}"
+        )
+        try:
+            data = requests.get(url, timeout=10).json()
+            splits = data.get("stats", [])[0].get("splits", [])
+            stat = splits[0].get("stat", {}) if splits else {}
+        except Exception:
+            stat = {}
+
+        recent.update({
+            f"Last {games} ERA": stat.get("era", UNAVAILABLE),
+            f"Last {games} WHIP": stat.get("whip", UNAVAILABLE),
+            f"Last {games} K/BB": stat.get("strikeoutWalkRatio", UNAVAILABLE),
+            f"Last {games} P/IP": stat.get("pitchesPerInning", UNAVAILABLE),
+            f"Last {games} OPS": stat.get("ops", UNAVAILABLE),
+        })
+
+    return recent
 
 
 def get_team_records(season=None):
@@ -1342,6 +1420,15 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
                 season
             )
 
+            away_pitcher_first_baseline = get_pitcher_first_baseline_stats(
+                away_pitcher_id,
+                season,
+            )
+            home_pitcher_first_baseline = get_pitcher_first_baseline_stats(
+                home_pitcher_id,
+                season,
+            )
+
             nrfi_score, lean, summary, f5_edge, confidence = calculate_nrfi_score(
                 away_stats,
                 home_stats,
@@ -1412,6 +1499,28 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
             )
 
             (
+                baseline_away_starter_edge,
+                baseline_home_starter_edge,
+                baseline_starter_edge_winner,
+                baseline_starter_edge_margin,
+            ) = calculate_starter_edge(
+                away_stats["ERA"],
+                home_stats["ERA"],
+                away_stats["WHIP"],
+                home_stats["WHIP"],
+                away_stats["IP"],
+                home_stats["IP"],
+                away_stats["K"],
+                home_stats["K"],
+                away_pitcher_first_baseline["1st ERA"],
+                home_pitcher_first_baseline["1st ERA"],
+                away_pitcher_first_baseline["1st WHIP"],
+                home_pitcher_first_baseline["1st WHIP"],
+                away_pitcher_first_baseline["Pitcher YRFI %"],
+                home_pitcher_first_baseline["Pitcher YRFI %"],
+            )
+
+            (
                 away_bullpen_edge,
                 home_bullpen_edge,
                 bullpen_edge_winner,
@@ -1443,9 +1552,32 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
                 LEAGUE_YRFI_AVG,
             )
 
+            baseline_first_inning_pick, baseline_first_inning_confidence, baseline_first_inning_score = calculate_first_inning_decision(
+                away_pitcher_first_baseline["Pitcher YRFI %"],
+                home_pitcher_first_baseline["Pitcher YRFI %"],
+                away_first_live["Offense YRFI %"],
+                home_first_live["Offense YRFI %"],
+                away_pitcher_first_baseline["1st ERA"],
+                home_pitcher_first_baseline["1st ERA"],
+                away_pitcher_first_baseline["1st WHIP"],
+                home_pitcher_first_baseline["1st WHIP"],
+                away_first_live["1st Run Avg"],
+                home_first_live["1st Run Avg"],
+                LEAGUE_YRFI_AVG,
+            )
+
             f5_pick, f5_confidence, f5_score = calculate_f5_decision(
                 starter_edge_winner,
                 starter_edge_margin,
+                offensive_edge_winner,
+                offensive_edge_margin,
+                away_team,
+                home_team,
+            )
+
+            baseline_f5_pick, baseline_f5_confidence, baseline_f5_score = calculate_f5_decision(
+                baseline_starter_edge_winner,
+                baseline_starter_edge_margin,
                 offensive_edge_winner,
                 offensive_edge_margin,
                 away_team,
@@ -1467,6 +1599,29 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
                 bullpen_edge_margin,
                 away_starter_edge,
                 home_starter_edge,
+                away_offensive_edge,
+                home_offensive_edge,
+                away_bullpen_edge,
+                home_bullpen_edge,
+                away_team,
+                home_team,
+            )
+
+            (
+                baseline_full_game_pick,
+                baseline_full_game_confidence,
+                baseline_full_game_score,
+                baseline_full_game_agreement,
+                baseline_full_game_edge,
+            ) = calculate_full_game_decision(
+                baseline_starter_edge_winner,
+                baseline_starter_edge_margin,
+                offensive_edge_winner,
+                offensive_edge_margin,
+                bullpen_edge_winner,
+                bullpen_edge_margin,
+                baseline_away_starter_edge,
+                baseline_home_starter_edge,
                 away_offensive_edge,
                 home_offensive_edge,
                 away_bullpen_edge,
@@ -1503,6 +1658,27 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
                 "Full Game Score": full_game_score,
                 "Full Game Agreement": full_game_agreement,
                 "Full Game Edge": full_game_edge,
+                "Baseline First Inning Pick": baseline_first_inning_pick,
+                "Baseline First Inning Confidence": baseline_first_inning_confidence,
+                "Baseline First Inning Score": baseline_first_inning_score,
+                "Baseline F5 Pick": baseline_f5_pick,
+                "Baseline F5 Confidence": baseline_f5_confidence,
+                "Baseline F5 Score": baseline_f5_score,
+                "Baseline Full Game Pick": baseline_full_game_pick,
+                "Baseline Full Game Confidence": baseline_full_game_confidence,
+                "Baseline Full Game Score": baseline_full_game_score,
+                "Baseline Full Game Agreement": baseline_full_game_agreement,
+                "Baseline Full Game Edge": baseline_full_game_edge,
+                "Baseline Away Starter Edge": baseline_away_starter_edge,
+                "Baseline Home Starter Edge": baseline_home_starter_edge,
+                "Baseline Starter Edge Winner": baseline_starter_edge_winner,
+                "Baseline Starter Edge Margin": baseline_starter_edge_margin,
+                "Baseline Away Pitcher YRFI %": away_pitcher_first_baseline["Pitcher YRFI %"],
+                "Baseline Home Pitcher YRFI %": home_pitcher_first_baseline["Pitcher YRFI %"],
+                "Baseline Away 1st ERA": away_pitcher_first_baseline["1st ERA"],
+                "Baseline Home 1st ERA": home_pitcher_first_baseline["1st ERA"],
+                "Baseline Away 1st WHIP": away_pitcher_first_baseline["1st WHIP"],
+                "Baseline Home 1st WHIP": home_pitcher_first_baseline["1st WHIP"],
 
                 "Away Record": away_record,
                 "Home Record": home_record,
@@ -1523,6 +1699,36 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
                 "Home IP/Start": format_ip_per_start(home_stats["IP"], home_stats["GS"]),
                 "Away K": away_stats["K"],
                 "Home K": home_stats["K"],
+                "Away Last 7 ERA": away_stats["Last 7 ERA"],
+                "Home Last 7 ERA": home_stats["Last 7 ERA"],
+                "Away Last 7 WHIP": away_stats["Last 7 WHIP"],
+                "Home Last 7 WHIP": home_stats["Last 7 WHIP"],
+                "Away Last 7 K/BB": away_stats["Last 7 K/BB"],
+                "Home Last 7 K/BB": home_stats["Last 7 K/BB"],
+                "Away Last 7 P/IP": away_stats["Last 7 P/IP"],
+                "Home Last 7 P/IP": home_stats["Last 7 P/IP"],
+                "Away Last 7 OPS": away_stats["Last 7 OPS"],
+                "Home Last 7 OPS": home_stats["Last 7 OPS"],
+                "Away Last 15 ERA": away_stats["Last 15 ERA"],
+                "Home Last 15 ERA": home_stats["Last 15 ERA"],
+                "Away Last 15 WHIP": away_stats["Last 15 WHIP"],
+                "Home Last 15 WHIP": home_stats["Last 15 WHIP"],
+                "Away Last 15 K/BB": away_stats["Last 15 K/BB"],
+                "Home Last 15 K/BB": home_stats["Last 15 K/BB"],
+                "Away Last 15 P/IP": away_stats["Last 15 P/IP"],
+                "Home Last 15 P/IP": home_stats["Last 15 P/IP"],
+                "Away Last 15 OPS": away_stats["Last 15 OPS"],
+                "Home Last 15 OPS": home_stats["Last 15 OPS"],
+                "Away Last 30 ERA": away_stats["Last 30 ERA"],
+                "Home Last 30 ERA": home_stats["Last 30 ERA"],
+                "Away Last 30 WHIP": away_stats["Last 30 WHIP"],
+                "Home Last 30 WHIP": home_stats["Last 30 WHIP"],
+                "Away Last 30 K/BB": away_stats["Last 30 K/BB"],
+                "Home Last 30 K/BB": home_stats["Last 30 K/BB"],
+                "Away Last 30 P/IP": away_stats["Last 30 P/IP"],
+                "Home Last 30 P/IP": home_stats["Last 30 P/IP"],
+                "Away Last 30 OPS": away_stats["Last 30 OPS"],
+                "Home Last 30 OPS": home_stats["Last 30 OPS"],
                 "Away Starter Edge": away_starter_edge,
                 "Home Starter Edge": home_starter_edge,
                 "Starter Edge Winner": starter_edge_winner,
@@ -1549,6 +1755,24 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
                 "Home 1st ERA": home_pitcher_first["1st ERA"],
                 "Away 1st WHIP": away_pitcher_first["1st WHIP"],
                 "Home 1st WHIP": home_pitcher_first["1st WHIP"],
+                "Away 1st IP": away_pitcher_first["1st IP"],
+                "Home 1st IP": home_pitcher_first["1st IP"],
+                "Away 1st Games": away_pitcher_first["1st Games"],
+                "Home 1st Games": home_pitcher_first["1st Games"],
+                "Away 1st R": away_pitcher_first["1st R"],
+                "Home 1st R": home_pitcher_first["1st R"],
+                "Away 1st ER": away_pitcher_first["1st ER"],
+                "Home 1st ER": home_pitcher_first["1st ER"],
+                "Away 1st H": away_pitcher_first["1st H"],
+                "Home 1st H": home_pitcher_first["1st H"],
+                "Away 1st BB": away_pitcher_first["1st BB"],
+                "Home 1st BB": home_pitcher_first["1st BB"],
+                "Away 1st HR": away_pitcher_first["1st HR"],
+                "Home 1st HR": home_pitcher_first["1st HR"],
+                "Away 1st BF": away_pitcher_first["1st BF"],
+                "Home 1st BF": home_pitcher_first["1st BF"],
+                "Away 1st Split Source": away_pitcher_first["1st Split Source"],
+                "Home 1st Split Source": home_pitcher_first["1st Split Source"],
 
                 "Away Bullpen Fatigue": away_bullpen,
                 "Home Bullpen Fatigue": home_bullpen,

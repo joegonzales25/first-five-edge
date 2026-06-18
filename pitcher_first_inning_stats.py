@@ -30,6 +30,26 @@ def get_pitcher_game_log(pitcher_id, season=None):
         return []
 
 
+def get_pitcher_first_inning_split(pitcher_id, season=None):
+    if not pitcher_id:
+        return {}
+
+    season = season or date.today().year
+    url = (
+        f"https://statsapi.mlb.com/api/v1/people/{pitcher_id}/stats"
+        f"?stats=statSplits&group=pitching&season={season}&sitCodes=i01"
+    )
+
+    try:
+        data = requests.get(url, timeout=15).json()
+        splits = data.get("stats", [])[0].get("splits", [])
+        if not splits:
+            return {}
+        return splits[0].get("stat", {})
+    except Exception:
+        return {}
+
+
 def estimate_pitcher_first_inning_stats(pitcher_id, season=None):
     """
     Stable V1.1 placeholder using MLB game logs.
@@ -46,6 +66,15 @@ def estimate_pitcher_first_inning_stats(pitcher_id, season=None):
             "Pitcher YRFI %": UNAVAILABLE,
             "1st ERA": UNAVAILABLE,
             "1st WHIP": UNAVAILABLE,
+            "1st IP": UNAVAILABLE,
+            "1st Games": 0,
+            "1st R": UNAVAILABLE,
+            "1st ER": UNAVAILABLE,
+            "1st H": UNAVAILABLE,
+            "1st BB": UNAVAILABLE,
+            "1st HR": UNAVAILABLE,
+            "1st BF": UNAVAILABLE,
+            "1st Split Source": "Unavailable",
             "Starts": 0,
         }
 
@@ -77,6 +106,15 @@ def estimate_pitcher_first_inning_stats(pitcher_id, season=None):
             "Pitcher YRFI %": UNAVAILABLE,
             "1st ERA": UNAVAILABLE,
             "1st WHIP": UNAVAILABLE,
+            "1st IP": UNAVAILABLE,
+            "1st Games": starts,
+            "1st R": UNAVAILABLE,
+            "1st ER": UNAVAILABLE,
+            "1st H": UNAVAILABLE,
+            "1st BB": UNAVAILABLE,
+            "1st HR": UNAVAILABLE,
+            "1st BF": UNAVAILABLE,
+            "1st Split Source": "Estimated",
             "Starts": starts,
         }
 
@@ -92,12 +130,40 @@ def estimate_pitcher_first_inning_stats(pitcher_id, season=None):
         "Pitcher YRFI %": estimated_yrfi,
         "1st ERA": estimated_first_era,
         "1st WHIP": estimated_first_whip,
+        "1st IP": UNAVAILABLE,
+        "1st Games": starts,
+        "1st R": UNAVAILABLE,
+        "1st ER": UNAVAILABLE,
+        "1st H": UNAVAILABLE,
+        "1st BB": UNAVAILABLE,
+        "1st HR": UNAVAILABLE,
+        "1st BF": UNAVAILABLE,
+        "1st Split Source": "Estimated",
         "Starts": starts,
     }
 
 
 def get_pitcher_first_inning_stats(pitcher_id, season=None):
-    return estimate_pitcher_first_inning_stats(pitcher_id, season)
+    estimated = estimate_pitcher_first_inning_stats(pitcher_id, season)
+    actual = get_pitcher_first_inning_split(pitcher_id, season)
+
+    if not actual:
+        return estimated
+
+    return {
+        **estimated,
+        "1st ERA": actual.get("era", estimated["1st ERA"]),
+        "1st WHIP": actual.get("whip", estimated["1st WHIP"]),
+        "1st IP": actual.get("inningsPitched", UNAVAILABLE),
+        "1st Games": actual.get("gamesPlayed", estimated["Starts"]),
+        "1st R": actual.get("runs", UNAVAILABLE),
+        "1st ER": actual.get("earnedRuns", UNAVAILABLE),
+        "1st H": actual.get("hits", UNAVAILABLE),
+        "1st BB": actual.get("baseOnBalls", UNAVAILABLE),
+        "1st HR": actual.get("homeRuns", UNAVAILABLE),
+        "1st BF": actual.get("battersFaced", UNAVAILABLE),
+        "1st Split Source": "MLB actual split",
+    }
 
 
 if __name__ == "__main__":
