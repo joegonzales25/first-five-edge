@@ -9,8 +9,8 @@ from model_history import (
     record_model_history,
 )
 
-APP_VERSION = "2.3.1"
-MODEL_CACHE_VERSION = "edge-v2-promoted-v231"
+APP_VERSION = "2.3.3"
+MODEL_CACHE_VERSION = "edge-v233-load-performance-ip-start"
 FALLBACK_TIMEZONE = "America/New_York"
 
 team_logo_map = {
@@ -1854,7 +1854,7 @@ default_slate_date = current_date_for_timezone(display_timezone)
 max_slate_date = default_slate_date + timedelta(days=1)
 
 st.sidebar.title("Controls")
-st.sidebar.caption(f"Version {APP_VERSION}")
+st.sidebar.caption(f"Model version: {APP_VERSION}")
 if (
     "header_slate_date" in st.session_state
     and st.session_state["header_slate_date"] > max_slate_date
@@ -1906,7 +1906,6 @@ if games.empty:
 
 games = games.copy()
 record_model_history(games, selected_date, APP_VERSION)
-st.caption("Model version: 2.3.1")
 
 top_look_game_names = top_look_games(games)
 first_inning_pick_text = games["First Inning Pick"].fillna("").astype(str)

@@ -1,11 +1,15 @@
+import os
 import requests
 import pandas as pd
 
 from datetime import date, datetime, timedelta
+from functools import lru_cache
+from time import perf_counter
 from zoneinfo import ZoneInfo
 
 
 UNAVAILABLE = "N/A"
+ENABLE_LOAD_PROFILING = os.getenv("MLB_AGENT_PROFILE", "0") == "1"
 
 TEAM_ABBREVIATIONS = {
     "Arizona Diamondbacks": "ARI",
@@ -91,6 +95,26 @@ def safe_float(value):
         return None
 
 
+def profile_add(profile, label, elapsed):
+    if not ENABLE_LOAD_PROFILING:
+        return
+
+    profile[label] = profile.get(label, 0) + elapsed
+
+
+def profile_print(profile):
+    if not ENABLE_LOAD_PROFILING:
+        return
+
+    print("\nMLB agent load profile:")
+    for label, elapsed in sorted(
+        profile.items(),
+        key=lambda item: item[1],
+        reverse=True,
+    ):
+        print(f"  {label}: {elapsed:.2f}s")
+
+
 def average_metric(records, metric_name):
     values = []
 
@@ -147,6 +171,61 @@ def format_ip_per_start(innings_pitched, starts):
     return round(innings / starts, 1)
 
 
+def baseball_innings_to_outs(value):
+    if value in [None, "", UNAVAILABLE]:
+        return 0
+
+    text = str(value)
+    whole, _, partial = text.partition(".")
+
+    try:
+        outs = int(whole) * 3
+    except ValueError:
+        return 0
+
+    if partial:
+        try:
+            outs += min(int(partial[0]), 2)
+        except ValueError:
+            return 0
+
+    return outs
+
+
+@lru_cache(maxsize=512)
+def get_start_only_ip_per_start(pitcher_id, season=None):
+    if not pitcher_id:
+        return UNAVAILABLE
+
+    season_param = f"&season={season}" if season else ""
+    url = (
+        f"https://statsapi.mlb.com/api/v1/people/{pitcher_id}/stats"
+        f"?stats=gameLog&group=pitching{season_param}"
+    )
+
+    try:
+        data = requests.get(url, timeout=10).json()
+        splits = data.get("stats", [{}])[0].get("splits", [])
+    except Exception:
+        return UNAVAILABLE
+
+    start_outs = 0
+    starts = 0
+
+    for split in splits:
+        stat = split.get("stat", {})
+        if int(stat.get("gamesStarted", 0) or 0) <= 0:
+            continue
+
+        starts += 1
+        start_outs += baseball_innings_to_outs(stat.get("inningsPitched"))
+
+    if starts <= 0 or start_outs <= 0:
+        return UNAVAILABLE
+
+    return round((start_outs / 3) / starts, 1)
+
+
 def calculate_factor_confidence(nrfi_signals, yrfi_signals):
     dominant_signals = max(nrfi_signals, yrfi_signals)
     opposing_signals = min(nrfi_signals, yrfi_signals)
@@ -188,6 +267,7 @@ def get_live_first_inning_stats(team_name):
     })
 
 
+@lru_cache(maxsize=512)
 def get_pitcher_first_stats(pitcher_id, season=None):
     fallback = {
         "Pitcher YRFI %": UNAVAILABLE,
@@ -214,6 +294,7 @@ def get_pitcher_first_stats(pitcher_id, season=None):
         return fallback
 
 
+@lru_cache(maxsize=512)
 def get_pitcher_first_baseline_stats(pitcher_id, season=None):
     fallback = {
         "Pitcher YRFI %": UNAVAILABLE,
@@ -411,6 +492,7 @@ def format_recent_game_date(game_date):
         return UNAVAILABLE
 
 
+@lru_cache(maxsize=256)
 def get_team_last_5_results(team_id, team_name, slate_date):
     if not team_id:
         return []
@@ -467,7 +549,8 @@ def get_team_last_5_results(team_id, team_name, slate_date):
     return results[:5]
 
 
-def get_pitcher_stats(pitcher_id):
+@lru_cache(maxsize=512)
+def get_pitcher_stats(pitcher_id, season=None):
     fallback = {
         "ERA": None,
         "WHIP": None,
@@ -475,6 +558,7 @@ def get_pitcher_stats(pitcher_id):
         "L": UNAVAILABLE,
         "IP": UNAVAILABLE,
         "GS": 0,
+        "IP/Start": UNAVAILABLE,
         "K": UNAVAILABLE,
         "Last 7 ERA": UNAVAILABLE,
         "Last 7 WHIP": UNAVAILABLE,
@@ -496,9 +580,10 @@ def get_pitcher_stats(pitcher_id):
     if not pitcher_id:
         return fallback
 
+    season_param = f"&season={season}" if season else ""
     url = (
         f"https://statsapi.mlb.com/api/v1/people/"
-        f"{pitcher_id}/stats?stats=season&group=pitching"
+        f"{pitcher_id}/stats?stats=season&group=pitching{season_param}"
     )
 
     try:
@@ -512,14 +597,23 @@ def get_pitcher_stats(pitcher_id):
             "L": stats.get("losses", UNAVAILABLE),
             "IP": stats.get("inningsPitched", UNAVAILABLE),
             "GS": stats.get("gamesStarted", 0),
+            "IP/Start": get_start_only_ip_per_start(pitcher_id, season),
             "K": stats.get("strikeOuts", UNAVAILABLE),
         }
-        return {**fallback, **pitcher_stats, **get_pitcher_recent_form(pitcher_id)}
+        if pitcher_stats["IP/Start"] == UNAVAILABLE:
+            pitcher_stats["IP/Start"] = format_ip_per_start(
+                pitcher_stats["IP"],
+                pitcher_stats["GS"],
+            )
+        # Recent form remains available via get_pitcher_recent_form(), but it is
+        # not fetched during normal slate loads until the UI promotes it again.
+        return {**fallback, **pitcher_stats}
 
     except Exception:
         return fallback
 
 
+@lru_cache(maxsize=512)
 def get_pitcher_recent_form(pitcher_id, season=None):
     if not pitcher_id:
         return {}
@@ -550,6 +644,7 @@ def get_pitcher_recent_form(pitcher_id, season=None):
     return recent
 
 
+@lru_cache(maxsize=16)
 def get_team_records(season=None):
     season = season or date.today().year
 
@@ -1562,6 +1657,8 @@ def model_data_quality_status(
 
 
 def get_today_games(selected_date=None, timezone_name="America/New_York"):
+    profile = {}
+    total_start = perf_counter()
     slate_date = selected_date or date.today().isoformat()
     season = int(str(slate_date)[0:4])
 
@@ -1571,11 +1668,15 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
     )
 
     try:
+        step_start = perf_counter()
         data = requests.get(url, timeout=10).json()
+        profile_add(profile, "schedule/probable pitchers", perf_counter() - step_start)
     except Exception:
         return pd.DataFrame()
 
+    step_start = perf_counter()
     team_records = get_team_records(season)
+    profile_add(profile, "team records", perf_counter() - step_start)
     last_5_cache = {}
     games = []
 
@@ -1593,9 +1694,13 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
             home_team_id = home_side["team"].get("id")
 
             if away_team_id not in last_5_cache:
+                step_start = perf_counter()
                 last_5_cache[away_team_id] = get_team_last_5_results(away_team_id, away_team, slate_date)
+                profile_add(profile, "last 5 team results", perf_counter() - step_start)
             if home_team_id not in last_5_cache:
+                step_start = perf_counter()
                 last_5_cache[home_team_id] = get_team_last_5_results(home_team_id, home_team, slate_date)
+                profile_add(profile, "last 5 team results", perf_counter() - step_start)
 
             away_record = format_team_record(
                 away_side,
@@ -1632,9 +1737,12 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
             away_pitcher = away_pitcher_data.get("fullName", UNAVAILABLE)
             home_pitcher = home_pitcher_data.get("fullName", UNAVAILABLE)
 
-            away_stats = get_pitcher_stats(away_pitcher_id)
-            home_stats = get_pitcher_stats(home_pitcher_id)
+            step_start = perf_counter()
+            away_stats = get_pitcher_stats(away_pitcher_id, season)
+            home_stats = get_pitcher_stats(home_pitcher_id, season)
+            profile_add(profile, "pitcher season/recent stats", perf_counter() - step_start)
 
+            step_start = perf_counter()
             away_pitcher_first = get_pitcher_first_stats(
                 away_pitcher_id,
                 season
@@ -1644,16 +1752,9 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
                 home_pitcher_id,
                 season
             )
+            profile_add(profile, "pitcher first-inning splits", perf_counter() - step_start)
 
-            away_pitcher_first_baseline = get_pitcher_first_baseline_stats(
-                away_pitcher_id,
-                season,
-            )
-            home_pitcher_first_baseline = get_pitcher_first_baseline_stats(
-                home_pitcher_id,
-                season,
-            )
-
+            step_start = perf_counter()
             pitcher_status = probable_pitcher_status(
                 away_pitcher_id,
                 home_pitcher_id,
@@ -1672,7 +1773,9 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
                 first_inning_data_status,
                 bullpen_status,
             )
+            profile_add(profile, "data-quality checks", perf_counter() - step_start)
 
+            step_start = perf_counter()
             nrfi_score, lean, summary, f5_edge, confidence = calculate_nrfi_score(
                 away_stats,
                 home_stats,
@@ -1743,28 +1846,6 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
             )
 
             (
-                baseline_away_starter_edge,
-                baseline_home_starter_edge,
-                baseline_starter_edge_winner,
-                baseline_starter_edge_margin,
-            ) = calculate_starter_edge(
-                away_stats["ERA"],
-                home_stats["ERA"],
-                away_stats["WHIP"],
-                home_stats["WHIP"],
-                away_stats["IP"],
-                home_stats["IP"],
-                away_stats["K"],
-                home_stats["K"],
-                away_pitcher_first_baseline["1st ERA"],
-                home_pitcher_first_baseline["1st ERA"],
-                away_pitcher_first_baseline["1st WHIP"],
-                home_pitcher_first_baseline["1st WHIP"],
-                away_pitcher_first_baseline["Pitcher YRFI %"],
-                home_pitcher_first_baseline["Pitcher YRFI %"],
-            )
-
-            (
                 away_bullpen_edge,
                 home_bullpen_edge,
                 bullpen_edge_winner,
@@ -1796,32 +1877,9 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
                 LEAGUE_YRFI_AVG,
             )
 
-            baseline_first_inning_pick, baseline_first_inning_confidence, baseline_first_inning_score = calculate_first_inning_decision(
-                away_pitcher_first_baseline["Pitcher YRFI %"],
-                home_pitcher_first_baseline["Pitcher YRFI %"],
-                away_first_live["Offense YRFI %"],
-                home_first_live["Offense YRFI %"],
-                away_pitcher_first_baseline["1st ERA"],
-                home_pitcher_first_baseline["1st ERA"],
-                away_pitcher_first_baseline["1st WHIP"],
-                home_pitcher_first_baseline["1st WHIP"],
-                away_first_live["1st Run Avg"],
-                home_first_live["1st Run Avg"],
-                LEAGUE_YRFI_AVG,
-            )
-
             f5_pick, f5_confidence, f5_score = calculate_f5_decision(
                 starter_edge_winner,
                 starter_edge_margin,
-                offensive_edge_winner,
-                offensive_edge_margin,
-                away_team,
-                home_team,
-            )
-
-            baseline_f5_pick, baseline_f5_confidence, baseline_f5_score = calculate_f5_decision(
-                baseline_starter_edge_winner,
-                baseline_starter_edge_margin,
                 offensive_edge_winner,
                 offensive_edge_margin,
                 away_team,
@@ -1851,29 +1909,9 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
                 home_team,
             )
 
-            (
-                baseline_full_game_pick,
-                baseline_full_game_confidence,
-                baseline_full_game_score,
-                baseline_full_game_agreement,
-                baseline_full_game_edge,
-            ) = calculate_full_game_decision(
-                baseline_starter_edge_winner,
-                baseline_starter_edge_margin,
-                offensive_edge_winner,
-                offensive_edge_margin,
-                bullpen_edge_winner,
-                bullpen_edge_margin,
-                baseline_away_starter_edge,
-                baseline_home_starter_edge,
-                away_offensive_edge,
-                home_offensive_edge,
-                away_bullpen_edge,
-                home_bullpen_edge,
-                away_team,
-                home_team,
-            )
+            profile_add(profile, "model calculations", perf_counter() - step_start)
 
+            step_start = perf_counter()
             games.append({
                 "Game Time": format_game_time(game_date, timezone_name),
                 "Game Sort Time": game_date,
@@ -1908,27 +1946,6 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
                 "Full Game Score": full_game_score,
                 "Full Game Agreement": full_game_agreement,
                 "Full Game Edge": full_game_edge,
-                "Baseline First Inning Pick": baseline_first_inning_pick,
-                "Baseline First Inning Confidence": baseline_first_inning_confidence,
-                "Baseline First Inning Score": baseline_first_inning_score,
-                "Baseline F5 Pick": baseline_f5_pick,
-                "Baseline F5 Confidence": baseline_f5_confidence,
-                "Baseline F5 Score": baseline_f5_score,
-                "Baseline Full Game Pick": baseline_full_game_pick,
-                "Baseline Full Game Confidence": baseline_full_game_confidence,
-                "Baseline Full Game Score": baseline_full_game_score,
-                "Baseline Full Game Agreement": baseline_full_game_agreement,
-                "Baseline Full Game Edge": baseline_full_game_edge,
-                "Baseline Away Starter Edge": baseline_away_starter_edge,
-                "Baseline Home Starter Edge": baseline_home_starter_edge,
-                "Baseline Starter Edge Winner": baseline_starter_edge_winner,
-                "Baseline Starter Edge Margin": baseline_starter_edge_margin,
-                "Baseline Away Pitcher YRFI %": away_pitcher_first_baseline["Pitcher YRFI %"],
-                "Baseline Home Pitcher YRFI %": home_pitcher_first_baseline["Pitcher YRFI %"],
-                "Baseline Away 1st ERA": away_pitcher_first_baseline["1st ERA"],
-                "Baseline Home 1st ERA": home_pitcher_first_baseline["1st ERA"],
-                "Baseline Away 1st WHIP": away_pitcher_first_baseline["1st WHIP"],
-                "Baseline Home 1st WHIP": home_pitcher_first_baseline["1st WHIP"],
 
                 "Away Record": away_record,
                 "Home Record": home_record,
@@ -1945,8 +1962,8 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
                 "Home WHIP": home_stats["WHIP"],
                 "Away IP": away_stats["IP"],
                 "Home IP": home_stats["IP"],
-                "Away IP/Start": format_ip_per_start(away_stats["IP"], away_stats["GS"]),
-                "Home IP/Start": format_ip_per_start(home_stats["IP"], home_stats["GS"]),
+                "Away IP/Start": away_stats["IP/Start"],
+                "Home IP/Start": home_stats["IP/Start"],
                 "Away K": away_stats["K"],
                 "Home K": home_stats["K"],
                 "Away Last 7 ERA": away_stats["Last 7 ERA"],
@@ -2050,9 +2067,14 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
                 "Agent Notes": summary,
                 "Status": game_status,
             })
+            profile_add(profile, "row assembly", perf_counter() - step_start)
 
+    step_start = perf_counter()
     df = pd.DataFrame(games)
     validate_model_contract(df)
+    profile_add(profile, "dataframe validation", perf_counter() - step_start)
+    profile_add(profile, "total", perf_counter() - total_start)
+    profile_print(profile)
     return df
 
 
