@@ -9,7 +9,7 @@ from model_history import (
     record_model_history,
 )
 
-APP_VERSION = "2.3.4"
+APP_VERSION = "2.3.5"
 MODEL_CACHE_VERSION = "edge-v233-load-performance-ip-start"
 # Keep performance history stable across UI/cache releases. Change this only
 # when the model baseline, grading definition, or history schema intentionally changes.
@@ -1901,9 +1901,9 @@ def load_games(selected_date, model_cache_version, display_timezone):
     return get_today_games(selected_date.isoformat(), display_timezone)
 
 
-st.title("⚾ MLB Edge Detector")
-
 render_sport_picker()
+
+st.title("⚾ MLB Edge Detector")
 
 display_timezone, timezone_detected = detect_browser_timezone()
 default_slate_date = current_date_for_timezone(display_timezone)
