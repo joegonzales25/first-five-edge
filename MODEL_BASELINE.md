@@ -2,6 +2,8 @@
 
 This baseline is bookmarked by git tag `v2.2.7-baseline`.
 
+As of `v2.3.1`, Model 2.3 is the active product model. This v2.2.7 baseline is retained only as rollback/reference context and should not be exposed as a user-facing model selector.
+
 ## Primary Outputs
 
 1. 1st Inning: `YRFI`, `NRFI`, or `No Edge`

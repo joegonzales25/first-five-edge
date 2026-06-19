@@ -9,8 +9,8 @@ from model_history import (
     record_model_history,
 )
 
-APP_VERSION = "2.2.7"
-MODEL_CACHE_VERSION = "edge-v2-local-time-v1"
+APP_VERSION = "2.3.1"
+MODEL_CACHE_VERSION = "edge-v2-promoted-v231"
 FALLBACK_TIMEZONE = "America/New_York"
 
 team_logo_map = {
@@ -181,6 +181,24 @@ st.markdown("""
     color: #cbd5e1;
     font-size: 15px;
     margin-bottom: 14px;
+}
+.data-quality-notice {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border-radius: 999px;
+    padding: 8px 12px;
+    margin: 0 0 12px 0;
+    font-size: 13px;
+    font-weight: 800;
+    color: #fde68a;
+    background: rgba(120, 53, 15, 0.42);
+    border: 1px solid rgba(251, 191, 36, 0.42);
+}
+.data-quality-poor {
+    color: #fecaca;
+    background: rgba(127, 29, 29, 0.45);
+    border-color: rgba(248, 113, 113, 0.45);
 }
 .recommendation {
     font-size: 18px;
@@ -1247,25 +1265,25 @@ def build_market_watch(row):
     )
 
     if both_bullpens_tired:
-        return "Scoring Environment Watch", [
+        return "Over Watch", [
             "Both bullpens fatigued",
             "Elevated late-game scoring risk",
         ]
 
     if both_bullpens_fresh and strong_starting_pitching:
-        return "Run Prevention Watch", [
+        return "Under Watch", [
             "Fresh bullpens",
             "Strong starting pitching",
         ]
 
     if starter_margin >= 8 and bullpen_margin < 6:
-        return "In-Game Edge Watch", [
+        return "Live Watch", [
             "Early starter edge detected",
             "Bullpen edge remains uncertain",
             "Recheck as pitch counts rise",
         ]
 
-    return "No Clear Edge", [
+    return "No Edge", [
         "No meaningful edge signal detected",
     ]
 
@@ -1284,10 +1302,76 @@ def render_market_watch(row):
 
     return f"""
     <div class="market-watch">
-        <div class="market-heading">📈 Edge Watch</div>
+        <div class="market-heading">📈 Market Watch</div>
         <div class="market-pick">{escape(market_pick)}</div>
         <div class="market-why">Why?</div>
         <div class="reason-stack">{reason_items}</div>
+    </div>
+    """
+
+
+def render_data_quality_notice(row):
+    quality = get_row_value(row, "Model Data Quality", "Good")
+    notes = get_row_value(row, "Model Data Quality Notes", "")
+
+    if "Model Data Quality" not in row.index:
+        quality_notes = []
+        away_pitcher = get_row_value(row, "Away Pitcher", "N/A")
+        home_pitcher = get_row_value(row, "Home Pitcher", "N/A")
+        missing_pitchers = sum(
+            pitcher in [None, "", "N/A", "Unavailable", "TBD"]
+            for pitcher in [away_pitcher, home_pitcher]
+        )
+
+        away_source = get_row_value(row, "Away 1st Split Source", "Unavailable")
+        home_source = get_row_value(row, "Home 1st Split Source", "Unavailable")
+        first_sources = [away_source, home_source]
+
+        core_bullpen_fields = [
+            "Away 3 Day Bullpen Pitches",
+            "Home 3 Day Bullpen Pitches",
+            "Away 3 Day Relievers",
+            "Home 3 Day Relievers",
+            "Away Back-to-Back Arms",
+            "Home Back-to-Back Arms",
+        ]
+        missing_bullpen_fields = [
+            field for field in core_bullpen_fields
+            if get_row_value(row, field, "N/A") in [None, "", "N/A", "Unavailable", "TBD"]
+        ]
+
+        if missing_pitchers == 2:
+            quality_notes.append("Probable pitchers missing")
+        elif missing_pitchers == 1:
+            quality_notes.append("One probable pitcher missing")
+
+        if all(source == "Unavailable" for source in first_sources):
+            quality_notes.append("Pitcher first-inning data missing")
+        elif any(source in ["Unavailable", "Estimated"] for source in first_sources):
+            quality_notes.append("Pitcher first-inning data limited")
+
+        if len(missing_bullpen_fields) == len(core_bullpen_fields):
+            quality_notes.append("Bullpen workload data missing")
+
+        if missing_pitchers == 2 or all(source == "Unavailable" for source in first_sources):
+            quality = "Poor"
+        elif quality_notes:
+            quality = "Limited"
+        else:
+            quality = "Good"
+
+        notes = "; ".join(quality_notes)
+
+    if quality == "Good":
+        return ""
+
+    css_class = "data-quality-poor" if quality == "Poor" else "data-quality-limited"
+    label = "Limited data" if quality == "Limited" else "Poor data"
+
+    detail = f": {notes}" if notes else ""
+    return f"""
+    <div class="data-quality-notice {css_class}">
+        <span>Data Quality: {escape(label)}{escape(detail)}</span>
     </div>
     """
 
@@ -1763,43 +1847,6 @@ def load_games(selected_date, model_cache_version, display_timezone):
     return get_today_games(selected_date.isoformat(), display_timezone)
 
 
-def apply_model_view(games, model_view):
-    if model_view != "Baseline 2.2.7":
-        return games
-
-    games = games.copy()
-    baseline_column_map = {
-        "First Inning Pick": "Baseline First Inning Pick",
-        "First Inning Confidence": "Baseline First Inning Confidence",
-        "First Inning Score": "Baseline First Inning Score",
-        "F5 Pick": "Baseline F5 Pick",
-        "F5 Confidence": "Baseline F5 Confidence",
-        "F5 Score": "Baseline F5 Score",
-        "Full Game Pick": "Baseline Full Game Pick",
-        "Full Game Confidence": "Baseline Full Game Confidence",
-        "Full Game Score": "Baseline Full Game Score",
-        "Full Game Agreement": "Baseline Full Game Agreement",
-        "Full Game Edge": "Baseline Full Game Edge",
-        "Away Starter Edge": "Baseline Away Starter Edge",
-        "Home Starter Edge": "Baseline Home Starter Edge",
-        "Starter Edge Winner": "Baseline Starter Edge Winner",
-        "Starter Edge Margin": "Baseline Starter Edge Margin",
-        "Away Pitcher YRFI %": "Baseline Away Pitcher YRFI %",
-        "Home Pitcher YRFI %": "Baseline Home Pitcher YRFI %",
-        "Away 1st ERA": "Baseline Away 1st ERA",
-        "Home 1st ERA": "Baseline Home 1st ERA",
-        "Away 1st WHIP": "Baseline Away 1st WHIP",
-        "Home 1st WHIP": "Baseline Home 1st WHIP",
-    }
-
-    for active_column, baseline_column in baseline_column_map.items():
-        if baseline_column in games.columns:
-            games[active_column] = games[baseline_column]
-
-    games["Model View"] = model_view
-    return games
-
-
 st.title("⚾ First Five Edge")
 
 display_timezone, timezone_detected = detect_browser_timezone()
@@ -1821,14 +1868,9 @@ selected_date = st.date_input(
     format="MM/DD/YYYY",
     key="header_slate_date",
 )
-model_view = st.selectbox(
-    "Model View",
-    ["Proposed Model", "Baseline 2.2.7"],
-    index=0,
-    key="model_view_selector_v3",
-)
 timezone_label = "local" if timezone_detected else "Eastern fallback"
 st.sidebar.caption(f"Times shown in {display_timezone} ({timezone_label})")
+st.sidebar.caption("Model 2.3 promoted; 2.2.7 retained as rollback reference.")
 st.sidebar.divider()
 st.sidebar.subheader("Data Sources")
 
@@ -1863,10 +1905,8 @@ if games.empty:
     st.stop()
 
 games = games.copy()
-if model_view == "Proposed Model":
-    record_model_history(games, selected_date, APP_VERSION)
-games = apply_model_view(games, model_view)
-st.caption(f"Model view: {model_view}")
+record_model_history(games, selected_date, APP_VERSION)
+st.caption("Model version: 2.3.1")
 
 top_look_game_names = top_look_games(games)
 first_inning_pick_text = games["First Inning Pick"].fillna("").astype(str)
@@ -1949,6 +1989,7 @@ else:
         away_team, home_team = split_game_name(row["Game"])
         logo_matchup = render_logo_matchup(away_team, home_team)
         market_watch = render_market_watch(row)
+        data_quality_notice = render_data_quality_notice(row)
         card_anchor = game_anchor(row["Game"])
         key_factors = render_key_factor_panels(row, away_team, home_team)
         first_inning_pick = get_row_value(row, "First Inning Pick")
@@ -2098,6 +2139,7 @@ else:
             <div class="game-title">{row["Game"]}</div>
             <div class="muted">{row["Game Time"]} • {row["Status"]}</div>
 
+            {data_quality_notice}
             <input class="edge-view-control edge-view-first" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-first" checked>
             <input class="edge-view-control edge-view-f5" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-f5">
             <input class="edge-view-control edge-view-full" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-full">
@@ -2115,9 +2157,6 @@ else:
         """)
 
         with st.expander(f"🔍 Analysis: {row['Game']}"):
-            render_signal_review(row, away_team, home_team)
-
-            st.markdown("---")
             st.markdown("### Edge Breakdown")
 
             st.markdown("#### Starter Edge")
@@ -2172,17 +2211,6 @@ else:
             """)
             if first_signal_active:
                 st.caption("\\* - Edge Signal")
-
-            st.markdown("#### Recent Pitching Form")
-            st.markdown(f"""
-            | Metric | {away_team} Starter | {home_team} Starter |
-            |---|---|---|
-            | Last 7 ERA / WHIP | {get_row_value(row, "Away Last 7 ERA", "N/A")} / {get_row_value(row, "Away Last 7 WHIP", "N/A")} | {get_row_value(row, "Home Last 7 ERA", "N/A")} / {get_row_value(row, "Home Last 7 WHIP", "N/A")} |
-            | Last 7 K/BB / P-IP | {get_row_value(row, "Away Last 7 K/BB", "N/A")} / {get_row_value(row, "Away Last 7 P/IP", "N/A")} | {get_row_value(row, "Home Last 7 K/BB", "N/A")} / {get_row_value(row, "Home Last 7 P/IP", "N/A")} |
-            | Last 15 ERA / WHIP | {get_row_value(row, "Away Last 15 ERA", "N/A")} / {get_row_value(row, "Away Last 15 WHIP", "N/A")} | {get_row_value(row, "Home Last 15 ERA", "N/A")} / {get_row_value(row, "Home Last 15 WHIP", "N/A")} |
-            | Last 15 K/BB / P-IP | {get_row_value(row, "Away Last 15 K/BB", "N/A")} / {get_row_value(row, "Away Last 15 P/IP", "N/A")} | {get_row_value(row, "Home Last 15 K/BB", "N/A")} / {get_row_value(row, "Home Last 15 P/IP", "N/A")} |
-            | Last 30 OPS Allowed | {get_row_value(row, "Away Last 30 OPS", "N/A")} | {get_row_value(row, "Home Last 30 OPS", "N/A")} |
-            """)
 
             st.markdown("---")
             st.markdown("### Offensive Matchup")

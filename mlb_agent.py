@@ -1336,6 +1336,231 @@ def calculate_full_game_decision(
     return "No Edge", "No Edge", margin, agreement, edge_label
 
 
+MODEL_REQUIRED_COLUMNS = [
+    "Game",
+    "Game Time",
+    "Status",
+    "First Inning Pick",
+    "First Inning Confidence",
+    "First Inning Score",
+    "F5 Pick",
+    "F5 Confidence",
+    "F5 Score",
+    "Full Game Pick",
+    "Full Game Confidence",
+    "Full Game Score",
+    "Full Game Agreement",
+    "Away Starter Edge",
+    "Home Starter Edge",
+    "Starter Edge Winner",
+    "Starter Edge Margin",
+    "Away Offensive Edge",
+    "Home Offensive Edge",
+    "Offensive Edge Winner",
+    "Offensive Edge Margin",
+    "Away Bullpen Edge",
+    "Home Bullpen Edge",
+    "Bullpen Edge Winner",
+    "Bullpen Edge Margin",
+    "Probable Pitcher Status",
+    "Pitcher 1st Inning Data Status",
+    "Bullpen Data Status",
+    "Game Result Status",
+    "Model Data Quality",
+    "Model Data Quality Notes",
+]
+
+FIRST_INNING_ALLOWED_PICKS = {"YRFI", "NRFI", "No Edge"}
+MODEL_ALLOWED_CONFIDENCE = {"A+", "A", "B", "C", "No Edge"}
+SIDE_ALLOWED_WINNERS = {"Away", "Home", "Even", "No Edge"}
+LEGACY_OUTPUT_TERMS = [
+    "Pass",
+    "YRFI Yes",
+    "NRFI Yes",
+    "Away F5",
+    "Home F5",
+    "Away Full Game",
+    "Home Full Game",
+]
+
+# Kept for compatibility/debugging only. Product UI should use the V2 columns:
+# First Inning Pick, F5 Pick, Full Game Pick, and Market Watch display logic.
+LEGACY_INTERNAL_COLUMNS = [
+    "Recommendation",
+    "Confidence",
+    "Edge Score",
+    "NRFI Score",
+    "Lean",
+    "F5 Edge",
+    "Agent Notes",
+]
+
+
+def parse_game_teams(game_label):
+    if not isinstance(game_label, str) or " @ " not in game_label:
+        return None, None
+
+    away_team, home_team = game_label.split(" @ ", 1)
+    return away_team.strip(), home_team.strip()
+
+
+def validate_model_contract(df):
+    if df.empty:
+        return df
+
+    missing_columns = [
+        column for column in MODEL_REQUIRED_COLUMNS
+        if column not in df.columns
+    ]
+    if missing_columns:
+        raise KeyError(
+            "Model contract missing required columns: "
+            + ", ".join(missing_columns)
+        )
+
+    errors = []
+
+    for index, row in df.iterrows():
+        game = row.get("Game", f"row {index}")
+        away_team, home_team = parse_game_teams(game)
+        allowed_team_picks = {"No Edge"}
+        if away_team:
+            allowed_team_picks.add(away_team)
+        if home_team:
+            allowed_team_picks.add(home_team)
+
+        first_pick = row.get("First Inning Pick")
+        if first_pick not in FIRST_INNING_ALLOWED_PICKS:
+            errors.append(f"{game}: invalid First Inning Pick '{first_pick}'")
+
+        for pick_column in ["F5 Pick", "Full Game Pick"]:
+            pick = row.get(pick_column)
+            if pick not in allowed_team_picks:
+                errors.append(f"{game}: invalid {pick_column} '{pick}'")
+
+        for confidence_column in [
+            "First Inning Confidence",
+            "F5 Confidence",
+            "Full Game Confidence",
+        ]:
+            confidence = row.get(confidence_column)
+            if confidence not in MODEL_ALLOWED_CONFIDENCE:
+                errors.append(f"{game}: invalid {confidence_column} '{confidence}'")
+
+        for winner_column in [
+            "Starter Edge Winner",
+            "Offensive Edge Winner",
+            "Bullpen Edge Winner",
+        ]:
+            winner = row.get(winner_column)
+            if winner not in SIDE_ALLOWED_WINNERS:
+                errors.append(f"{game}: invalid {winner_column} '{winner}'")
+
+        for output_column in [
+            "First Inning Pick",
+            "F5 Pick",
+            "Full Game Pick",
+        ]:
+            output = str(row.get(output_column, ""))
+            for legacy_term in LEGACY_OUTPUT_TERMS:
+                if legacy_term in output:
+                    errors.append(
+                        f"{game}: legacy term '{legacy_term}' found in {output_column}"
+                    )
+
+    if errors:
+        error_preview = "\n".join(errors[:20])
+        if len(errors) > 20:
+            error_preview += f"\n... {len(errors) - 20} more validation errors"
+        raise ValueError("Model contract validation failed:\n" + error_preview)
+
+    return df
+
+
+def probable_pitcher_status(away_pitcher_id, home_pitcher_id):
+    if away_pitcher_id and home_pitcher_id:
+        return "Confirmed"
+    if away_pitcher_id or home_pitcher_id:
+        return "Partial"
+    return "Missing"
+
+
+def pitcher_first_inning_data_status(away_first_stats, home_first_stats):
+    sources = [
+        str(away_first_stats.get("1st Split Source", "Unavailable")),
+        str(home_first_stats.get("1st Split Source", "Unavailable")),
+    ]
+
+    if all(source == "MLB actual split" for source in sources):
+        return "Actual Split"
+    if any(source == "MLB actual split" for source in sources):
+        return "Partial Actual Split"
+    if all(source == "Estimated" for source in sources):
+        return "Estimated"
+    if any(source == "Estimated" for source in sources):
+        return "Partial Estimated"
+    return "Missing"
+
+
+def bullpen_data_status(away_bullpen_data, home_bullpen_data):
+    core_bullpen_fields = [
+        "Last 3 Days Pitches",
+        "Last 3 Days Relievers",
+        "Back-to-Back Arms",
+    ]
+
+    def complete(data):
+        return all(data.get(field) != UNAVAILABLE for field in core_bullpen_fields)
+
+    away_complete = complete(away_bullpen_data)
+    home_complete = complete(home_bullpen_data)
+
+    if away_complete and home_complete:
+        return "Complete"
+    if away_complete or home_complete:
+        return "Partial"
+    return "Missing"
+
+
+def game_result_status(status):
+    sort_value = game_status_sort_value(status)
+    if sort_value == 0:
+        return "Pre-Game"
+    if sort_value == 1:
+        return "In Progress"
+    return "Final"
+
+
+def model_data_quality_status(
+    pitcher_status,
+    first_inning_status,
+    bullpen_status,
+):
+    notes = []
+
+    if pitcher_status == "Missing":
+        notes.append("Probable pitchers missing")
+    elif pitcher_status == "Partial":
+        notes.append("One probable pitcher missing")
+
+    if first_inning_status in ["Missing", "Partial Estimated"]:
+        notes.append("Pitcher first-inning data limited")
+    elif first_inning_status == "Estimated":
+        notes.append("Pitcher first-inning data estimated")
+
+    if bullpen_status == "Missing":
+        notes.append("Bullpen workload data missing")
+
+    if pitcher_status == "Missing" or first_inning_status == "Missing":
+        quality = "Poor"
+    elif notes:
+        quality = "Limited"
+    else:
+        quality = "Good"
+
+    return quality, "; ".join(notes) if notes else "All core model inputs available"
+
+
 def get_today_games(selected_date=None, timezone_name="America/New_York"):
     slate_date = selected_date or date.today().isoformat()
     season = int(str(slate_date)[0:4])
@@ -1427,6 +1652,25 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
             home_pitcher_first_baseline = get_pitcher_first_baseline_stats(
                 home_pitcher_id,
                 season,
+            )
+
+            pitcher_status = probable_pitcher_status(
+                away_pitcher_id,
+                home_pitcher_id,
+            )
+            first_inning_data_status = pitcher_first_inning_data_status(
+                away_pitcher_first,
+                home_pitcher_first,
+            )
+            bullpen_status = bullpen_data_status(
+                away_bullpen_data,
+                home_bullpen_data,
+            )
+            result_status = game_result_status(game_status)
+            model_data_quality, model_data_quality_notes = model_data_quality_status(
+                pitcher_status,
+                first_inning_data_status,
+                bullpen_status,
             )
 
             nrfi_score, lean, summary, f5_edge, confidence = calculate_nrfi_score(
@@ -1640,6 +1884,12 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
                 "F5 Result Compact": build_f5_result(linescore, game_status, away_team, home_team, compact=True),
                 "Full Game Result": build_full_game_result(linescore, game_status, away_team, home_team),
                 "Full Game Result Compact": build_full_game_result(linescore, game_status, away_team, home_team, compact=True),
+                "Probable Pitcher Status": pitcher_status,
+                "Pitcher 1st Inning Data Status": first_inning_data_status,
+                "Bullpen Data Status": bullpen_status,
+                "Game Result Status": result_status,
+                "Model Data Quality": model_data_quality,
+                "Model Data Quality Notes": model_data_quality_notes,
                 "Game": f"{away_team} @ {home_team}",
                 "Recommendation": recommendation,
                 "Confidence": confidence,
@@ -1801,7 +2051,9 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
                 "Status": game_status,
             })
 
-    return pd.DataFrame(games)
+    df = pd.DataFrame(games)
+    validate_model_contract(df)
+    return df
 
 
 if __name__ == "__main__":
