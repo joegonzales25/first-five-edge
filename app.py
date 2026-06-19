@@ -9,9 +9,18 @@ from model_history import (
     record_model_history,
 )
 
-APP_VERSION = "2.3.3"
+APP_VERSION = "2.3.4"
 MODEL_CACHE_VERSION = "edge-v233-load-performance-ip-start"
+# Keep performance history stable across UI/cache releases. Change this only
+# when the model baseline, grading definition, or history schema intentionally changes.
+PERFORMANCE_TRACKING_VERSION = "2.3.3"
 FALLBACK_TIMEZONE = "America/New_York"
+SPORT_CONFIG = {
+    "MLB": {"enabled": True},
+    "NFL": {"enabled": False},
+    "NBA": {"enabled": False},
+    "NHL": {"enabled": False},
+}
 
 team_logo_map = {
     "Arizona Diamondbacks": "https://www.mlbstatic.com/team-logos/109.svg",
@@ -521,6 +530,38 @@ st.markdown("""
 }
 .result-loss {
     background: #dc2626;
+}
+
+.sport-picker {
+    display: flex;
+    gap: 8px;
+    margin: 8px 0 18px;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+.sport-picker::-webkit-scrollbar {
+    display: none;
+}
+.sport-pill {
+    min-width: 58px;
+    padding: 9px 14px;
+    border-radius: 999px;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 900;
+    letter-spacing: 0;
+    border: 1px solid #334155;
+    background: #1e293b;
+    color: #cbd5e1;
+}
+.sport-pill.active {
+    border-color: #22c55e;
+    background: linear-gradient(135deg, #1d4ed8, #0f766e);
+    color: #ffffff;
+    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.18);
+}
+.sport-pill.disabled {
+    opacity: 0.48;
 }
 
 div[data-testid="stRadio"] [role="radiogroup"] {
@@ -1842,12 +1883,27 @@ def render_model_performance(model_version, slate_date):
     )
 
 
+def render_sport_picker():
+    pills = []
+    for sport, config in SPORT_CONFIG.items():
+        classes = ["sport-pill"]
+        if sport == "MLB":
+            classes.append("active")
+        if not config["enabled"]:
+            classes.append("disabled")
+        pills.append(f'<div class="{" ".join(classes)}">{escape(sport)}</div>')
+
+    st.html(f'<div class="sport-picker">{"".join(pills)}</div>')
+
+
 @st.cache_data(ttl=900)
 def load_games(selected_date, model_cache_version, display_timezone):
     return get_today_games(selected_date.isoformat(), display_timezone)
 
 
-st.title("⚾ First Five Edge")
+st.title("⚾ MLB Edge Detector")
+
+render_sport_picker()
 
 display_timezone, timezone_detected = detect_browser_timezone()
 default_slate_date = current_date_for_timezone(display_timezone)
@@ -1905,7 +1961,7 @@ if games.empty:
     st.stop()
 
 games = games.copy()
-record_model_history(games, selected_date, APP_VERSION)
+record_model_history(games, selected_date, PERFORMANCE_TRACKING_VERSION)
 
 top_look_game_names = top_look_games(games)
 first_inning_pick_text = games["First Inning Pick"].fillna("").astype(str)
@@ -1961,7 +2017,10 @@ filtered = filtered.sort_values(
 if selected_filter == "Performance":
     performance_total = sum(
         row.get("total") or 0
-        for row in load_performance_summary(APP_VERSION, exact_date=selected_date)
+        for row in load_performance_summary(
+            PERFORMANCE_TRACKING_VERSION,
+            exact_date=selected_date,
+        )
     )
     st.caption(f"{performance_total} results")
 else:
@@ -1970,7 +2029,7 @@ else:
 st.divider()
 
 if selected_filter == "Performance":
-    render_model_performance(APP_VERSION, selected_date)
+    render_model_performance(PERFORMANCE_TRACKING_VERSION, selected_date)
     st.stop()
 
 if selected_filter in ["All Games", "Top Looks"]:
