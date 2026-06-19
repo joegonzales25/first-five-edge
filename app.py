@@ -1265,25 +1265,25 @@ def build_market_watch(row):
     )
 
     if both_bullpens_tired:
-        return "Over Watch", [
+        return "Scoring May Be Elevated", [
             "Both bullpens fatigued",
             "Elevated late-game scoring risk",
         ]
 
     if both_bullpens_fresh and strong_starting_pitching:
-        return "Under Watch", [
+        return "Scoring May Be Limited", [
             "Fresh bullpens",
             "Strong starting pitching",
         ]
 
     if starter_margin >= 8 and bullpen_margin < 6:
-        return "Live Watch", [
+        return "Live Monitor", [
             "Early starter edge detected",
             "Bullpen edge remains uncertain",
             "Recheck as pitch counts rise",
         ]
 
-    return "No Edge", [
+    return "No Clear Signal", [
         "No meaningful edge signal detected",
     ]
 
@@ -1632,7 +1632,7 @@ def build_top_looks(games):
     ].copy()
     if bullpen_rows.empty:
         looks.append({
-            "title": "Bullpen Watch: No edges found",
+            "title": "Bullpen Workload Watch: No signal found",
             "meta": "No elevated bullpen risk signal on this slate.",
             "why": "",
             "link": "",
@@ -1649,7 +1649,7 @@ def build_top_looks(games):
         ).iloc[0]
         away_team, home_team = split_game_name(bullpen_row["Game"])
         looks.append({
-            "title": f'Bullpen Watch: {game_matchup_label(bullpen_row["Game"])}',
+            "title": f'Bullpen Workload Watch: {game_matchup_label(bullpen_row["Game"])}',
             "meta": f'Fatigue {bullpen_row["_fatigue_max"]} • Bullpen edge {get_row_value(bullpen_row, "Bullpen Edge Margin", "N/A")}',
             "why": f'{away_team} bullpen {bullpen_row["Away Bullpen Status"]} / {home_team} bullpen {bullpen_row["Home Bullpen Status"]}',
             "link": top_look_link(bullpen_row),

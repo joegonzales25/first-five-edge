@@ -5,7 +5,7 @@ Current product outputs should stay centered on:
 1. 1st Inning: YRFI / NRFI / No Edge
 2. First 5: away team / home team / No Edge
 3. Full Game: away team / home team / No Edge
-4. Market Watch: Over Watch / Under Watch / Live Watch / Bullpen Watch / No Edge
+4. Market Watch: Scoring May Be Elevated / Scoring May Be Limited / Live Monitor / Bullpen Workload Watch / No Clear Signal
 
 ## Quarantined Internal Fields
 
@@ -27,9 +27,13 @@ These fields may remain in the dataframe for compatibility, debugging, exports, 
 |---|---|
 | Game cards | Use only current model outputs and compact key factors |
 | Top Looks | Use current model picks, current confidence columns, and current scores |
-| Market Watch | Avoid betting language; use watch language only |
+| Market Watch | Informational only; describe scoring environment without implying a posted total |
 | Analysis expander | Keep trust-but-verify tables; keep experimental details hidden until promoted |
 | Performance | Track model outputs by version; do not grade legacy recommendation fields |
+
+## Market Watch Performance
+
+Market Watch is not currently graded in model performance. It is an informational context signal, not a direct pick. Revisit grading only after success criteria are defined for scoring environment and live-monitor signals.
 
 ## Legacy Terms To Keep Out Of Product UI
 
