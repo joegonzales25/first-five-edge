@@ -5,15 +5,16 @@ import re
 from zoneinfo import ZoneInfo
 from mlb_agent import get_today_games
 from model_history import (
+    load_model_versions,
     load_performance_summary,
     record_model_history,
 )
 
-APP_VERSION = "2.3.5"
-MODEL_CACHE_VERSION = "edge-v233-load-performance-ip-start"
+APP_VERSION = "2.3.6"
+MODEL_CACHE_VERSION = "edge-v236-offensive-edge-rpg"
 # Keep performance history stable across UI/cache releases. Change this only
 # when the model baseline, grading definition, or history schema intentionally changes.
-PERFORMANCE_TRACKING_VERSION = "2.3.3"
+PERFORMANCE_TRACKING_VERSION = "2.3.6"
 FALLBACK_TIMEZONE = "America/New_York"
 SPORT_CONFIG = {
     "MLB": {"enabled": True},
@@ -1799,7 +1800,16 @@ def render_model_performance_legacy_unused():
 def render_model_performance(model_version, slate_date):
     st.markdown("### Model Performance")
 
-    filter_cols = st.columns([1, 1, 1])
+    available_versions = load_model_versions()
+    version_options = [model_version]
+    version_options.extend(
+        version
+        for version in available_versions
+        if version != model_version
+    )
+    model_filter_options = [f"Current {model_version}", *version_options[1:], "All"]
+
+    filter_cols = st.columns([1, 1, 1, 1])
     with filter_cols[0]:
         market_filter = st.selectbox(
             "Market",
@@ -1818,6 +1828,22 @@ def render_model_performance(model_version, slate_date):
             ["All", "A+", "A", "B", "C"],
             key="performance_confidence_filter",
         )
+    with filter_cols[3]:
+        selected_model_filter = st.selectbox(
+            "Model",
+            model_filter_options,
+            key="performance_model_filter",
+        )
+
+    if selected_model_filter == "All":
+        selected_model_version = None
+        model_label = "All models"
+    elif selected_model_filter.startswith("Current "):
+        selected_model_version = model_version
+        model_label = selected_model_filter
+    else:
+        selected_model_version = selected_model_filter
+        model_label = f"Model {selected_model_filter}"
 
     day_filters = {
         "Today": {"exact_date": slate_date, "label": "Today"},
@@ -1839,7 +1865,7 @@ def render_model_performance(model_version, slate_date):
         day_label = f"{window_filter} days"
 
     summary_rows = load_performance_summary(
-        model_version,
+        selected_model_version,
         market=market_filter,
         days=days,
         confidence=confidence_filter,
@@ -1866,7 +1892,7 @@ def render_model_performance(model_version, slate_date):
             '</div>'
         )
 
-    filter_text = day_label
+    filter_text = f"{model_label} - {day_label}"
     if market_filter != "All":
         filter_text += f" • {market_filter}"
     if confidence_filter != "All":

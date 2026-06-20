@@ -955,6 +955,8 @@ def add_offensive_edge_points(away_score, home_score, away_value, home_value, we
 def calculate_offensive_edge(
     away_offense,
     home_offense,
+    away_runs_per_game,
+    home_runs_per_game,
     away_offense_yrfi,
     home_offense_yrfi,
     away_first_run_avg,
@@ -969,7 +971,15 @@ def calculate_offensive_edge(
         away_offense,
         home_offense,
         weight=2,
-        cap=12,
+        cap=9,
+    )
+    away_score, home_score = add_offensive_edge_points(
+        away_score,
+        home_score,
+        away_runs_per_game,
+        home_runs_per_game,
+        weight=4,
+        cap=9,
     )
     away_score, home_score = add_offensive_edge_points(
         away_score,
@@ -977,7 +987,7 @@ def calculate_offensive_edge(
         away_offense_yrfi,
         home_offense_yrfi,
         weight=0.25,
-        cap=10,
+        cap=7.5,
     )
     away_score, home_score = add_offensive_edge_points(
         away_score,
@@ -985,7 +995,7 @@ def calculate_offensive_edge(
         away_first_run_avg,
         home_first_run_avg,
         weight=10,
-        cap=8,
+        cap=4.5,
     )
 
     margin = round(abs(away_score - home_score), 1)
@@ -1817,6 +1827,8 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
             ) = calculate_offensive_edge(
                 away_offense,
                 home_offense,
+                away_runs_per_game,
+                home_runs_per_game,
                 away_first_live["Offense YRFI %"],
                 home_first_live["Offense YRFI %"],
                 away_first_live["1st Run Avg"],

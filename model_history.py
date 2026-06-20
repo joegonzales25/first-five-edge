@@ -286,6 +286,24 @@ def load_performance_summary(
     return [dict(row) for row in rows]
 
 
+def load_model_versions(db_path=DB_PATH):
+    if not db_path.exists():
+        return []
+
+    with connect(db_path) as connection:
+        init_db(connection)
+        rows = connection.execute(
+            """
+            SELECT model_version, MAX(updated_at) AS latest_update
+            FROM model_history
+            GROUP BY model_version
+            ORDER BY latest_update DESC, model_version DESC
+            """
+        ).fetchall()
+
+    return [row["model_version"] for row in rows]
+
+
 def load_performance_details(
     model_version=None,
     market=None,
