@@ -5,12 +5,11 @@ import re
 from zoneinfo import ZoneInfo
 from mlb_agent import get_today_games
 from model_history import (
-    load_model_versions,
     load_performance_summary,
     record_model_history,
 )
 
-APP_VERSION = "2.3.6"
+APP_VERSION = "2.3.7"
 MODEL_CACHE_VERSION = "edge-v236-offensive-edge-rpg"
 # Keep performance history stable across UI/cache releases. Change this only
 # when the model baseline, grading definition, or history schema intentionally changes.
@@ -1744,6 +1743,15 @@ def performance_hit_rate(row):
     return f"{((row.get('hits') or 0) / completed) * 100:.0f}%"
 
 
+def safe_load_model_versions():
+    try:
+        from model_history import load_model_versions
+
+        return load_model_versions()
+    except (ImportError, AttributeError):
+        return []
+
+
 def render_model_performance_legacy_unused():
     summary_cols = []
     for index, row in enumerate(summary_rows):
@@ -1800,7 +1808,7 @@ def render_model_performance_legacy_unused():
 def render_model_performance(model_version, slate_date):
     st.markdown("### Model Performance")
 
-    available_versions = load_model_versions()
+    available_versions = safe_load_model_versions()
     version_options = [model_version]
     version_options.extend(
         version
