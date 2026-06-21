@@ -572,6 +572,40 @@ st.markdown("""
     opacity: 0.48;
 }
 
+.nfl-control-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 12px 0 18px;
+}
+.nfl-control-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 42px;
+    padding: 10px 14px;
+    border-radius: 14px;
+    background: #1e293b;
+    border: 1px solid #334155;
+    color: #f8fafc;
+    font-size: 13px;
+    font-weight: 900;
+    text-decoration: none;
+    white-space: nowrap;
+}
+.nfl-control-pill.active {
+    border-color: #22c55e;
+    background: linear-gradient(135deg, #1d4ed8, #0f766e);
+    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.18);
+}
+.nfl-control-label {
+    margin: 12px 0 6px;
+    color: #64748b;
+    font-size: 13px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
 div[data-testid="stRadio"] [role="radiogroup"] {
     display: grid;
     grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -1934,6 +1968,90 @@ def selected_sport():
     return sport
 
 
+def selected_nfl_mode():
+    mode = str(get_query_param("mode") or "current").lower()
+    if mode not in ["current", "lab"]:
+        return "current"
+    return mode
+
+
+def selected_nfl_filter(default_filter="all"):
+    filter_value = str(get_query_param("filter") or default_filter).lower()
+    valid_filters = {
+        "all",
+        "signals",
+        "side",
+        "scoring",
+        "a",
+        "pass",
+        "correct",
+        "missed",
+    }
+    if filter_value not in valid_filters:
+        return default_filter
+    return filter_value
+
+
+def selected_nfl_week():
+    week = str(get_query_param("week") or "all").lower()
+    if week == "all":
+        return "all"
+    try:
+        parsed = int(week)
+    except Exception:
+        return "all"
+    if 1 <= parsed <= 18:
+        return str(parsed)
+    return "all"
+
+
+def query_link(params):
+    merged = {}
+    for key, value in st.query_params.items():
+        if isinstance(value, list):
+            merged[key] = value[0] if value else ""
+        else:
+            merged[key] = value
+    merged.update(params)
+    query = "&".join(
+        f"{escape(str(key))}={escape(str(value))}"
+        for key, value in merged.items()
+        if value is not None
+    )
+    return f"?{query}" if query else "?"
+
+
+def render_nfl_pills(options, active_value, extra_params=None):
+    extra_params = extra_params or {}
+    pills = []
+    for label, value in options:
+        classes = ["nfl-control-pill"]
+        if value == active_value:
+            classes.append("active")
+        params = {"sport": "NFL", **extra_params, "filter": value}
+        if "mode" not in params:
+            params["mode"] = selected_nfl_mode()
+        pills.append(
+            f'<a class="{" ".join(classes)}" href="{query_link(params)}">'
+            f'{escape(label)}</a>'
+        )
+    st.html(f'<div class="nfl-control-row">{"".join(pills)}</div>')
+
+
+def render_nfl_mode_pills(active_mode):
+    options = [("Current", "current"), ("Historical Lab", "lab")]
+    pills = []
+    for label, mode in options:
+        classes = ["nfl-control-pill"]
+        if mode == active_mode:
+            classes.append("active")
+        pills.append(
+            f'<a class="{" ".join(classes)}" href="{query_link({"sport": "NFL", "mode": mode, "filter": "all", "week": "all"})}">'
+            f'{escape(label)}</a>'
+        )
+    st.html(f'<div class="nfl-control-row">{"".join(pills)}</div>')
+
+
 def render_sport_picker(active_sport):
     pills = []
     for sport, config in SPORT_CONFIG.items():
@@ -2032,22 +2150,22 @@ def render_nfl_card(row, historical=False):
 
 def filter_nfl_games(games, view, historical=False):
     filtered = games.copy()
-    if view == "Model Signals":
+    if view == "signals":
         filtered = filtered[filtered["Model Signal"] != "Pass"]
-    elif view == "Side Edge":
+    elif view == "side":
         filtered = filtered[filtered["Side Edge"] != "Pass"]
-    elif view == "Scoring Environment":
+    elif view == "scoring":
         filtered = filtered[filtered["Scoring Edge"] != "Neutral Scoring Environment"]
-    elif view == "A Confidence":
+    elif view == "a":
         filtered = filtered[filtered["Confidence"] == "A"]
-    elif view == "Pass":
+    elif view == "pass":
         filtered = filtered[filtered["Model Signal"] == "Pass"]
-    elif historical and view == "Correct":
+    elif historical and view == "correct":
         filtered = filtered[
             filtered["Winner Result"].eq("Correct")
             | filtered["Scoring Result"].eq("Correct")
         ]
-    elif historical and view == "Missed":
+    elif historical and view == "missed":
         filtered = filtered[
             filtered["Winner Result"].eq("Missed")
             | filtered["Scoring Result"].eq("Missed")
@@ -2069,19 +2187,25 @@ def render_nfl_current():
     slate, meta = load_nfl_current()
     if slate.empty:
         st.info("No upcoming NFL games found.")
-        if st.button("Open Historical Lab"):
-            st.query_params["sport"] = "NFL"
-            st.session_state["nfl_mode"] = "Historical Lab"
-            st.rerun()
+        st.markdown(
+            f'[Open Historical Lab]({query_link({"sport": "NFL", "mode": "lab", "filter": "all", "week": "all"})})'
+        )
         return
 
     st.caption(f"Season {meta['season']} â€¢ Week {meta['week']}")
-    selected_filter = st.radio(
-        "NFL Current Filter",
-        ["All Games", "Model Signals", "Side Edge", "Scoring Environment", "A Confidence", "Pass"],
-        horizontal=True,
-        label_visibility="collapsed",
-        key="nfl_current_filter",
+    selected_filter = selected_nfl_filter("all")
+    st.html('<div class="nfl-control-label">Filter</div>')
+    render_nfl_pills(
+        [
+            ("All", "all"),
+            ("Signals", "signals"),
+            ("Side", "side"),
+            ("Scoring", "scoring"),
+            ("A", "a"),
+            ("Pass", "pass"),
+        ],
+        selected_filter,
+        {"mode": "current", "week": "all"},
     )
     filtered = filter_nfl_games(slate, selected_filter)
 
@@ -2105,28 +2229,38 @@ def render_nfl_current():
 def render_nfl_historical():
     results, summary = load_nfl_historical()
 
-    selected_filter = st.radio(
-        "NFL Historical Filter",
+    selected_filter = selected_nfl_filter("all")
+    st.html('<div class="nfl-control-label">Filter</div>')
+    render_nfl_pills(
         [
-            "All Games",
-            "Model Signals",
-            "Correct",
-            "Missed",
-            "Side Edge",
-            "Scoring Environment",
-            "A Confidence",
+            ("All", "all"),
+            ("Signals", "signals"),
+            ("Correct", "correct"),
+            ("Missed", "missed"),
+            ("Side", "side"),
+            ("Scoring", "scoring"),
+            ("A", "a"),
         ],
-        horizontal=True,
-        label_visibility="collapsed",
-        key="nfl_historical_filter",
+        selected_filter,
+        {"mode": "lab", "week": selected_nfl_week()},
     )
-    selected_week = st.radio(
-        "NFL Historical Week",
-        ["All Weeks"] + [f"Week {week}" for week in range(1, 19)],
-        horizontal=True,
-        label_visibility="collapsed",
-        key="nfl_historical_week",
+
+    week_options = ["All Weeks"] + [f"Week {week}" for week in range(1, 19)]
+    current_week = selected_nfl_week()
+    week_index = 0 if current_week == "all" else int(current_week)
+    selected_week = st.selectbox(
+        "Week",
+        week_options,
+        index=week_index,
+        key="nfl_historical_week_select",
     )
+    desired_week_param = "all" if selected_week == "All Weeks" else selected_week.split()[-1]
+    if desired_week_param != current_week:
+        st.query_params["sport"] = "NFL"
+        st.query_params["mode"] = "lab"
+        st.query_params["filter"] = selected_filter
+        st.query_params["week"] = desired_week_param
+        st.rerun()
 
     filtered = results.copy()
     if selected_week != "All Weeks":
@@ -2164,15 +2298,10 @@ def render_nfl_page():
     st.title("NFL Edge Detector")
     st.caption("Outcome and scoring-environment model signals")
 
-    mode = st.radio(
-        "NFL Mode",
-        ["Current Slate", "Historical Lab"],
-        horizontal=True,
-        label_visibility="collapsed",
-        key="nfl_mode",
-    )
+    mode = selected_nfl_mode()
+    render_nfl_mode_pills(mode)
 
-    if mode == "Current Slate":
+    if mode == "current":
         render_nfl_current()
     else:
         render_nfl_historical()
