@@ -1213,7 +1213,7 @@ def render_signal_review(row, away_team, home_team):
 
     st.markdown("### Signal Review")
     st.caption(
-        f'{counts["Confirms"]} confirm • {counts["Warning"]} warning • '
+        f'{counts["Confirms"]} confirm - {counts["Warning"]} warning - '
         f'{counts["Neutral"]} neutral'
     )
     st.markdown(
@@ -1624,7 +1624,7 @@ def format_score_meta(label, row, score_column, confidence_column):
     if score is None:
         return f"{label} unavailable"
 
-    return f"{label} {score:.1f} • Confidence {confidence}"
+    return f"{label} {score:.1f} - Confidence {confidence}"
 
 
 def build_top_looks(games):
@@ -1733,7 +1733,7 @@ def build_top_looks(games):
         away_team, home_team = split_game_name(bullpen_row["Game"])
         looks.append({
             "title": f'Bullpen Workload Watch: {game_matchup_label(bullpen_row["Game"])}',
-            "meta": f'Fatigue {bullpen_row["_fatigue_max"]} • Bullpen edge {get_row_value(bullpen_row, "Bullpen Edge Margin", "N/A")}',
+            "meta": f'Fatigue {bullpen_row["_fatigue_max"]} - Bullpen edge {get_row_value(bullpen_row, "Bullpen Edge Margin", "N/A")}',
             "why": f'{away_team} bullpen {bullpen_row["Away Bullpen Status"]} / {home_team} bullpen {bullpen_row["Home Bullpen Status"]}',
             "link": top_look_link(bullpen_row),
             "game": bullpen_row["Game"],
@@ -1806,7 +1806,7 @@ def render_model_performance_legacy_unused():
             st.metric(
                 row["market"],
                 performance_hit_rate(row),
-                f"{record} • {pending} pending",
+                f"{record} - {pending} pending",
             )
             st.caption(f"{completed} completed")
 
@@ -1938,15 +1938,15 @@ def render_model_performance(model_version, slate_date):
             f'<div class="performance-market">{escape(row["market"])}</div>'
             f'<div class="performance-hit-rate">{performance_hit_rate(row)}</div>'
             f'<div class="performance-record">{escape(record)} record</div>'
-            f'<div class="performance-meta">{completed} completed &bull; {pending} pending</div>'
+            f'<div class="performance-meta">{completed} completed - {pending} pending</div>'
             '</div>'
         )
 
     filter_text = f"{model_label} - {day_label}"
     if market_filter != "All":
-        filter_text += f" • {market_filter}"
+        filter_text += f" - {market_filter}"
     if confidence_filter != "All":
-        filter_text += f" • {confidence_filter} confidence"
+        filter_text += f" - {confidence_filter} confidence"
 
     st.html(
         '<div class="model-favorite top-looks">'
@@ -2627,7 +2627,7 @@ else:
             {logo_matchup}
 
             <div class="game-title">{row["Game"]}</div>
-            <div class="muted">{row["Game Time"]} • {row["Status"]}</div>
+            <div class="muted">{row["Game Time"]} - {row["Status"]}</div>
 
             {data_quality_notice}
             <input class="edge-view-control edge-view-first" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-first" checked>
