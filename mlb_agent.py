@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 UNAVAILABLE = "N/A"
 ENABLE_LOAD_PROFILING = os.getenv("MLB_AGENT_PROFILE", "0") == "1"
+PITCHER_STATS_CACHE = {}
 
 TEAM_ABBREVIATIONS = {
     "Arizona Diamondbacks": "ARI",
@@ -549,7 +550,6 @@ def get_team_last_5_results(team_id, team_name, slate_date):
     return results[:5]
 
 
-@lru_cache(maxsize=512)
 def get_pitcher_stats(pitcher_id, season=None):
     fallback = {
         "ERA": None,
@@ -580,6 +580,10 @@ def get_pitcher_stats(pitcher_id, season=None):
     if not pitcher_id:
         return fallback
 
+    cache_key = (pitcher_id, season)
+    if cache_key in PITCHER_STATS_CACHE:
+        return PITCHER_STATS_CACHE[cache_key]
+
     season_param = f"&season={season}" if season else ""
     url = (
         f"https://statsapi.mlb.com/api/v1/people/"
@@ -607,7 +611,9 @@ def get_pitcher_stats(pitcher_id, season=None):
             )
         # Recent form remains available via get_pitcher_recent_form(), but it is
         # not fetched during normal slate loads until the UI promotes it again.
-        return {**fallback, **pitcher_stats}
+        result = {**fallback, **pitcher_stats}
+        PITCHER_STATS_CACHE[cache_key] = result
+        return result
 
     except Exception:
         return fallback

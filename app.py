@@ -9,8 +9,8 @@ from model_history import (
     record_model_history,
 )
 
-APP_VERSION = "2.3.7"
-MODEL_CACHE_VERSION = "edge-v236-offensive-edge-rpg"
+APP_VERSION = "2.3.8"
+MODEL_CACHE_VERSION = "edge-v238-pitcher-stats-cache-hotfix"
 # Keep performance history stable across UI/cache releases. Change this only
 # when the model baseline, grading definition, or history schema intentionally changes.
 PERFORMANCE_TRACKING_VERSION = "2.3.6"
