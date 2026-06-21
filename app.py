@@ -4,6 +4,11 @@ from html import escape
 import re
 from zoneinfo import ZoneInfo
 from mlb_agent import get_today_games
+from nfl_agent import (
+    build_current_slate,
+    build_historical_lab,
+    historical_summary_tables,
+)
 from model_history import (
     load_performance_summary,
     record_model_history,
@@ -17,9 +22,10 @@ PERFORMANCE_TRACKING_VERSION = "2.3.6"
 FALLBACK_TIMEZONE = "America/New_York"
 SPORT_CONFIG = {
     "MLB": {"enabled": True},
-    "NFL": {"enabled": False},
+    "NFL": {"enabled": True},
     "NBA": {"enabled": False},
     "NHL": {"enabled": False},
+    "CBB": {"enabled": False},
 }
 
 team_logo_map = {
@@ -543,6 +549,7 @@ st.markdown("""
     display: none;
 }
 .sport-pill {
+    display: inline-block;
     min-width: 58px;
     padding: 9px 14px;
     border-radius: 999px;
@@ -553,6 +560,7 @@ st.markdown("""
     border: 1px solid #334155;
     background: #1e293b;
     color: #cbd5e1;
+    text-decoration: none;
 }
 .sport-pill.active {
     border-color: #22c55e;
@@ -562,6 +570,40 @@ st.markdown("""
 }
 .sport-pill.disabled {
     opacity: 0.48;
+}
+
+.nfl-control-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 12px 0 18px;
+}
+.nfl-control-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 42px;
+    padding: 10px 14px;
+    border-radius: 14px;
+    background: #1e293b;
+    border: 1px solid #334155;
+    color: #f8fafc;
+    font-size: 13px;
+    font-weight: 900;
+    text-decoration: none;
+    white-space: nowrap;
+}
+.nfl-control-pill.active {
+    border-color: #22c55e;
+    background: linear-gradient(135deg, #1d4ed8, #0f766e);
+    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.18);
+}
+.nfl-control-label {
+    margin: 12px 0 6px;
+    color: #64748b;
+    font-size: 13px;
+    font-weight: 900;
+    text-transform: uppercase;
 }
 
 div[data-testid="stRadio"] [role="radiogroup"] {
@@ -1171,7 +1213,7 @@ def render_signal_review(row, away_team, home_team):
 
     st.markdown("### Signal Review")
     st.caption(
-        f'{counts["Confirms"]} confirm • {counts["Warning"]} warning • '
+        f'{counts["Confirms"]} confirm - {counts["Warning"]} warning - '
         f'{counts["Neutral"]} neutral'
     )
     st.markdown(
@@ -1582,7 +1624,7 @@ def format_score_meta(label, row, score_column, confidence_column):
     if score is None:
         return f"{label} unavailable"
 
-    return f"{label} {score:.1f} • Confidence {confidence}"
+    return f"{label} {score:.1f} - Confidence {confidence}"
 
 
 def build_top_looks(games):
@@ -1691,7 +1733,7 @@ def build_top_looks(games):
         away_team, home_team = split_game_name(bullpen_row["Game"])
         looks.append({
             "title": f'Bullpen Workload Watch: {game_matchup_label(bullpen_row["Game"])}',
-            "meta": f'Fatigue {bullpen_row["_fatigue_max"]} • Bullpen edge {get_row_value(bullpen_row, "Bullpen Edge Margin", "N/A")}',
+            "meta": f'Fatigue {bullpen_row["_fatigue_max"]} - Bullpen edge {get_row_value(bullpen_row, "Bullpen Edge Margin", "N/A")}',
             "why": f'{away_team} bullpen {bullpen_row["Away Bullpen Status"]} / {home_team} bullpen {bullpen_row["Home Bullpen Status"]}',
             "link": top_look_link(bullpen_row),
             "game": bullpen_row["Game"],
@@ -1764,7 +1806,7 @@ def render_model_performance_legacy_unused():
             st.metric(
                 row["market"],
                 performance_hit_rate(row),
-                f"{record} • {pending} pending",
+                f"{record} - {pending} pending",
             )
             st.caption(f"{completed} completed")
 
@@ -1896,15 +1938,15 @@ def render_model_performance(model_version, slate_date):
             f'<div class="performance-market">{escape(row["market"])}</div>'
             f'<div class="performance-hit-rate">{performance_hit_rate(row)}</div>'
             f'<div class="performance-record">{escape(record)} record</div>'
-            f'<div class="performance-meta">{completed} completed &bull; {pending} pending</div>'
+            f'<div class="performance-meta">{completed} completed - {pending} pending</div>'
             '</div>'
         )
 
     filter_text = f"{model_label} - {day_label}"
     if market_filter != "All":
-        filter_text += f" • {market_filter}"
+        filter_text += f" - {market_filter}"
     if confidence_filter != "All":
-        filter_text += f" • {confidence_filter} confidence"
+        filter_text += f" - {confidence_filter} confidence"
 
     st.html(
         '<div class="model-favorite top-looks">'
@@ -1917,17 +1959,363 @@ def render_model_performance(model_version, slate_date):
     )
 
 
-def render_sport_picker():
+def selected_sport():
+    sport = str(get_query_param("sport") or "MLB").upper()
+    if sport not in SPORT_CONFIG:
+        return "MLB"
+    if not SPORT_CONFIG[sport]["enabled"]:
+        return "MLB"
+    return sport
+
+
+def selected_nfl_mode():
+    mode = str(get_query_param("mode") or "current").lower()
+    if mode not in ["current", "lab"]:
+        return "current"
+    return mode
+
+
+def selected_nfl_filter(default_filter="all"):
+    filter_value = str(get_query_param("filter") or default_filter).lower()
+    valid_filters = {
+        "all",
+        "signals",
+        "side",
+        "scoring",
+        "a",
+        "pass",
+        "correct",
+        "missed",
+    }
+    if filter_value not in valid_filters:
+        return default_filter
+    return filter_value
+
+
+def selected_nfl_week():
+    week = str(get_query_param("week") or "all").lower()
+    if week == "all":
+        return "all"
+    try:
+        parsed = int(week)
+    except Exception:
+        return "all"
+    if 1 <= parsed <= 18:
+        return str(parsed)
+    return "all"
+
+
+def query_link(params):
+    merged = {}
+    for key, value in st.query_params.items():
+        if isinstance(value, list):
+            merged[key] = value[0] if value else ""
+        else:
+            merged[key] = value
+    merged.update(params)
+    query = "&".join(
+        f"{escape(str(key))}={escape(str(value))}"
+        for key, value in merged.items()
+        if value is not None
+    )
+    return f"?{query}" if query else "?"
+
+
+def render_nfl_pills(options, active_value, extra_params=None):
+    extra_params = extra_params or {}
+    pills = []
+    for label, value in options:
+        classes = ["nfl-control-pill"]
+        if value == active_value:
+            classes.append("active")
+        params = {"sport": "NFL", **extra_params, "filter": value}
+        if "mode" not in params:
+            params["mode"] = selected_nfl_mode()
+        pills.append(
+            f'<a class="{" ".join(classes)}" href="{query_link(params)}">'
+            f'{escape(label)}</a>'
+        )
+    st.html(f'<div class="nfl-control-row">{"".join(pills)}</div>')
+
+
+def render_nfl_mode_pills(active_mode):
+    options = [("Current", "current"), ("Historical Lab", "lab")]
+    pills = []
+    for label, mode in options:
+        classes = ["nfl-control-pill"]
+        if mode == active_mode:
+            classes.append("active")
+        pills.append(
+            f'<a class="{" ".join(classes)}" href="{query_link({"sport": "NFL", "mode": mode, "filter": "all", "week": "all"})}">'
+            f'{escape(label)}</a>'
+        )
+    st.html(f'<div class="nfl-control-row">{"".join(pills)}</div>')
+
+
+def render_sport_picker(active_sport):
     pills = []
     for sport, config in SPORT_CONFIG.items():
         classes = ["sport-pill"]
-        if sport == "MLB":
+        if sport == active_sport:
             classes.append("active")
         if not config["enabled"]:
             classes.append("disabled")
-        pills.append(f'<div class="{" ".join(classes)}">{escape(sport)}</div>')
+            pills.append(f'<span class="{" ".join(classes)}">{escape(sport)}</span>')
+        else:
+            pills.append(
+                f'<a class="{" ".join(classes)}" href="?sport={escape(sport)}">'
+                f'{escape(sport)}</a>'
+            )
 
     st.html(f'<div class="sport-picker">{"".join(pills)}</div>')
+
+
+def nfl_signal_class(row):
+    if row["Model Signal"] == "Pass":
+        return "badge-pass"
+    if row["Scoring Edge"] != "Neutral Scoring Environment":
+        return "badge-f5"
+    return "badge-nrfi"
+
+
+def render_nfl_card(row, historical=False):
+    away_team, home_team = split_game_name(row["Game"])
+    result_line = ""
+    if historical:
+        result_line = f"""
+        <div class="muted">
+            Final: <strong>{escape(str(row["Away Score"]))}-{escape(str(row["Home Score"]))}</strong>
+            &nbsp; - &nbsp; Winner: <strong>{escape(str(row["Winner Result"]))}</strong>
+            &nbsp; - &nbsp; Scoring: <strong>{escape(str(row["Scoring Result"]))}</strong>
+            &nbsp; - &nbsp; Margin Error: <strong>{escape(str(row["Margin Error"]))}</strong>
+            &nbsp; - &nbsp; Total Error: <strong>{escape(str(row["Total Error"]))}</strong>
+        </div>
+        """
+
+    st.html(f"""
+    <div class="game-card">
+        <span class="badge {nfl_signal_class(row)}">{escape(str(row["Model Signal"]))}</span>
+        <span class="badge badge-edge">Edge {escape(str(row["Edge Score"]))}</span>
+        <span class="badge badge-edge">Confidence {escape(str(row["Confidence"]))}</span>
+
+        <div class="game-title">{escape(str(row["Game"]))}</div>
+        <div class="muted">{escape(str(row["Game Time"]))} - {escape(str(row["Status"]))}</div>
+
+        <div class="decision-stack">
+            <div class="decision-line decision-first">Side Edge: {escape(str(row["Side Edge"]))}</div>
+            <div class="decision-line decision-f5">Scoring Environment: {escape(str(row["Scoring Edge"]))}</div>
+            <div class="decision-line decision-full">Early Edge: {escape(str(row["Early Edge"]))}</div>
+        </div>
+
+        <div class="key-factor-panel">
+            <div class="key-factor-heading">Key Factors</div>
+            <div class="key-factor-line">{escape(str(row["Key Factors Summary"]))}</div>
+        </div>
+
+        {result_line}
+    </div>
+    """)
+
+    with st.expander(f"Analysis: {row['Game']}"):
+        if historical:
+            st.markdown("### Result Review")
+            st.markdown(f"""
+            | Metric | Value |
+            |---|---|
+            | Final Score | {away_team} {row["Away Score"]} - {home_team} {row["Home Score"]} |
+            | Winner | {row["Winner Result"]} |
+            | Scoring | {row["Scoring Result"]} |
+            | Margin Error | {row["Margin Error"]} |
+            | Total Error | {row["Total Error"]} |
+            """)
+
+        st.markdown("### Key Factors")
+        for factor in row["Key Factors List"]:
+            st.markdown(f"- {factor}")
+
+        st.markdown("### Model Detail")
+        st.markdown(f"""
+        | Metric | Value |
+        |---|---|
+        | Side Edge | {row["Side Edge"]} |
+        | Scoring Environment | {row["Scoring Edge"]} |
+        | Early Edge | {row["Early Edge"]} |
+        | Edge Score | {row["Edge Score"]} |
+        | Confidence | {row["Confidence"]} |
+        | Model Margin | {row["Model Margin"]} |
+        | Projected Total | {row["Projected Total"]} |
+        | League Total Baseline | {row["League Total Baseline"]} |
+        """)
+
+
+def filter_nfl_games(games, view, historical=False):
+    filtered = games.copy()
+    if view == "signals":
+        filtered = filtered[filtered["Model Signal"] != "Pass"]
+    elif view == "side":
+        filtered = filtered[filtered["Side Edge"] != "Pass"]
+    elif view == "scoring":
+        filtered = filtered[filtered["Scoring Edge"] != "Neutral Scoring Environment"]
+    elif view == "a":
+        filtered = filtered[filtered["Confidence"] == "A"]
+    elif view == "pass":
+        filtered = filtered[filtered["Model Signal"] == "Pass"]
+    elif historical and view == "correct":
+        filtered = filtered[
+            filtered["Winner Result"].eq("Correct")
+            | filtered["Scoring Result"].eq("Correct")
+        ]
+    elif historical and view == "missed":
+        filtered = filtered[
+            filtered["Winner Result"].eq("Missed")
+            | filtered["Scoring Result"].eq("Missed")
+        ]
+    return filtered
+
+
+@st.cache_data(ttl=900)
+def load_nfl_current():
+    return build_current_slate()
+
+
+@st.cache_data(ttl=900)
+def load_nfl_historical():
+    return build_historical_lab(2025)
+
+
+def render_nfl_current():
+    slate, meta = load_nfl_current()
+    if slate.empty:
+        st.info("No upcoming NFL games found.")
+        st.markdown(
+            f'[Open Historical Lab]({query_link({"sport": "NFL", "mode": "lab", "filter": "all", "week": "all"})})'
+        )
+        return
+
+    st.caption(f"Season {meta['season']} - Week {meta['week']}")
+    selected_filter = selected_nfl_filter("all")
+    st.html('<div class="nfl-control-label">Filter</div>')
+    render_nfl_pills(
+        [
+            ("All", "all"),
+            ("Signals", "signals"),
+            ("Side", "side"),
+            ("Scoring", "scoring"),
+            ("A", "a"),
+            ("Pass", "pass"),
+        ],
+        selected_filter,
+        {"mode": "current", "week": "all"},
+    )
+    filtered = filter_nfl_games(slate, selected_filter)
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Games", len(slate))
+    c2.metric("Model Signals", len(slate[slate["Model Signal"] != "Pass"]))
+    c3.metric("Side Edges", len(slate[slate["Side Edge"] != "Pass"]))
+    c4.metric(
+        "Scoring Signals",
+        len(slate[slate["Scoring Edge"] != "Neutral Scoring Environment"]),
+    )
+
+    if filtered.empty:
+        st.info("No NFL games match the selected filter.")
+        return
+
+    for _, row in filtered.iterrows():
+        render_nfl_card(row)
+
+
+def render_nfl_historical():
+    results, summary = load_nfl_historical()
+
+    selected_filter = selected_nfl_filter("all")
+    st.html('<div class="nfl-control-label">Filter</div>')
+    render_nfl_pills(
+        [
+            ("All", "all"),
+            ("Signals", "signals"),
+            ("Correct", "correct"),
+            ("Missed", "missed"),
+            ("Side", "side"),
+            ("Scoring", "scoring"),
+            ("A", "a"),
+        ],
+        selected_filter,
+        {"mode": "lab", "week": selected_nfl_week()},
+    )
+
+    week_options = ["All Weeks"] + [f"Week {week}" for week in range(1, 19)]
+    current_week = selected_nfl_week()
+    week_index = 0 if current_week == "all" else int(current_week)
+    selected_week = st.selectbox(
+        "Week",
+        week_options,
+        index=week_index,
+        key="nfl_historical_week_select",
+    )
+    desired_week_param = "all" if selected_week == "All Weeks" else selected_week.split()[-1]
+    if desired_week_param != current_week:
+        st.query_params["sport"] = "NFL"
+        st.query_params["mode"] = "lab"
+        st.query_params["filter"] = selected_filter
+        st.query_params["week"] = desired_week_param
+        st.rerun()
+
+    filtered = results.copy()
+    if selected_week != "All Weeks":
+        filtered = filtered[filtered["Week"] == int(selected_week.split()[-1])]
+    filtered = filter_nfl_games(filtered, selected_filter, historical=True)
+
+    st.subheader("2025 Historical Lab")
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("Games", int(summary["games"]))
+    c2.metric("Winner Acc", f"{summary['winner_accuracy']:.1%}")
+    c3.metric("Side Signal Acc", f"{summary['side_signal_accuracy']:.1%}")
+    c4.metric("Scoring Acc", f"{summary['scoring_signal_accuracy']:.1%}")
+    c5.metric("Margin MAE", summary["margin_mae"])
+    c6.metric("Total MAE", summary["total_mae"])
+
+    confidence_table, scoring_table = historical_summary_tables(results)
+    table_left, table_right = st.columns(2)
+    with table_left:
+        st.markdown("#### Confidence Tiers")
+        st.dataframe(confidence_table, width="stretch", hide_index=True)
+    with table_right:
+        st.markdown("#### Scoring Environment")
+        st.dataframe(scoring_table, width="stretch", hide_index=True)
+
+    if filtered.empty:
+        st.info("No historical NFL games match the selected filters.")
+        return
+
+    filtered = filtered.sort_values(["Week", "Game"])
+    for _, row in filtered.iterrows():
+        render_nfl_card(row, historical=True)
+
+
+def render_nfl_page():
+    st.title("NFL Edge Detector")
+    st.caption("Outcome and scoring-environment model signals")
+
+    mode = selected_nfl_mode()
+    render_nfl_mode_pills(mode)
+
+    if mode == "current":
+        render_nfl_current()
+    else:
+        render_nfl_historical()
+
+    with st.expander("NFL Data Sources / Model Info"):
+        st.markdown("""
+        **Game Data**: nflverse regular-season game data
+
+        **Current Slate**: nearest upcoming regular-season week, when available
+
+        **Historical Lab**: fixed 2025 regular-season model test
+
+        **Model Scope**: matchup intelligence only. No odds, market comparison, staking guidance, or betting recommendations.
+        """)
 
 
 @st.cache_data(ttl=900)
@@ -1935,7 +2323,17 @@ def load_games(selected_date, model_cache_version, display_timezone):
     return get_today_games(selected_date.isoformat(), display_timezone)
 
 
-render_sport_picker()
+active_sport = selected_sport()
+render_sport_picker(active_sport)
+
+if active_sport == "NFL":
+    render_nfl_page()
+    st.stop()
+
+if active_sport != "MLB":
+    st.title(f"{active_sport} Edge Detector")
+    st.info(f"{active_sport} module is coming soon.")
+    st.stop()
 
 st.title("⚾ MLB Edge Detector")
 
@@ -2229,7 +2627,7 @@ else:
             {logo_matchup}
 
             <div class="game-title">{row["Game"]}</div>
-            <div class="muted">{row["Game Time"]} • {row["Status"]}</div>
+            <div class="muted">{row["Game Time"]} - {row["Status"]}</div>
 
             {data_quality_notice}
             <input class="edge-view-control edge-view-first" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-first" checked>
