@@ -2085,10 +2085,10 @@ def render_nfl_card(row, historical=False):
         result_line = f"""
         <div class="muted">
             Final: <strong>{escape(str(row["Away Score"]))}-{escape(str(row["Home Score"]))}</strong>
-            &nbsp; â€¢ &nbsp; Winner: <strong>{escape(str(row["Winner Result"]))}</strong>
-            &nbsp; â€¢ &nbsp; Scoring: <strong>{escape(str(row["Scoring Result"]))}</strong>
-            &nbsp; â€¢ &nbsp; Margin Error: <strong>{escape(str(row["Margin Error"]))}</strong>
-            &nbsp; â€¢ &nbsp; Total Error: <strong>{escape(str(row["Total Error"]))}</strong>
+            &nbsp; - &nbsp; Winner: <strong>{escape(str(row["Winner Result"]))}</strong>
+            &nbsp; - &nbsp; Scoring: <strong>{escape(str(row["Scoring Result"]))}</strong>
+            &nbsp; - &nbsp; Margin Error: <strong>{escape(str(row["Margin Error"]))}</strong>
+            &nbsp; - &nbsp; Total Error: <strong>{escape(str(row["Total Error"]))}</strong>
         </div>
         """
 
@@ -2099,7 +2099,7 @@ def render_nfl_card(row, historical=False):
         <span class="badge badge-edge">Confidence {escape(str(row["Confidence"]))}</span>
 
         <div class="game-title">{escape(str(row["Game"]))}</div>
-        <div class="muted">{escape(str(row["Game Time"]))} â€¢ {escape(str(row["Status"]))}</div>
+        <div class="muted">{escape(str(row["Game Time"]))} - {escape(str(row["Status"]))}</div>
 
         <div class="decision-stack">
             <div class="decision-line decision-first">Side Edge: {escape(str(row["Side Edge"]))}</div>
@@ -2192,7 +2192,7 @@ def render_nfl_current():
         )
         return
 
-    st.caption(f"Season {meta['season']} â€¢ Week {meta['week']}")
+    st.caption(f"Season {meta['season']} - Week {meta['week']}")
     selected_filter = selected_nfl_filter("all")
     st.html('<div class="nfl-control-label">Filter</div>')
     render_nfl_pills(
