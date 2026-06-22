@@ -1268,6 +1268,83 @@ def weighted_relative_impact(value, neutral, factor_weight, cap):
     )
 
 
+def classify_first_inning_matchup_pressure(
+    offense_yrfi,
+    opposing_pitcher_yrfi,
+    league_yrfi=LEAGUE_YRFI_AVG,
+):
+    offense_yrfi = safe_float(offense_yrfi)
+    opposing_pitcher_yrfi = safe_float(opposing_pitcher_yrfi)
+    league_yrfi = safe_float(league_yrfi) or 32
+    meaningful_gap = 3
+
+    if offense_yrfi is None or opposing_pitcher_yrfi is None:
+        return "Neutral", 0
+
+    strength = round(
+        ((offense_yrfi - league_yrfi) + (opposing_pitcher_yrfi - league_yrfi)) / 2,
+        1,
+    )
+
+    if (
+        offense_yrfi >= league_yrfi + meaningful_gap
+        and opposing_pitcher_yrfi >= league_yrfi + meaningful_gap
+    ):
+        return "Strong YRFI", strength
+    if offense_yrfi >= league_yrfi and opposing_pitcher_yrfi >= league_yrfi:
+        return "YRFI", strength
+    if (
+        offense_yrfi <= league_yrfi - meaningful_gap
+        and opposing_pitcher_yrfi <= league_yrfi - meaningful_gap
+    ):
+        return "Strong NRFI", strength
+    if offense_yrfi <= league_yrfi and opposing_pitcher_yrfi <= league_yrfi:
+        return "NRFI", strength
+
+    return "Neutral", strength
+
+
+def summarize_first_inning_matchup_pressure(away_pressure, home_pressure):
+    yrfi_pressures = {"YRFI", "Strong YRFI"}
+    nrfi_pressures = {"NRFI", "Strong NRFI"}
+    away_yrfi = away_pressure in yrfi_pressures
+    home_yrfi = home_pressure in yrfi_pressures
+    away_nrfi = away_pressure in nrfi_pressures
+    home_nrfi = home_pressure in nrfi_pressures
+
+    if away_yrfi and home_yrfi:
+        return "Both sides support YRFI"
+    if (away_yrfi and home_pressure == "Neutral") or (home_yrfi and away_pressure == "Neutral"):
+        return "One-sided YRFI path"
+    if (away_yrfi and home_nrfi) or (home_yrfi and away_nrfi):
+        return "Mixed profile; one-sided YRFI path"
+    if away_nrfi and home_nrfi:
+        return "Both sides suppress first-inning scoring"
+    if (away_nrfi and home_pressure == "Neutral") or (home_nrfi and away_pressure == "Neutral"):
+        return "Weak NRFI support"
+
+    return "No clear matchup pressure"
+
+
+def calculate_first_inning_matchup_modifier(away_pressure, home_pressure):
+    summary = summarize_first_inning_matchup_pressure(away_pressure, home_pressure)
+
+    if summary == "Both sides support YRFI":
+        return 4
+    if summary == "One-sided YRFI path":
+        return 2
+    if summary == "Mixed profile; one-sided YRFI path":
+        if "Strong YRFI" in [away_pressure, home_pressure]:
+            return 2
+        return 0
+    if summary == "Both sides suppress first-inning scoring":
+        return -4
+    if summary == "Weak NRFI support":
+        return -1
+
+    return 0
+
+
 def calculate_first_inning_decision(
     away_pitcher_yrfi,
     home_pitcher_yrfi,
@@ -1895,6 +1972,25 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
                 LEAGUE_YRFI_AVG,
             )
 
+            away_matchup_pressure, away_matchup_strength = classify_first_inning_matchup_pressure(
+                away_first_live["Offense YRFI %"],
+                home_pitcher_first["Pitcher YRFI %"],
+                LEAGUE_YRFI_AVG,
+            )
+            home_matchup_pressure, home_matchup_strength = classify_first_inning_matchup_pressure(
+                home_first_live["Offense YRFI %"],
+                away_pitcher_first["Pitcher YRFI %"],
+                LEAGUE_YRFI_AVG,
+            )
+            first_inning_matchup_summary = summarize_first_inning_matchup_pressure(
+                away_matchup_pressure,
+                home_matchup_pressure,
+            )
+            first_inning_matchup_modifier = calculate_first_inning_matchup_modifier(
+                away_matchup_pressure,
+                home_matchup_pressure,
+            )
+
             f5_pick, f5_confidence, f5_score = calculate_f5_decision(
                 starter_edge_winner,
                 starter_edge_margin,
@@ -2032,6 +2128,12 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
                 "Home Offense YRFI %": home_first_live["Offense YRFI %"],
                 "Away 1st Run Avg": away_first_live["1st Run Avg"],
                 "Home 1st Run Avg": home_first_live["1st Run Avg"],
+                "Away 1st Inning Matchup Pressure": away_matchup_pressure,
+                "Home 1st Inning Matchup Pressure": home_matchup_pressure,
+                "Away 1st Inning Matchup Strength": away_matchup_strength,
+                "Home 1st Inning Matchup Strength": home_matchup_strength,
+                "1st Inning Matchup Summary": first_inning_matchup_summary,
+                "1st Inning Matchup Modifier": first_inning_matchup_modifier,
 
                 "Away Pitcher YRFI %": away_pitcher_first["Pitcher YRFI %"],
                 "Home Pitcher YRFI %": home_pitcher_first["Pitcher YRFI %"],

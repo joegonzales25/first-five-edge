@@ -14,8 +14,8 @@ from model_history import (
     record_model_history,
 )
 
-APP_VERSION = "2.3.8"
-MODEL_CACHE_VERSION = "edge-v238-pitcher-stats-cache-hotfix"
+APP_VERSION = "2.3.9"
+MODEL_CACHE_VERSION = "edge-v239-first-inning-matchup-pressure"
 # Keep performance history stable across UI/cache releases. Change this only
 # when the model baseline, grading definition, or history schema intentionally changes.
 PERFORMANCE_TRACKING_VERSION = "2.3.6"
@@ -2714,6 +2714,18 @@ else:
             """)
             if first_signal_active:
                 st.caption("\\* - Edge Signal")
+
+            st.markdown("### 1st Inning Matchup Pressure")
+            st.markdown(f"""
+            | Matchup | Offense YRFI% | Opp Starter YRFI% | Read |
+            |---|---|---|---|
+            | {away_team} offense vs {home_team} starter | {away_offense_yrfi_display} | {home_pitcher_yrfi_display} | {get_row_value(row, "Away 1st Inning Matchup Pressure", "Neutral")} |
+            | {home_team} offense vs {away_team} starter | {home_offense_yrfi_display} | {away_pitcher_yrfi_display} | {get_row_value(row, "Home 1st Inning Matchup Pressure", "Neutral")} |
+            """)
+            st.caption(
+                f'Matchup summary: {get_row_value(row, "1st Inning Matchup Summary", "No clear matchup pressure")} '
+                f'| Review modifier: {get_row_value(row, "1st Inning Matchup Modifier", 0)}'
+            )
 
             st.markdown("---")
             st.markdown("### Bullpen Usage")
