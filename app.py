@@ -14,8 +14,8 @@ from model_history import (
     record_model_history,
 )
 
-APP_VERSION = "2.3.9"
-MODEL_CACHE_VERSION = "edge-v239-first-inning-matchup-pressure"
+APP_VERSION = "2.3.10"
+MODEL_CACHE_VERSION = "edge-v2310-first-inning-key-factors"
 # Keep performance history stable across UI/cache releases. Change this only
 # when the model baseline, grading definition, or history schema intentionally changes.
 PERFORMANCE_TRACKING_VERSION = "2.3.6"
@@ -1482,8 +1482,45 @@ def build_key_factors(row, view="first", away_team=None, home_team=None):
     factors = []
 
     if view == "first":
-        factors.append("Primary drivers: pitcher and offense YRFI rates")
-        factors.append("Support checks: 1st ERA, 1st WHIP, 1st run avg")
+        pick = str(get_row_value(row, "First Inning Pick", "No Edge"))
+        score = get_numeric_value(row, "First Inning Score")
+        league_yrfi = get_numeric_value(row, "League YRFI %")
+        pitcher_yrfi = average_available_values([
+            get_numeric_value(row, "Away Pitcher YRFI %"),
+            get_numeric_value(row, "Home Pitcher YRFI %"),
+        ])
+        offense_yrfi = average_available_values([
+            get_numeric_value(row, "Away Offense YRFI %"),
+            get_numeric_value(row, "Home Offense YRFI %"),
+        ])
+        matchup_summary = get_row_value(
+            row,
+            "1st Inning Matchup Summary",
+            "No clear matchup pressure",
+        )
+
+        if score is not None:
+            if "YRFI" in pick.upper():
+                factors.append(f"Score {score:g}: YRFI pressure above neutral")
+            elif "NRFI" in pick.upper():
+                factors.append(f"Score {score:g}: NRFI pressure below neutral")
+            else:
+                factors.append(f"Score {score:g}: no clear first-inning edge")
+
+        if pitcher_yrfi is not None and league_yrfi is not None:
+            direction = "above" if pitcher_yrfi >= league_yrfi else "below"
+            factors.append(
+                f"Pitcher YRFI avg {pitcher_yrfi:.1f}% is {direction} league {league_yrfi:.1f}%"
+            )
+
+        if matchup_summary not in [None, "", "N/A"]:
+            factors.append(f"Matchup: {matchup_summary}")
+
+        if len(factors) < 3 and offense_yrfi is not None and league_yrfi is not None:
+            direction = "above" if offense_yrfi >= league_yrfi else "below"
+            factors.append(
+                f"Offense YRFI avg {offense_yrfi:.1f}% is {direction} league {league_yrfi:.1f}%"
+            )
 
     elif view == "f5":
         factors.append(edge_signal_text(
