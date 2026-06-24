@@ -1,4 +1,5 @@
 import streamlit as st
+import pandas as pd
 from datetime import datetime, timedelta
 from html import escape
 import re
@@ -8,6 +9,13 @@ from nfl_agent import (
     build_current_slate,
     build_historical_lab,
     historical_summary_tables,
+)
+from wnba_agent import (
+    backtest_no_rest_schedule,
+    build_current_season_lab as build_wnba_current_season_lab,
+    build_current_slate as build_wnba_current_slate,
+    backtest_schedule as build_wnba_historical_lab,
+    historical_summary_tables as wnba_historical_summary_tables,
 )
 from model_history import (
     load_performance_summary,
@@ -23,6 +31,7 @@ FALLBACK_TIMEZONE = "America/New_York"
 SPORT_CONFIG = {
     "MLB": {"enabled": True},
     "NFL": {"enabled": True},
+    "WNBA": {"enabled": True},
     "NBA": {"enabled": False},
     "NHL": {"enabled": False},
     "CBB": {"enabled": False},
@@ -2089,6 +2098,43 @@ def render_nfl_mode_pills(active_mode):
     st.html(f'<div class="nfl-control-row">{"".join(pills)}</div>')
 
 
+def render_wnba_mode_pills(active_mode):
+    options = [("Current Slate", "current"), ("Historical Lab", "lab")]
+    pills = []
+    for label, mode in options:
+        classes = ["nfl-control-pill"]
+        if mode == active_mode:
+            classes.append("active")
+        pills.append(
+            f'<a class="{" ".join(classes)}" href="{query_link({"sport": "WNBA", "mode": mode, "filter": "all"})}">'
+            f'{escape(label)}</a>'
+        )
+    st.html(f'<div class="nfl-control-row">{"".join(pills)}</div>')
+
+
+def render_wnba_filter_pills(active_filter, mode="lab"):
+    options = [
+        ("All", "all"),
+        ("Signals", "signals"),
+        ("Correct", "correct"),
+        ("Missed", "missed"),
+        ("Side", "side"),
+        ("Scoring", "scoring"),
+        ("A", "a"),
+        ("Pass", "pass"),
+    ]
+    pills = []
+    for label, value in options:
+        classes = ["nfl-control-pill"]
+        if value == active_filter:
+            classes.append("active")
+        pills.append(
+            f'<a class="{" ".join(classes)}" href="{query_link({"sport": "WNBA", "mode": mode, "filter": value})}">'
+            f'{escape(label)}</a>'
+        )
+    st.html(f'<div class="nfl-control-row">{"".join(pills)}</div>')
+
+
 def render_sport_picker(active_sport):
     pills = []
     for sport, config in SPORT_CONFIG.items():
@@ -2166,6 +2212,120 @@ def render_nfl_card(row, historical=False):
             | Total Error | {row["Total Error"]} |
             """)
 
+        st.markdown("### Key Factors")
+        for factor in row["Key Factors List"]:
+            st.markdown(f"- {factor}")
+
+        st.markdown("### Model Detail")
+        st.markdown(f"""
+        | Metric | Value |
+        |---|---|
+        | Side Edge | {row["Side Edge"]} |
+        | Scoring Environment | {row["Scoring Edge"]} |
+        | Early Edge | {row["Early Edge"]} |
+        | Edge Score | {row["Edge Score"]} |
+        | Confidence | {row["Confidence"]} |
+        | Model Margin | {row["Model Margin"]} |
+        | Projected Total | {row["Projected Total"]} |
+        | League Total Baseline | {row["League Total Baseline"]} |
+        """)
+
+
+def wnba_key_factor_groups(row):
+    factors = row.get("Key Factors List", [])
+    if not isinstance(factors, list):
+        factors = [
+            note.strip()
+            for note in str(row.get("Agent Notes", "")).split(";")
+            if note.strip()
+        ]
+
+    primary = []
+    support = []
+    for factor in factors:
+        text = str(factor)
+        lower = text.lower()
+        if (
+            "team-strength" in lower
+            or "threshold" in lower
+            or "side edge" in lower
+            or "home-court" in lower
+        ):
+            primary.append(text)
+        else:
+            support.append(text)
+
+    if not primary and factors:
+        primary = [str(factors[0])]
+        support = [str(factor) for factor in factors[1:]]
+
+    return primary[:2], support[:2]
+
+
+def render_wnba_key_factors(row):
+    primary, support = wnba_key_factor_groups(row)
+    if not primary and not support:
+        primary = ["Neutral model profile"]
+
+    items = []
+    if primary:
+        items.append(
+            '<div class="reason-item">'
+            '<span class="reason-check">&#10003;</span>'
+            f'<span>Primary drivers: {escape("; ".join(primary))}</span>'
+            '</div>'
+        )
+    if support:
+        items.append(
+            '<div class="reason-item">'
+            '<span class="reason-check">&#10003;</span>'
+            f'<span>Support checks: {escape("; ".join(support))}</span>'
+            '</div>'
+        )
+
+    return (
+        '<div class="key-factors">'
+        '<div class="market-heading">Key Factors: Full Game Edge</div>'
+        f'<div class="reason-stack">{"".join(items)}</div>'
+        '</div>'
+    )
+
+
+def render_wnba_card(row, historical=False):
+    result_line = ""
+    if historical:
+        result_line = f"""
+        <div class="muted">
+            Final: <strong>{escape(str(row["Away Score"]))}-{escape(str(row["Home Score"]))}</strong>
+            &nbsp; - &nbsp; Winner: <strong>{escape(str(row["Winner Result"]))}</strong>
+            &nbsp; - &nbsp; Scoring: <strong>{escape(str(row["Scoring Result"]))}</strong>
+            &nbsp; - &nbsp; Margin Error: <strong>{escape(str(row["Margin Error"]))}</strong>
+            &nbsp; - &nbsp; Total Error: <strong>{escape(str(row["Total Error"]))}</strong>
+        </div>
+        """
+
+    st.html(f"""
+    <div class="game-card">
+        <span class="badge {nfl_signal_class(row)}">{escape(str(row["Model Signal"]))}</span>
+        <span class="badge badge-edge">Edge {escape(str(row["Edge Score"]))}</span>
+        <span class="badge badge-edge">Confidence {escape(str(row["Confidence"]))}</span>
+
+        <div class="game-title">{escape(str(row["Game"]))}</div>
+        <div class="muted">{escape(str(row["Game Time"]))} - {escape(str(row["Status"]))}</div>
+
+        <div class="decision-stack">
+            <div class="decision-line decision-first">Side Edge: {escape(str(row["Side Edge"]))}</div>
+            <div class="decision-line decision-f5">Scoring Environment: {escape(str(row["Scoring Edge"]))}</div>
+            <div class="decision-line decision-full">Early Edge: {escape(str(row["Early Edge"]))}</div>
+        </div>
+
+        {render_wnba_key_factors(row)}
+
+        {result_line}
+    </div>
+    """)
+
+    with st.expander(f"Analysis: {row['Game']}"):
         st.markdown("### Key Factors")
         for factor in row["Key Factors List"]:
             st.markdown(f"- {factor}")
@@ -2355,6 +2515,253 @@ def render_nfl_page():
         """)
 
 
+def wnba_data_contract_text():
+    return """
+    Required columns:
+
+    ```text
+    season
+    game_date
+    away_team
+    home_team
+    away_score
+    home_score
+    ```
+
+    Optional columns:
+
+    ```text
+    game_id
+    away_rest
+    home_rest
+    ```
+    """
+
+
+def render_wnba_current():
+    default_date = current_date_for_timezone(FALLBACK_TIMEZONE)
+    selected_date = st.date_input(
+        "Slate Date",
+        value=default_date,
+        format="MM/DD/YYYY",
+        key="wnba_slate_date",
+    )
+
+    try:
+        slate, meta = load_wnba_current(selected_date)
+    except Exception as exc:
+        st.error(f"Could not load WNBA current slate: {exc}")
+        return
+
+    if slate.empty:
+        st.info("No WNBA games found for the selected slate date.")
+        return
+
+    selected_filter = selected_nfl_filter("all")
+    st.html('<div class="nfl-control-label">Filter</div>')
+    render_wnba_filter_pills(selected_filter, mode="current")
+    filtered = filter_nfl_games(slate, selected_filter)
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Games", len(slate))
+    c2.metric("Model Signals", len(slate[slate["Model Signal"] != "Pass"]))
+    c3.metric("Side Edges", len(slate[slate["Side Edge"] != "Pass"]))
+    c4.metric(
+        "Scoring Signals",
+        len(slate[slate["Scoring Edge"] != "Neutral Scoring Environment"]),
+    )
+
+    if filtered.empty:
+        st.info("No WNBA games match the selected filter.")
+        return
+
+    for _, row in filtered.iterrows():
+        render_wnba_card(row)
+
+
+def render_wnba_summary_tables(tables):
+    core = tables.get("core")
+    if core is not None and not core.empty:
+        st.markdown("#### Core")
+        st.dataframe(core, width="stretch", hide_index=True)
+
+    left, right = st.columns(2)
+    with left:
+        st.markdown("#### Confidence Tiers")
+        confidence = tables.get("confidence")
+        if confidence is not None and not confidence.empty:
+            st.dataframe(confidence, width="stretch", hide_index=True)
+        else:
+            st.caption("No confidence-tier rows yet.")
+
+        st.markdown("#### Side Location")
+        side_location = tables.get("side_location")
+        if side_location is not None and not side_location.empty:
+            st.dataframe(side_location, width="stretch", hide_index=True)
+        else:
+            st.caption("No side signals yet.")
+
+    with right:
+        st.markdown("#### Scoring Environment")
+        scoring = tables.get("scoring")
+        if scoring is not None and not scoring.empty:
+            st.dataframe(scoring, width="stretch", hide_index=True)
+        else:
+            st.caption("No high/low scoring signals yet.")
+
+        st.markdown("#### Team History")
+        history = tables.get("history")
+        if history is not None and not history.empty:
+            st.dataframe(history, width="stretch", hide_index=True)
+        else:
+            st.caption("No history split rows yet.")
+
+    rest = tables.get("rest")
+    if rest is not None and not rest.empty:
+        st.markdown("#### Rest Context")
+        st.dataframe(rest, width="stretch", hide_index=True)
+
+
+def render_wnba_historical():
+    uploaded = st.file_uploader(
+        "WNBA historical/current-season CSV",
+        type=["csv"],
+        key="wnba_historical_csv",
+    )
+
+    with st.expander("CSV Data Contract", expanded=uploaded is None):
+        st.markdown(wnba_data_contract_text())
+
+    if uploaded is None:
+        st.info("Upload a normalized WNBA games CSV to run the v1.0 model lab, or use Current Slate for the live ESPN-fed test surface.")
+        try:
+            current_results, current_summary = load_wnba_current_lab()
+        except Exception:
+            return
+
+        if current_results.empty:
+            return
+
+        st.subheader("Current Season Completed Games")
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        c1.metric("Games", int(current_summary["games"]))
+        c2.metric("Winner Acc", f"{current_summary['winner_accuracy']:.1%}")
+        c3.metric("Side Signal Acc", f"{current_summary['side_signal_accuracy']:.1%}")
+        c4.metric("Scoring Acc", f"{current_summary['scoring_signal_accuracy']:.1%}")
+        c5.metric("Margin MAE", current_summary["margin_mae"])
+        c6.metric("Total MAE", current_summary["total_mae"])
+        render_wnba_summary_tables(wnba_historical_summary_tables(current_results))
+        return
+
+    try:
+        games = pd.read_csv(uploaded)
+    except Exception as exc:
+        st.error(f"Could not read CSV: {exc}")
+        return
+
+    if "season" not in games.columns:
+        st.error("CSV is missing required column: season")
+        return
+
+    seasons = sorted(
+        int(season)
+        for season in pd.to_numeric(games["season"], errors="coerce").dropna().unique()
+    )
+    season_options = ["All Seasons"] + [str(season) for season in seasons]
+    default_index = len(season_options) - 1 if len(season_options) > 1 else 0
+    selected_season = st.selectbox(
+        "Season",
+        season_options,
+        index=default_index,
+        key="wnba_lab_season",
+    )
+    season = None if selected_season == "All Seasons" else int(selected_season)
+    compare_no_rest = st.checkbox(
+        "Show no-rest ablation",
+        value=True,
+        key="wnba_compare_no_rest",
+    )
+
+    try:
+        results, summary = build_wnba_historical_lab(games, season)
+    except Exception as exc:
+        st.error(f"Could not run WNBA model: {exc}")
+        return
+
+    if results.empty:
+        st.info("No completed WNBA games found for the selected data.")
+        return
+
+    tables = wnba_historical_summary_tables(results)
+    st.subheader("WNBA Historical Lab")
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("Games", int(summary["games"]))
+    c2.metric("Winner Acc", f"{summary['winner_accuracy']:.1%}")
+    c3.metric("Side Signal Acc", f"{summary['side_signal_accuracy']:.1%}")
+    c4.metric("Scoring Acc", f"{summary['scoring_signal_accuracy']:.1%}")
+    c5.metric("Margin MAE", summary["margin_mae"])
+    c6.metric("Total MAE", summary["total_mae"])
+
+    if compare_no_rest:
+        try:
+            _, no_rest_summary = backtest_no_rest_schedule(games, season)
+            st.caption(
+                "No-rest ablation: "
+                f"side signal accuracy {no_rest_summary['side_signal_accuracy']:.1%}, "
+                f"margin MAE {no_rest_summary['margin_mae']}"
+            )
+        except Exception as exc:
+            st.warning(f"No-rest ablation could not run: {exc}")
+
+    render_wnba_summary_tables(tables)
+
+    selected_filter = selected_nfl_filter("all")
+    st.html('<div class="nfl-control-label">Filter</div>')
+    render_wnba_filter_pills(selected_filter, mode="lab")
+    filtered = filter_nfl_games(results, selected_filter, historical=True)
+
+    if filtered.empty:
+        st.info("No WNBA games match the selected filter.")
+        return
+
+    filtered = filtered.sort_values(["Game Date", "Game"])
+    for _, row in filtered.iterrows():
+        render_wnba_card(row, historical=True)
+
+
+def render_wnba_page():
+    st.title("WNBA Edge Detector")
+    mode = selected_nfl_mode()
+
+    if mode == "current":
+        render_wnba_current()
+    else:
+        render_wnba_historical()
+
+    with st.expander("WNBA Data Sources / Model Info"):
+        st.markdown("""
+        **Current Status**: Historical Lab is enabled for uploaded current-season or historical game data.
+
+        **Current Slate**: ESPN scoreboard feed, v1.0 test surface.
+
+        **Model Scope**: matchup intelligence only. No odds, market comparison, staking guidance, or betting recommendations.
+        """)
+
+
+@st.cache_data(ttl=900)
+def load_wnba_current(selected_date):
+    return build_wnba_current_slate(
+        today=selected_date,
+        days_ahead=0,
+        slate_date=selected_date,
+    )
+
+
+@st.cache_data(ttl=900)
+def load_wnba_current_lab():
+    return build_wnba_current_season_lab()
+
+
 @st.cache_data(ttl=900)
 def load_games(selected_date, model_cache_version, display_timezone):
     return get_today_games(selected_date.isoformat(), display_timezone)
@@ -2365,6 +2772,10 @@ render_sport_picker(active_sport)
 
 if active_sport == "NFL":
     render_nfl_page()
+    st.stop()
+
+if active_sport == "WNBA":
+    render_wnba_page()
     st.stop()
 
 if active_sport != "MLB":
