@@ -24,8 +24,8 @@ from model_history import (
     record_model_history,
 )
 
-APP_VERSION = "2.3.12"
-MODEL_CACHE_VERSION = "edge-v2312-performance-import-guard"
+APP_VERSION = "2.3.13"
+MODEL_CACHE_VERSION = "edge-v2313-performance-snapshot-diagnostics"
 # Keep performance history stable across UI/cache releases. Change this only
 # when the model baseline, grading definition, or history schema intentionally changes.
 PERFORMANCE_TRACKING_VERSION = "2.3.6"
@@ -1855,9 +1855,12 @@ def safe_load_history_diagnostics():
             "completed_rows": 0,
             "pending_rows": 0,
             "no_edge_rows": 0,
+            "result_updated_rows": 0,
             "model_versions": [],
             "earliest_slate_date": None,
             "latest_slate_date": None,
+            "earliest_snapshot": None,
+            "latest_snapshot": None,
             "latest_update": None,
         }
 
@@ -2024,6 +2027,10 @@ def render_model_performance(model_version, slate_date):
         with diag_cols[3]:
             st.metric("No Edge", diagnostics["no_edge_rows"])
 
+        st.caption(
+            "Snapshot rule: pick, confidence, and score are stored once on first snapshot; "
+            "later page loads update only result, outcome, status, and updated timestamp."
+        )
         st.caption(f"Storage: {diagnostics['storage_backend']}")
         st.code(diagnostics["db_path"], language="text")
         st.caption(
@@ -2031,6 +2038,9 @@ def render_model_performance(model_version, slate_date):
             f"{diagnostics['earliest_slate_date'] or 'N/A'} to "
             f"{diagnostics['latest_slate_date'] or 'N/A'}"
         )
+        st.caption(f"Rows with result updates: {diagnostics['result_updated_rows']}")
+        st.caption(f"First snapshot: {diagnostics['earliest_snapshot'] or 'N/A'}")
+        st.caption(f"Latest snapshot: {diagnostics['latest_snapshot'] or 'N/A'}")
         st.caption(f"Latest update: {diagnostics['latest_update'] or 'N/A'}")
         st.caption(
             "Model versions: "

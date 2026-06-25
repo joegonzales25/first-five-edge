@@ -315,9 +315,12 @@ def load_history_diagnostics(db_path=DB_PATH):
         "completed_rows": 0,
         "pending_rows": 0,
         "no_edge_rows": 0,
+        "result_updated_rows": 0,
         "model_versions": [],
         "earliest_slate_date": None,
         "latest_slate_date": None,
+        "earliest_snapshot": None,
+        "latest_snapshot": None,
         "latest_update": None,
     }
 
@@ -333,8 +336,11 @@ def load_history_diagnostics(db_path=DB_PATH):
                 SUM(CASE WHEN outcome IN ('Hit', 'Miss', 'Push') THEN 1 ELSE 0 END) AS completed_rows,
                 SUM(CASE WHEN outcome = 'Pending' THEN 1 ELSE 0 END) AS pending_rows,
                 SUM(CASE WHEN outcome = 'No Edge' THEN 1 ELSE 0 END) AS no_edge_rows,
+                SUM(CASE WHEN updated_at != created_at THEN 1 ELSE 0 END) AS result_updated_rows,
                 MIN(slate_date) AS earliest_slate_date,
                 MAX(slate_date) AS latest_slate_date,
+                MIN(created_at) AS earliest_snapshot,
+                MAX(created_at) AS latest_snapshot,
                 MAX(updated_at) AS latest_update
             FROM model_history
             """
@@ -355,8 +361,11 @@ def load_history_diagnostics(db_path=DB_PATH):
                 "completed_rows": row["completed_rows"] or 0,
                 "pending_rows": row["pending_rows"] or 0,
                 "no_edge_rows": row["no_edge_rows"] or 0,
+                "result_updated_rows": row["result_updated_rows"] or 0,
                 "earliest_slate_date": row["earliest_slate_date"],
                 "latest_slate_date": row["latest_slate_date"],
+                "earliest_snapshot": row["earliest_snapshot"],
+                "latest_snapshot": row["latest_snapshot"],
                 "latest_update": row["latest_update"],
                 "model_versions": [version["model_version"] for version in versions],
             }
