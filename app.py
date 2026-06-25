@@ -20,14 +20,12 @@ from wnba_agent import (
     historical_summary_tables as wnba_historical_summary_tables,
 )
 from model_history import (
-    load_history_diagnostics,
     load_performance_summary,
-    load_performance_export_rows,
     record_model_history,
 )
 
-APP_VERSION = "2.3.11"
-MODEL_CACHE_VERSION = "edge-v2311-performance-history-diagnostics"
+APP_VERSION = "2.3.12"
+MODEL_CACHE_VERSION = "edge-v2312-performance-import-guard"
 # Keep performance history stable across UI/cache releases. Change this only
 # when the model baseline, grading definition, or history schema intentionally changes.
 PERFORMANCE_TRACKING_VERSION = "2.3.6"
@@ -1844,6 +1842,35 @@ def safe_load_model_versions():
         return []
 
 
+def safe_load_history_diagnostics():
+    try:
+        from model_history import load_history_diagnostics
+
+        return load_history_diagnostics()
+    except (ImportError, AttributeError):
+        return {
+            "storage_backend": "Unavailable",
+            "db_path": "N/A",
+            "total_rows": 0,
+            "completed_rows": 0,
+            "pending_rows": 0,
+            "no_edge_rows": 0,
+            "model_versions": [],
+            "earliest_slate_date": None,
+            "latest_slate_date": None,
+            "latest_update": None,
+        }
+
+
+def safe_load_performance_export_rows(model_version=None):
+    try:
+        from model_history import load_performance_export_rows
+
+        return load_performance_export_rows(model_version)
+    except (ImportError, AttributeError):
+        return []
+
+
 def rows_to_csv(rows):
     if not rows:
         return ""
@@ -1983,8 +2010,8 @@ def render_model_performance(model_version, slate_date):
         exact_date=exact_date,
     )
 
-    export_rows = load_performance_export_rows(selected_model_version)
-    diagnostics = load_history_diagnostics()
+    export_rows = safe_load_performance_export_rows(selected_model_version)
+    diagnostics = safe_load_history_diagnostics()
 
     with st.expander("Performance History Diagnostics"):
         diag_cols = st.columns(4)
