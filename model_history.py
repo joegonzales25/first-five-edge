@@ -304,6 +304,112 @@ def load_model_versions(db_path=DB_PATH):
     return [row["model_version"] for row in rows]
 
 
+def load_history_diagnostics(db_path=DB_PATH):
+    db_path = Path(db_path)
+    diagnostics = {
+        "storage_backend": "SQLite",
+        "db_path": str(db_path),
+        "exists": db_path.exists(),
+        "size_bytes": db_path.stat().st_size if db_path.exists() else 0,
+        "total_rows": 0,
+        "completed_rows": 0,
+        "pending_rows": 0,
+        "no_edge_rows": 0,
+        "model_versions": [],
+        "earliest_slate_date": None,
+        "latest_slate_date": None,
+        "latest_update": None,
+    }
+
+    if not db_path.exists():
+        return diagnostics
+
+    with connect(db_path) as connection:
+        init_db(connection)
+        row = connection.execute(
+            """
+            SELECT
+                COUNT(*) AS total_rows,
+                SUM(CASE WHEN outcome IN ('Hit', 'Miss', 'Push') THEN 1 ELSE 0 END) AS completed_rows,
+                SUM(CASE WHEN outcome = 'Pending' THEN 1 ELSE 0 END) AS pending_rows,
+                SUM(CASE WHEN outcome = 'No Edge' THEN 1 ELSE 0 END) AS no_edge_rows,
+                MIN(slate_date) AS earliest_slate_date,
+                MAX(slate_date) AS latest_slate_date,
+                MAX(updated_at) AS latest_update
+            FROM model_history
+            """
+        ).fetchone()
+        versions = connection.execute(
+            """
+            SELECT model_version
+            FROM model_history
+            GROUP BY model_version
+            ORDER BY MAX(updated_at) DESC, model_version DESC
+            """
+        ).fetchall()
+
+    if row:
+        diagnostics.update(
+            {
+                "total_rows": row["total_rows"] or 0,
+                "completed_rows": row["completed_rows"] or 0,
+                "pending_rows": row["pending_rows"] or 0,
+                "no_edge_rows": row["no_edge_rows"] or 0,
+                "earliest_slate_date": row["earliest_slate_date"],
+                "latest_slate_date": row["latest_slate_date"],
+                "latest_update": row["latest_update"],
+                "model_versions": [version["model_version"] for version in versions],
+            }
+        )
+
+    return diagnostics
+
+
+def load_performance_export_rows(model_version=None, db_path=DB_PATH):
+    db_path = Path(db_path)
+    if not db_path.exists():
+        return []
+
+    where_clause = ""
+    params = []
+    if model_version:
+        where_clause = "WHERE model_version = ?"
+        params.append(model_version)
+
+    with connect(db_path) as connection:
+        init_db(connection)
+        rows = connection.execute(
+            f"""
+            SELECT
+                model_version,
+                slate_date,
+                market,
+                game,
+                pick,
+                confidence,
+                score,
+                result,
+                outcome,
+                status,
+                created_at,
+                updated_at
+            FROM model_history
+            {where_clause}
+            ORDER BY date(slate_date) DESC,
+                CASE market
+                    WHEN '1st Inning' THEN 1
+                    WHEN 'First 5' THEN 2
+                    WHEN 'Full Game' THEN 3
+                    ELSE 4
+                END,
+                game
+            """,
+            params,
+        ).fetchall()
+
+    return [dict(row) for row in rows]
+
+
 def load_performance_details(
     model_version=None,
     market=None,

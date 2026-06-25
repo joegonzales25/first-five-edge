@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 from html import escape
+from io import StringIO
+import csv
 import re
 from zoneinfo import ZoneInfo
 from mlb_agent import get_today_games
@@ -18,12 +20,14 @@ from wnba_agent import (
     historical_summary_tables as wnba_historical_summary_tables,
 )
 from model_history import (
+    load_history_diagnostics,
     load_performance_summary,
+    load_performance_export_rows,
     record_model_history,
 )
 
-APP_VERSION = "2.3.10"
-MODEL_CACHE_VERSION = "edge-v2310-first-inning-key-factors"
+APP_VERSION = "2.3.11"
+MODEL_CACHE_VERSION = "edge-v2311-performance-history-diagnostics"
 # Keep performance history stable across UI/cache releases. Change this only
 # when the model baseline, grading definition, or history schema intentionally changes.
 PERFORMANCE_TRACKING_VERSION = "2.3.6"
@@ -1840,6 +1844,17 @@ def safe_load_model_versions():
         return []
 
 
+def rows_to_csv(rows):
+    if not rows:
+        return ""
+
+    buffer = StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=list(rows[0].keys()))
+    writer.writeheader()
+    writer.writerows(rows)
+    return buffer.getvalue()
+
+
 def render_model_performance_legacy_unused():
     summary_cols = []
     for index, row in enumerate(summary_rows):
@@ -1968,8 +1983,51 @@ def render_model_performance(model_version, slate_date):
         exact_date=exact_date,
     )
 
+    export_rows = load_performance_export_rows(selected_model_version)
+    diagnostics = load_history_diagnostics()
+
+    with st.expander("Performance History Diagnostics"):
+        diag_cols = st.columns(4)
+        with diag_cols[0]:
+            st.metric("Rows", diagnostics["total_rows"])
+        with diag_cols[1]:
+            st.metric("Completed", diagnostics["completed_rows"])
+        with diag_cols[2]:
+            st.metric("Pending", diagnostics["pending_rows"])
+        with diag_cols[3]:
+            st.metric("No Edge", diagnostics["no_edge_rows"])
+
+        st.caption(f"Storage: {diagnostics['storage_backend']}")
+        st.code(diagnostics["db_path"], language="text")
+        st.caption(
+            "Date range: "
+            f"{diagnostics['earliest_slate_date'] or 'N/A'} to "
+            f"{diagnostics['latest_slate_date'] or 'N/A'}"
+        )
+        st.caption(f"Latest update: {diagnostics['latest_update'] or 'N/A'}")
+        st.caption(
+            "Model versions: "
+            f"{', '.join(diagnostics['model_versions']) if diagnostics['model_versions'] else 'N/A'}"
+        )
+
+        if export_rows:
+            export_label = (
+                "all_models"
+                if selected_model_version is None
+                else str(selected_model_version).replace(".", "_")
+            )
+            st.download_button(
+                "Download Performance History CSV",
+                data=rows_to_csv(export_rows),
+                file_name=f"model_history_{export_label}.csv",
+                mime="text/csv",
+                key="performance_history_download",
+            )
+        else:
+            st.caption("No performance history rows are available to export.")
+
     if not summary_rows:
-        st.info("No graded model history found yet.")
+        st.info("No graded model history found for the selected filters.")
         return
 
     result_cards = []
