@@ -5,6 +5,7 @@ from html import escape
 from io import StringIO
 import csv
 import re
+import sqlite3
 from zoneinfo import ZoneInfo
 from mlb_agent import get_today_games
 from nfl_agent import (
@@ -24,8 +25,8 @@ from model_history import (
     record_model_history,
 )
 
-APP_VERSION = "2.3.14"
-MODEL_CACHE_VERSION = "edge-v2314-performance-diagnostic-error-detail"
+APP_VERSION = "2.3.15"
+MODEL_CACHE_VERSION = "edge-v2315-performance-direct-db-fallback"
 # Keep performance history stable across UI/cache releases. Change this only
 # when the model baseline, grading definition, or history schema intentionally changes.
 PERFORMANCE_TRACKING_VERSION = "2.3.6"
@@ -1842,6 +1843,97 @@ def safe_load_model_versions():
         return []
 
 
+def empty_history_diagnostics(storage_backend="Unavailable", module_path="N/A", error=None):
+    return {
+        "storage_backend": storage_backend,
+        "db_path": "N/A",
+        "module_path": module_path,
+        "diagnostic_error": error,
+        "total_rows": 0,
+        "completed_rows": 0,
+        "pending_rows": 0,
+        "no_edge_rows": 0,
+        "result_updated_rows": 0,
+        "model_versions": [],
+        "earliest_slate_date": None,
+        "latest_slate_date": None,
+        "earliest_snapshot": None,
+        "latest_snapshot": None,
+        "latest_update": None,
+    }
+
+
+def direct_load_history_diagnostics(previous_error=None):
+    try:
+        import model_history
+
+        module_path = getattr(model_history, "__file__", "N/A")
+        db_path = getattr(model_history, "DB_PATH", None)
+        if db_path is None:
+            return empty_history_diagnostics(
+                module_path=module_path,
+                error=f"{previous_error}; DB_PATH unavailable",
+            )
+
+        diagnostics = empty_history_diagnostics(
+            storage_backend="SQLite",
+            module_path=module_path,
+            error=previous_error,
+        )
+        diagnostics["db_path"] = str(db_path)
+        if not db_path.exists():
+            return diagnostics
+
+        with sqlite3.connect(db_path) as connection:
+            connection.row_factory = sqlite3.Row
+            row = connection.execute(
+                """
+                SELECT
+                    COUNT(*) AS total_rows,
+                    SUM(CASE WHEN outcome IN ('Hit', 'Miss', 'Push') THEN 1 ELSE 0 END) AS completed_rows,
+                    SUM(CASE WHEN outcome = 'Pending' THEN 1 ELSE 0 END) AS pending_rows,
+                    SUM(CASE WHEN outcome = 'No Edge' THEN 1 ELSE 0 END) AS no_edge_rows,
+                    SUM(CASE WHEN updated_at != created_at THEN 1 ELSE 0 END) AS result_updated_rows,
+                    MIN(slate_date) AS earliest_slate_date,
+                    MAX(slate_date) AS latest_slate_date,
+                    MIN(created_at) AS earliest_snapshot,
+                    MAX(created_at) AS latest_snapshot,
+                    MAX(updated_at) AS latest_update
+                FROM model_history
+                """
+            ).fetchone()
+            versions = connection.execute(
+                """
+                SELECT model_version
+                FROM model_history
+                GROUP BY model_version
+                ORDER BY MAX(updated_at) DESC, model_version DESC
+                """
+            ).fetchall()
+
+        if row:
+            diagnostics.update(
+                {
+                    "total_rows": row["total_rows"] or 0,
+                    "completed_rows": row["completed_rows"] or 0,
+                    "pending_rows": row["pending_rows"] or 0,
+                    "no_edge_rows": row["no_edge_rows"] or 0,
+                    "result_updated_rows": row["result_updated_rows"] or 0,
+                    "earliest_slate_date": row["earliest_slate_date"],
+                    "latest_slate_date": row["latest_slate_date"],
+                    "earliest_snapshot": row["earliest_snapshot"],
+                    "latest_snapshot": row["latest_snapshot"],
+                    "latest_update": row["latest_update"],
+                    "model_versions": [version["model_version"] for version in versions],
+                }
+            )
+
+        return diagnostics
+    except Exception as exc:
+        combined_error = f"{previous_error}; direct fallback {type(exc).__name__}: {exc}"
+        return empty_history_diagnostics(error=combined_error)
+
+
 def safe_load_history_diagnostics():
     try:
         from model_history import load_history_diagnostics
@@ -1850,31 +1942,7 @@ def safe_load_history_diagnostics():
         diagnostics["diagnostic_error"] = None
         return diagnostics
     except Exception as exc:
-        module_path = "N/A"
-        try:
-            import model_history
-
-            module_path = getattr(model_history, "__file__", "N/A")
-        except Exception:
-            pass
-
-        return {
-            "storage_backend": "Unavailable",
-            "db_path": "N/A",
-            "module_path": module_path,
-            "diagnostic_error": f"{type(exc).__name__}: {exc}",
-            "total_rows": 0,
-            "completed_rows": 0,
-            "pending_rows": 0,
-            "no_edge_rows": 0,
-            "result_updated_rows": 0,
-            "model_versions": [],
-            "earliest_slate_date": None,
-            "latest_slate_date": None,
-            "earliest_snapshot": None,
-            "latest_snapshot": None,
-            "latest_update": None,
-        }
+        return direct_load_history_diagnostics(f"{type(exc).__name__}: {exc}")
 
 
 def safe_load_performance_export_rows(model_version=None):
@@ -1882,6 +1950,56 @@ def safe_load_performance_export_rows(model_version=None):
         from model_history import load_performance_export_rows
 
         return load_performance_export_rows(model_version)
+    except Exception:
+        return direct_load_performance_export_rows(model_version)
+
+
+def direct_load_performance_export_rows(model_version=None):
+    try:
+        import model_history
+
+        db_path = getattr(model_history, "DB_PATH", None)
+        if db_path is None or not db_path.exists():
+            return []
+
+        where_clause = ""
+        params = []
+        if model_version:
+            where_clause = "WHERE model_version = ?"
+            params.append(model_version)
+
+        with sqlite3.connect(db_path) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                f"""
+                SELECT
+                    model_version,
+                    slate_date,
+                    market,
+                    game,
+                    pick,
+                    confidence,
+                    score,
+                    result,
+                    outcome,
+                    status,
+                    created_at,
+                    updated_at
+                FROM model_history
+                {where_clause}
+                ORDER BY date(slate_date) DESC,
+                    CASE market
+                        WHEN '1st Inning' THEN 1
+                        WHEN 'First 5' THEN 2
+                        WHEN 'Full Game' THEN 3
+                        ELSE 4
+                    END,
+                    game
+                """,
+                params,
+            ).fetchall()
+
+        return [dict(row) for row in rows]
     except Exception:
         return []
 
