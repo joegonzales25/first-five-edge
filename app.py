@@ -24,8 +24,8 @@ from model_history import (
     record_model_history,
 )
 
-APP_VERSION = "2.3.13"
-MODEL_CACHE_VERSION = "edge-v2313-performance-snapshot-diagnostics"
+APP_VERSION = "2.3.14"
+MODEL_CACHE_VERSION = "edge-v2314-performance-diagnostic-error-detail"
 # Keep performance history stable across UI/cache releases. Change this only
 # when the model baseline, grading definition, or history schema intentionally changes.
 PERFORMANCE_TRACKING_VERSION = "2.3.6"
@@ -1846,11 +1846,23 @@ def safe_load_history_diagnostics():
     try:
         from model_history import load_history_diagnostics
 
-        return load_history_diagnostics()
-    except (ImportError, AttributeError):
+        diagnostics = load_history_diagnostics()
+        diagnostics["diagnostic_error"] = None
+        return diagnostics
+    except Exception as exc:
+        module_path = "N/A"
+        try:
+            import model_history
+
+            module_path = getattr(model_history, "__file__", "N/A")
+        except Exception:
+            pass
+
         return {
             "storage_backend": "Unavailable",
             "db_path": "N/A",
+            "module_path": module_path,
+            "diagnostic_error": f"{type(exc).__name__}: {exc}",
             "total_rows": 0,
             "completed_rows": 0,
             "pending_rows": 0,
@@ -1870,7 +1882,7 @@ def safe_load_performance_export_rows(model_version=None):
         from model_history import load_performance_export_rows
 
         return load_performance_export_rows(model_version)
-    except (ImportError, AttributeError):
+    except Exception:
         return []
 
 
@@ -2033,6 +2045,10 @@ def render_model_performance(model_version, slate_date):
         )
         st.caption(f"Storage: {diagnostics['storage_backend']}")
         st.code(diagnostics["db_path"], language="text")
+        if diagnostics.get("module_path"):
+            st.caption(f"History module: {diagnostics['module_path']}")
+        if diagnostics.get("diagnostic_error"):
+            st.caption(f"Diagnostic error: {diagnostics['diagnostic_error']}")
         st.caption(
             "Date range: "
             f"{diagnostics['earliest_slate_date'] or 'N/A'} to "
