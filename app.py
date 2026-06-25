@@ -21,12 +21,11 @@ from wnba_agent import (
     historical_summary_tables as wnba_historical_summary_tables,
 )
 from model_history import (
-    load_performance_summary,
     record_model_history,
 )
 
-APP_VERSION = "2.3.16"
-MODEL_CACHE_VERSION = "edge-v2316-performance-diagnostics-cleanup"
+APP_VERSION = "2.3.17"
+MODEL_CACHE_VERSION = "edge-v2317-performance-grading-reliability"
 # Keep performance history stable across UI/cache releases. Change this only
 # when the model baseline, grading definition, or history schema intentionally changes.
 PERFORMANCE_TRACKING_VERSION = "2.3.6"
@@ -874,7 +873,7 @@ def get_row_value(row, column_name, default="Pass"):
 
 
 def is_no_edge_pick(pick):
-    return str(pick).strip() in ["Pass", "No Edge", "F5 Pass"]
+    return str(pick).strip() in ["", "Pass", "No Edge", "F5 Pass", "No Edge (Pass)"]
 
 
 def replace_home_away(value, away_team, home_team):
@@ -1834,6 +1833,97 @@ def performance_hit_rate(row):
     return f"{((row.get('hits') or 0) / completed) * 100:.0f}%"
 
 
+def parse_history_score_result(result):
+    text = str(result or "")
+    match = re.match(r"^(?:After 5|Final|In Progress):\s*(.+?)\s+(\d+),\s*(.+?)\s+(\d+)$", text)
+    if not match:
+        return None
+
+    return {
+        "away_team": match.group(1),
+        "away_score": int(match.group(2)),
+        "home_team": match.group(3),
+        "home_score": int(match.group(4)),
+    }
+
+
+def grade_history_first_inning(pick, result):
+    if is_no_edge_pick(pick):
+        return "No Edge"
+
+    result_text = str(result or "").strip().upper()
+    if result_text in ["", "PENDING", "IN PROGRESS"]:
+        return "Pending"
+    if result_text not in ["YRFI", "NRFI"]:
+        return "Pending"
+
+    return "Hit" if str(pick).strip().upper() == result_text else "Miss"
+
+
+def grade_history_team_pick(pick, result, completed_prefix):
+    if is_no_edge_pick(pick):
+        return "No Edge"
+
+    result_text = str(result or "")
+    if not result_text.startswith(completed_prefix):
+        return "Pending"
+
+    parsed = parse_history_score_result(result_text)
+    if parsed is None:
+        return "Pending"
+
+    if parsed["away_score"] == parsed["home_score"]:
+        return "Push"
+
+    winner = parsed["away_team"] if parsed["away_score"] > parsed["home_score"] else parsed["home_team"]
+    return "Hit" if str(pick).strip() == winner else "Miss"
+
+
+def grade_history_outcome(row):
+    market = str(row.get("market") or "")
+    if market == "1st Inning":
+        return grade_history_first_inning(row.get("pick"), row.get("result"))
+    if market == "First 5":
+        return grade_history_team_pick(row.get("pick"), row.get("result"), "After 5:")
+    if market == "Full Game":
+        return grade_history_team_pick(row.get("pick"), row.get("result"), "Final:")
+
+    return "No Edge" if is_no_edge_pick(row.get("pick")) else "Pending"
+
+
+def summarize_history_rows(rows):
+    summary = {}
+    market_order = {"1st Inning": 1, "First 5": 2, "Full Game": 3}
+
+    for row in rows:
+        outcome = row.get("outcome") or grade_history_outcome(row)
+        if outcome == "No Edge":
+            continue
+
+        market = row.get("market")
+        if market not in summary:
+            summary[market] = {
+                "market": market,
+                "total": 0,
+                "hits": 0,
+                "misses": 0,
+                "pushes": 0,
+                "pending": 0,
+            }
+
+        summary[market]["total"] += 1
+        if outcome == "Hit":
+            summary[market]["hits"] += 1
+        elif outcome == "Miss":
+            summary[market]["misses"] += 1
+        elif outcome == "Push":
+            summary[market]["pushes"] += 1
+        elif outcome == "Pending":
+            summary[market]["pending"] += 1
+
+    return sorted(summary.values(), key=lambda row: market_order.get(row["market"], 99))
+
+
 def safe_load_model_versions():
     try:
         from model_history import load_model_versions
@@ -1952,9 +2042,65 @@ def safe_load_performance_export_rows(model_version=None):
     try:
         from model_history import load_performance_export_rows
 
-        return load_performance_export_rows(model_version)
+        rows = load_performance_export_rows(model_version)
+        return recompute_export_outcomes(rows)
     except Exception:
         return direct_load_performance_export_rows(model_version)
+
+
+def recompute_export_outcomes(rows):
+    export_rows = []
+    for row in rows:
+        export_row = dict(row)
+        if "stored_outcome" not in export_row and "outcome" in export_row:
+            export_row["stored_outcome"] = export_row.get("outcome")
+        export_row["outcome"] = grade_history_outcome(export_row)
+        export_rows.append(export_row)
+
+    return export_rows
+
+
+def history_row_matches_filters(row, market=None, days=None, confidence=None, exact_date=None):
+    if is_no_edge_pick(row.get("pick")):
+        return False
+    if market and market != "All" and row.get("market") != market:
+        return False
+    if confidence and confidence != "All" and row.get("confidence") != confidence:
+        return False
+    if exact_date and str(row.get("slate_date")) != str(exact_date):
+        return False
+    if days:
+        try:
+            row_date = datetime.fromisoformat(str(row.get("slate_date"))).date()
+            cutoff = datetime.utcnow().date() - timedelta(days=int(days))
+            if row_date < cutoff:
+                return False
+        except (TypeError, ValueError):
+            return False
+
+    return True
+
+
+def safe_load_performance_summary(
+    model_version=None,
+    market=None,
+    days=None,
+    confidence=None,
+    exact_date=None,
+):
+    rows = safe_load_performance_export_rows(model_version)
+    filtered_rows = [
+        row
+        for row in rows
+        if history_row_matches_filters(
+            row,
+            market=market,
+            days=days,
+            confidence=confidence,
+            exact_date=exact_date,
+        )
+    ]
+    return summarize_history_rows(filtered_rows)
 
 
 def direct_load_performance_export_rows(model_version=None):
@@ -1985,9 +2131,9 @@ def direct_load_performance_export_rows(model_version=None):
                     score,
                     result,
                     outcome,
-                    status,
-                    created_at,
-                    updated_at
+                status,
+                created_at,
+                updated_at
                 FROM model_history
                 {where_clause}
                 ORDER BY date(slate_date) DESC,
@@ -2002,7 +2148,14 @@ def direct_load_performance_export_rows(model_version=None):
                 params,
             ).fetchall()
 
-        return [dict(row) for row in rows]
+        export_rows = []
+        for row in rows:
+            export_row = dict(row)
+            export_row["stored_outcome"] = export_row.pop("outcome", None)
+            export_row["outcome"] = grade_history_outcome(export_row)
+            export_rows.append(export_row)
+
+        return export_rows
     except Exception:
         return []
 
@@ -2138,7 +2291,7 @@ def render_model_performance(model_version, slate_date):
         exact_date = None
         day_label = f"{window_filter} days"
 
-    summary_rows = load_performance_summary(
+    summary_rows = safe_load_performance_summary(
         selected_model_version,
         market=market_filter,
         days=days,
@@ -3129,7 +3282,7 @@ filtered = filtered.sort_values(
 if selected_filter == "Performance":
     performance_total = sum(
         row.get("total") or 0
-        for row in load_performance_summary(
+        for row in safe_load_performance_summary(
             PERFORMANCE_TRACKING_VERSION,
             exact_date=selected_date,
         )

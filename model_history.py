@@ -113,6 +113,17 @@ def grade_team_pick(pick, result, completed_prefix):
     return "Hit" if str(pick) == winner else "Miss"
 
 
+def grade_history_row(market, pick, result):
+    if str(market) == "1st Inning":
+        return grade_first_inning(pick, result)
+    if str(market) == "First 5":
+        return grade_team_pick(pick, result, "After 5:")
+    if str(market) == "Full Game":
+        return grade_team_pick(pick, result, "Final:")
+
+    return "No Edge" if is_no_edge_pick(pick) else "Pending"
+
+
 def market_rows_for_game(row, slate_date, model_version):
     game = row.get("Game", "")
     status = row.get("Status", "")
@@ -265,14 +276,10 @@ def load_performance_summary(
             f"""
             SELECT
                 market,
-                COUNT(*) AS total,
-                SUM(CASE WHEN outcome = 'Hit' THEN 1 ELSE 0 END) AS hits,
-                SUM(CASE WHEN outcome = 'Miss' THEN 1 ELSE 0 END) AS misses,
-                SUM(CASE WHEN outcome = 'Push' THEN 1 ELSE 0 END) AS pushes,
-                SUM(CASE WHEN outcome = 'Pending' THEN 1 ELSE 0 END) AS pending
+                pick,
+                result
             FROM model_history
             {where_clause}
-            GROUP BY market
             ORDER BY CASE market
                 WHEN '1st Inning' THEN 1
                 WHEN 'First 5' THEN 2
@@ -283,7 +290,34 @@ def load_performance_summary(
             params,
         ).fetchall()
 
-    return [dict(row) for row in rows]
+    summary = {}
+    for row in rows:
+        market_name = row["market"]
+        outcome = grade_history_row(market_name, row["pick"], row["result"])
+        if outcome == "No Edge":
+            continue
+
+        if market_name not in summary:
+            summary[market_name] = {
+                "market": market_name,
+                "total": 0,
+                "hits": 0,
+                "misses": 0,
+                "pushes": 0,
+                "pending": 0,
+            }
+
+        summary[market_name]["total"] += 1
+        if outcome == "Hit":
+            summary[market_name]["hits"] += 1
+        elif outcome == "Miss":
+            summary[market_name]["misses"] += 1
+        elif outcome == "Push":
+            summary[market_name]["pushes"] += 1
+        elif outcome == "Pending":
+            summary[market_name]["pending"] += 1
+
+    return list(summary.values())
 
 
 def load_model_versions(db_path=DB_PATH):
@@ -398,7 +432,7 @@ def load_performance_export_rows(model_version=None, db_path=DB_PATH):
                 confidence,
                 score,
                 result,
-                outcome,
+                outcome AS stored_outcome,
                 status,
                 created_at,
                 updated_at
@@ -416,7 +450,17 @@ def load_performance_export_rows(model_version=None, db_path=DB_PATH):
             params,
         ).fetchall()
 
-    return [dict(row) for row in rows]
+    export_rows = []
+    for row in rows:
+        export_row = dict(row)
+        export_row["outcome"] = grade_history_row(
+            export_row["market"],
+            export_row["pick"],
+            export_row["result"],
+        )
+        export_rows.append(export_row)
+
+    return export_rows
 
 
 def load_performance_details(
@@ -452,7 +496,7 @@ def load_performance_details(
                 confidence,
                 score,
                 result,
-                outcome,
+                outcome AS stored_outcome,
                 status,
                 created_at,
                 updated_at
@@ -471,4 +515,14 @@ def load_performance_details(
             params,
         ).fetchall()
 
-    return [dict(row) for row in rows]
+    detail_rows = []
+    for row in rows:
+        detail_row = dict(row)
+        detail_row["outcome"] = grade_history_row(
+            detail_row["market"],
+            detail_row["pick"],
+            detail_row["result"],
+        )
+        detail_rows.append(detail_row)
+
+    return detail_rows
