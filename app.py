@@ -24,8 +24,8 @@ from model_history import (
     record_model_history,
 )
 
-APP_VERSION = "2.3.17"
-MODEL_CACHE_VERSION = "edge-v2317-performance-grading-reliability"
+APP_VERSION = "2.3.18"
+MODEL_CACHE_VERSION = "edge-v2318-result-outcome-indicators"
 # Keep performance history stable across UI/cache releases. Change this only
 # when the model baseline, grading definition, or history schema intentionally changes.
 PERFORMANCE_TRACKING_VERSION = "2.3.6"
@@ -291,6 +291,34 @@ st.markdown("""
     font-size: 13px;
     font-weight: 800;
     line-height: 1.25;
+}
+.result-outcome {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    margin-left: 6px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 900;
+    line-height: 1;
+    vertical-align: middle;
+}
+.result-hit {
+    color: #052e16;
+    background: #22c55e;
+}
+.result-miss {
+    color: #450a0a;
+    background: #ef4444;
+}
+.result-push {
+    width: auto;
+    padding: 0 7px;
+    color: #0f172a;
+    background: #cbd5e1;
+    font-size: 11px;
 }
 .decision-result-mobile {
     display: none;
@@ -913,14 +941,26 @@ def format_decision_pick(pick, confidence, away_team=None, home_team=None, marke
     return f"{display_pick} ({confidence})"
 
 
-def render_decision_result(result, compact_result=None):
+def render_result_outcome(outcome):
+    if outcome == "Hit":
+        return '<span class="result-outcome result-hit" aria-label="Hit">&#10003;</span>'
+    if outcome == "Miss":
+        return '<span class="result-outcome result-miss" aria-label="Miss">&times;</span>'
+    if outcome == "Push":
+        return '<span class="result-outcome result-push" aria-label="Push">Push</span>'
+
+    return ""
+
+
+def render_decision_result(result, compact_result=None, outcome=None):
     if result in [None, "", "N/A", "Pending"]:
         return ""
 
     compact_result = compact_result or result
+    outcome_badge = render_result_outcome(outcome)
     return (
-        f'<span class="decision-result decision-result-full">Result: {escape(str(result))}</span>'
-        f'<span class="decision-result decision-result-mobile">{escape(str(compact_result))}</span>'
+        f'<span class="decision-result decision-result-full">Result: {escape(str(result))}{outcome_badge}</span>'
+        f'<span class="decision-result decision-result-mobile">{escape(str(compact_result))}{outcome_badge}</span>'
     )
 
 
@@ -3325,20 +3365,26 @@ else:
         f5_result = ""
         full_game_result = ""
         if should_show_game_result(get_row_value(row, "Status", "")):
+            first_inning_result_value = get_row_value(row, "First Inning Result", "")
+            f5_result_value = get_row_value(row, "F5 Result", "")
+            full_game_result_value = get_row_value(row, "Full Game Result", "")
             first_inning_compact_result = get_row_value(row, "First Inning Result Compact", "")
             if first_inning_compact_result not in [None, "", "N/A", "Pending"]:
                 first_inning_compact_result = f"Result: {first_inning_compact_result}"
             first_inning_result = render_decision_result(
-                get_row_value(row, "First Inning Result", ""),
+                first_inning_result_value,
                 first_inning_compact_result,
+                grade_history_first_inning(first_inning_pick, first_inning_result_value),
             )
             f5_result = render_decision_result(
-                get_row_value(row, "F5 Result", ""),
+                f5_result_value,
                 get_row_value(row, "F5 Result Compact", ""),
+                grade_history_team_pick(f5_pick, f5_result_value, "After 5:"),
             )
             full_game_result = render_decision_result(
-                get_row_value(row, "Full Game Result", ""),
+                full_game_result_value,
                 get_row_value(row, "Full Game Result Compact", ""),
+                grade_history_team_pick(full_game_pick, full_game_result_value, "Final:"),
             )
         first_inning_display = format_decision_pick(
             first_inning_pick,
