@@ -25,8 +25,8 @@ from model_history import (
     record_model_history,
 )
 
-APP_VERSION = "2.3.15"
-MODEL_CACHE_VERSION = "edge-v2315-performance-direct-db-fallback"
+APP_VERSION = "2.3.16"
+MODEL_CACHE_VERSION = "edge-v2316-performance-diagnostics-cleanup"
 # Keep performance history stable across UI/cache releases. Change this only
 # when the model baseline, grading definition, or history schema intentionally changes.
 PERFORMANCE_TRACKING_VERSION = "2.3.6"
@@ -1849,6 +1849,7 @@ def empty_history_diagnostics(storage_backend="Unavailable", module_path="N/A", 
         "db_path": "N/A",
         "module_path": module_path,
         "diagnostic_error": error,
+        "using_fallback": False,
         "total_rows": 0,
         "completed_rows": 0,
         "pending_rows": 0,
@@ -1876,10 +1877,11 @@ def direct_load_history_diagnostics(previous_error=None):
             )
 
         diagnostics = empty_history_diagnostics(
-            storage_backend="SQLite",
+            storage_backend="SQLite fallback",
             module_path=module_path,
             error=previous_error,
         )
+        diagnostics["using_fallback"] = True
         diagnostics["db_path"] = str(db_path)
         if not db_path.exists():
             return diagnostics
@@ -1940,6 +1942,7 @@ def safe_load_history_diagnostics():
 
         diagnostics = load_history_diagnostics()
         diagnostics["diagnostic_error"] = None
+        diagnostics["using_fallback"] = False
         return diagnostics
     except Exception as exc:
         return direct_load_history_diagnostics(f"{type(exc).__name__}: {exc}")
@@ -2163,9 +2166,9 @@ def render_model_performance(model_version, slate_date):
         )
         st.caption(f"Storage: {diagnostics['storage_backend']}")
         st.code(diagnostics["db_path"], language="text")
-        if diagnostics.get("module_path"):
-            st.caption(f"History module: {diagnostics['module_path']}")
-        if diagnostics.get("diagnostic_error"):
+        if diagnostics.get("using_fallback"):
+            st.caption("Using direct DB fallback for diagnostics/export.")
+        elif diagnostics.get("diagnostic_error"):
             st.caption(f"Diagnostic error: {diagnostics['diagnostic_error']}")
         st.caption(
             "Date range: "
@@ -2188,7 +2191,7 @@ def render_model_performance(model_version, slate_date):
                 else str(selected_model_version).replace(".", "_")
             )
             st.download_button(
-                "Download Performance History CSV",
+                f"Download Performance History CSV ({len(export_rows)} rows)",
                 data=rows_to_csv(export_rows),
                 file_name=f"model_history_{export_label}.csv",
                 mime="text/csv",
