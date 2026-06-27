@@ -25,13 +25,13 @@ from model_history import (
 )
 
 APP_VERSION = "2.3.20"
-MODEL_CACHE_VERSION = "edge-v2319-first-inning-signal-type"
+MODEL_CACHE_VERSION = "edge-v2320-performance-history-date-anchor"
 # Keep performance history stable across UI/cache releases. Change this only
 # when the model baseline, grading definition, or history schema intentionally changes.
 PERFORMANCE_TRACKING_VERSION = "2.3.6"
 FALLBACK_TIMEZONE = "America/New_York"
 MARKET_RELEASES = {
-    "MLB": "2.3.19",
+    "MLB": "2.3.20",
     "NFL": "1.0.0",
     "WNBA": "1.0.1-test",
 }
@@ -2088,6 +2088,18 @@ def safe_load_history_diagnostics():
         return direct_load_history_diagnostics(f"{type(exc).__name__}: {exc}")
 
 
+def latest_history_slate_date(diagnostics=None):
+    diagnostics = diagnostics or safe_load_history_diagnostics()
+    latest_slate_date = diagnostics.get("latest_slate_date")
+    if not latest_slate_date:
+        return None
+
+    try:
+        return datetime.fromisoformat(str(latest_slate_date)).date()
+    except ValueError:
+        return None
+
+
 def safe_load_performance_export_rows(model_version=None):
     try:
         from model_history import load_performance_export_rows
@@ -2279,6 +2291,9 @@ def render_model_performance_legacy_unused():
 def render_model_performance(model_version, slate_date):
     st.markdown("### Model Performance")
 
+    diagnostics = safe_load_history_diagnostics()
+    history_today = latest_history_slate_date(diagnostics) or slate_date
+
     available_versions = safe_load_model_versions()
     version_options = [model_version]
     version_options.extend(
@@ -2325,10 +2340,10 @@ def render_model_performance(model_version, slate_date):
         model_label = f"Model {selected_model_filter}"
 
     day_filters = {
-        "Today": {"exact_date": slate_date, "label": "Today"},
+        "Today": {"exact_date": history_today, "label": f"Today ({history_today})"},
         "Yesterday": {
-            "exact_date": slate_date - timedelta(days=1),
-            "label": "Yesterday",
+            "exact_date": history_today - timedelta(days=1),
+            "label": f"Yesterday ({history_today - timedelta(days=1)})",
         },
         "Last 7": 7,
         "Last 30": 30,
@@ -2352,7 +2367,6 @@ def render_model_performance(model_version, slate_date):
     )
 
     export_rows = safe_load_performance_export_rows(selected_model_version)
-    diagnostics = safe_load_history_diagnostics()
 
     with st.expander("Performance History Diagnostics"):
         diag_cols = st.columns(4)
@@ -3384,11 +3398,12 @@ filtered = filtered.sort_values(
 )
 
 if selected_filter == "Performance":
+    performance_history_date = latest_history_slate_date() or selected_date
     performance_total = sum(
         row.get("total") or 0
         for row in safe_load_performance_summary(
             PERFORMANCE_TRACKING_VERSION,
-            exact_date=selected_date,
+            exact_date=performance_history_date,
         )
     )
     st.caption(f"{performance_total} results")
