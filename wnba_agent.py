@@ -62,6 +62,26 @@ def status_for_game(game):
     return game.get("status") or "Scheduled"
 
 
+def side_result_for_game(side_edge, predicted_winner, actual_winner, completed):
+    if side_edge == "Pass":
+        return "No Signal"
+    if not completed or actual_winner is None:
+        return "Pending"
+    return "Correct" if predicted_winner == actual_winner else "Missed"
+
+
+def scoring_result_for_game(scoring_edge, actual_total, league_total, completed):
+    if scoring_edge == "Neutral Scoring Environment":
+        return "No Signal"
+    if not completed or actual_total is None:
+        return "Pending"
+    if scoring_edge == "High Scoring Environment":
+        return "Correct" if actual_total > league_total else "Missed"
+    if scoring_edge == "Low Scoring Environment":
+        return "Correct" if actual_total < league_total else "Missed"
+    return "No Signal"
+
+
 def completed_games_for_lab(games: pd.DataFrame) -> pd.DataFrame:
     if games.empty:
         return games
@@ -189,6 +209,39 @@ def build_current_slate(season=None, today=None, days_ahead=14, slate_date=None)
             home_state.total_avg(league_total),
         )
         notes = agent_notes(side_notes, scoring_notes)
+        predicted_winner = home if model_margin > 0 else away
+        actual_winner = None
+        actual_total = None
+        side_result = side_result_for_game(
+            side_edge,
+            predicted_winner,
+            actual_winner,
+            completed,
+        )
+        scoring_result = scoring_result_for_game(
+            scoring_edge,
+            actual_total,
+            league_total,
+            completed,
+        )
+
+        if completed and pd.notna(away_score) and pd.notna(home_score):
+            away_score_int = int(away_score)
+            home_score_int = int(home_score)
+            actual_winner = home if home_score_int > away_score_int else away
+            actual_total = away_score_int + home_score_int
+            side_result = side_result_for_game(
+                side_edge,
+                predicted_winner,
+                actual_winner,
+                completed,
+            )
+            scoring_result = scoring_result_for_game(
+                scoring_edge,
+                actual_total,
+                league_total,
+                completed,
+            )
 
         game_day = eastern_game_date(game["game_date_dt"])
         if game_day == target_date:
@@ -201,12 +254,24 @@ def build_current_slate(season=None, today=None, days_ahead=14, slate_date=None)
                     "Game": f"{away} @ {home}",
                     "Away": away,
                     "Home": home,
+                    "Away Score": int(away_score)
+                    if completed and pd.notna(away_score)
+                    else None,
+                    "Home Score": int(home_score)
+                    if completed and pd.notna(home_score)
+                    else None,
+                    "Actual Winner": actual_winner,
+                    "Predicted Winner": predicted_winner,
+                    "Actual Total": actual_total,
                     "Model Signal": model_signal_display(side_edge, scoring_edge),
                     "Edge Score": edge_score,
                     "Confidence": confidence,
                     "Side Edge": side_edge,
                     "Scoring Edge": scoring_edge,
                     "Early Edge": "Model Pending",
+                    "Side Result": side_result,
+                    "Winner Result": side_result,
+                    "Scoring Result": scoring_result,
                     "Model Margin": round(model_margin, 2),
                     "Projected Total": round(projected_total, 2),
                     "League Total Baseline": round(league_total, 2),

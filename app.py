@@ -24,12 +24,22 @@ from model_history import (
     record_model_history,
 )
 
-APP_VERSION = "2.3.19"
+APP_VERSION = "2.3.20"
 MODEL_CACHE_VERSION = "edge-v2319-first-inning-signal-type"
 # Keep performance history stable across UI/cache releases. Change this only
 # when the model baseline, grading definition, or history schema intentionally changes.
 PERFORMANCE_TRACKING_VERSION = "2.3.6"
 FALLBACK_TIMEZONE = "America/New_York"
+MARKET_RELEASES = {
+    "MLB": "2.3.19",
+    "NFL": "1.0.0",
+    "WNBA": "1.0.1-test",
+}
+MODEL_BASELINES = {
+    "MLB": "2.3.19",
+    "NFL": "1.0.0",
+    "WNBA": "1.0.0-test",
+}
 SPORT_CONFIG = {
     "MLB": {"enabled": True},
     "NFL": {"enabled": True},
@@ -2718,6 +2728,48 @@ def render_wnba_key_factors(row):
     )
 
 
+def wnba_result_icon(result):
+    result = str(result or "Pending")
+    if result == "Correct":
+        return '<span class="result-outcome result-hit" aria-label="Correct">&#10003;</span>'
+    if result == "Missed":
+        return '<span class="result-outcome result-miss" aria-label="Missed">&times;</span>'
+    return f'<span class="result-outcome result-push">{escape(result)}</span>'
+
+
+def render_wnba_result_strip(row):
+    status = str(row.get("Status", "Scheduled"))
+    side_result = row.get("Side Result") or row.get("Winner Result") or "Pending"
+    scoring_result = row.get("Scoring Result") or "Pending"
+
+    if status != "Final":
+        side_result = "Pending" if row.get("Side Edge") != "Pass" else "No Signal"
+        scoring_result = (
+            "Pending"
+            if row.get("Scoring Edge") != "Neutral Scoring Environment"
+            else "No Signal"
+        )
+
+    score_line = ""
+    if status == "Final" and row.get("Away Score") is not None:
+        score_line = (
+            f'<div class="reason-item"><span class="reason-check">&#10003;</span>'
+            f'<span>Final: {escape(str(row.get("Away")))} {escape(str(row.get("Away Score")))}'
+            f' - {escape(str(row.get("Home")))} {escape(str(row.get("Home Score")))}</span></div>'
+        )
+
+    return (
+        '<div class="key-factors">'
+        '<div class="market-heading">Model Results</div>'
+        '<div class="reason-stack">'
+        f'<div class="reason-item"><span>Side: {escape(str(side_result))}</span>{wnba_result_icon(side_result)}</div>'
+        f'<div class="reason-item"><span>Scoring: {escape(str(scoring_result))}</span>{wnba_result_icon(scoring_result)}</div>'
+        f'{score_line}'
+        '</div>'
+        '</div>'
+    )
+
+
 def render_wnba_card(row, historical=False):
     result_line = ""
     if historical:
@@ -2746,6 +2798,8 @@ def render_wnba_card(row, historical=False):
             <div class="decision-line decision-full">Early Edge: {escape(str(row["Early Edge"]))}</div>
         </div>
 
+        {render_wnba_result_strip(row)}
+
         {render_wnba_key_factors(row)}
 
         {result_line}
@@ -2762,7 +2816,9 @@ def render_wnba_card(row, historical=False):
         | Metric | Value |
         |---|---|
         | Side Edge | {row["Side Edge"]} |
+        | Side Result | {row.get("Side Result", row.get("Winner Result", "Pending"))} |
         | Scoring Environment | {row["Scoring Edge"]} |
+        | Scoring Result | {row.get("Scoring Result", "Pending")} |
         | Early Edge | {row["Early Edge"]} |
         | Edge Score | {row["Edge Score"]} |
         | Confidence | {row["Confidence"]} |
@@ -3166,7 +3222,13 @@ def render_wnba_page():
         render_wnba_historical()
 
     with st.expander("WNBA Data Sources / Model Info"):
-        st.markdown("""
+        st.markdown(f"""
+        **Product Release**: Edge Detector v{APP_VERSION}
+
+        **WNBA Market Release**: v{MARKET_RELEASES["WNBA"]}
+
+        **WNBA Model Baseline**: v{MODEL_BASELINES["WNBA"]}
+
         **Current Status**: Historical Lab is enabled for uploaded current-season or historical game data.
 
         **Current Slate**: ESPN scoreboard feed, v1.0 test surface.
