@@ -24,8 +24,8 @@ from model_history import (
     record_model_history,
 )
 
-APP_VERSION = "2.3.18"
-MODEL_CACHE_VERSION = "edge-v2318-result-outcome-indicators"
+APP_VERSION = "2.3.19"
+MODEL_CACHE_VERSION = "edge-v2319-first-inning-signal-type"
 # Keep performance history stable across UI/cache releases. Change this only
 # when the model baseline, grading definition, or history schema intentionally changes.
 PERFORMANCE_TRACKING_VERSION = "2.3.6"
@@ -2159,6 +2159,7 @@ def direct_load_performance_export_rows(model_version=None):
 
         with sqlite3.connect(db_path) as connection:
             connection.row_factory = sqlite3.Row
+            model_history.init_db(connection)
             rows = connection.execute(
                 f"""
                 SELECT
@@ -2169,11 +2170,12 @@ def direct_load_performance_export_rows(model_version=None):
                     pick,
                     confidence,
                     score,
+                    signal_type,
                     result,
                     outcome,
-                status,
-                created_at,
-                updated_at
+                    status,
+                    created_at,
+                    updated_at
                 FROM model_history
                 {where_clause}
                 ORDER BY date(slate_date) DESC,

@@ -34,6 +34,7 @@ def init_db(connection):
             pick TEXT NOT NULL,
             confidence TEXT,
             score REAL,
+            signal_type TEXT,
             result TEXT,
             outcome TEXT,
             status TEXT,
@@ -43,6 +44,12 @@ def init_db(connection):
         )
         """
     )
+    columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(model_history)").fetchall()
+    }
+    if "signal_type" not in columns:
+        connection.execute("ALTER TABLE model_history ADD COLUMN signal_type TEXT")
     connection.commit()
 
 
@@ -137,6 +144,7 @@ def market_rows_for_game(row, slate_date, model_version):
             "pick": row.get("First Inning Pick", "No Edge"),
             "confidence": row.get("First Inning Confidence", "No Edge"),
             "score": safe_float(row.get("First Inning Score")),
+            "signal_type": row.get("First Inning Signal Type", "neutral"),
             "result": row.get("First Inning Result", "Pending"),
             "status": status,
         },
@@ -148,6 +156,7 @@ def market_rows_for_game(row, slate_date, model_version):
             "pick": row.get("F5 Pick", "No Edge"),
             "confidence": row.get("F5 Confidence", "No Edge"),
             "score": safe_float(row.get("F5 Score")),
+            "signal_type": None,
             "result": row.get("F5 Result", "Pending"),
             "status": status,
         },
@@ -159,6 +168,7 @@ def market_rows_for_game(row, slate_date, model_version):
             "pick": row.get("Full Game Pick", "No Edge"),
             "confidence": row.get("Full Game Confidence", "No Edge"),
             "score": safe_float(row.get("Full Game Score")),
+            "signal_type": None,
             "result": row.get("Full Game Result", "Pending"),
             "status": status,
         },
@@ -193,10 +203,10 @@ def record_model_history(games, slate_date, model_version, db_path=DB_PATH):
                     """
                     INSERT INTO model_history (
                         model_version, slate_date, game, market, pick,
-                        confidence, score, result, outcome, status,
+                        confidence, score, signal_type, result, outcome, status,
                         created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(model_version, slate_date, game, market)
                     DO UPDATE SET
                         result = excluded.result,
@@ -212,6 +222,7 @@ def record_model_history(games, slate_date, model_version, db_path=DB_PATH):
                         history_row["pick"],
                         history_row["confidence"],
                         history_row["score"],
+                        history_row["signal_type"],
                         history_row["result"],
                         history_row["outcome"],
                         history_row["status"],
@@ -431,6 +442,7 @@ def load_performance_export_rows(model_version=None, db_path=DB_PATH):
                 pick,
                 confidence,
                 score,
+                signal_type,
                 result,
                 outcome AS stored_outcome,
                 status,
@@ -495,6 +507,7 @@ def load_performance_details(
                 pick,
                 confidence,
                 score,
+                signal_type,
                 result,
                 outcome AS stored_outcome,
                 status,

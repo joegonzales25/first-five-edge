@@ -1326,6 +1326,28 @@ def summarize_first_inning_matchup_pressure(away_pressure, home_pressure):
     return "No clear matchup pressure"
 
 
+def classify_first_inning_signal_type(away_pressure, home_pressure):
+    yrfi_pressures = {"YRFI", "Strong YRFI"}
+    nrfi_pressures = {"NRFI", "Strong NRFI"}
+    away_yrfi = away_pressure in yrfi_pressures
+    home_yrfi = home_pressure in yrfi_pressures
+    away_nrfi = away_pressure in nrfi_pressures
+    home_nrfi = home_pressure in nrfi_pressures
+
+    if away_yrfi and home_yrfi:
+        return "two_sided_yrfi"
+    if (away_yrfi and home_pressure == "Neutral") or (home_yrfi and away_pressure == "Neutral"):
+        return "one_sided_yrfi"
+    if (away_yrfi and home_nrfi) or (home_yrfi and away_nrfi):
+        return "mixed_yrfi_nrfi"
+    if away_nrfi and home_nrfi:
+        return "two_sided_nrfi"
+    if (away_nrfi and home_pressure == "Neutral") or (home_nrfi and away_pressure == "Neutral"):
+        return "one_sided_nrfi"
+
+    return "neutral"
+
+
 def calculate_first_inning_matchup_modifier(away_pressure, home_pressure):
     summary = summarize_first_inning_matchup_pressure(away_pressure, home_pressure)
 
@@ -1986,6 +2008,10 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
                 away_matchup_pressure,
                 home_matchup_pressure,
             )
+            first_inning_signal_type = classify_first_inning_signal_type(
+                away_matchup_pressure,
+                home_matchup_pressure,
+            )
             first_inning_matchup_modifier = calculate_first_inning_matchup_modifier(
                 away_matchup_pressure,
                 home_matchup_pressure,
@@ -2052,6 +2078,7 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
                 "First Inning Pick": first_inning_pick,
                 "First Inning Confidence": first_inning_confidence,
                 "First Inning Score": first_inning_score,
+                "First Inning Signal Type": first_inning_signal_type,
                 "F5 Pick": f5_pick,
                 "F5 Confidence": f5_confidence,
                 "F5 Score": f5_score,
