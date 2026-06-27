@@ -53,6 +53,20 @@ def init_db(connection):
     connection.commit()
 
 
+def table_columns(connection):
+    return {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(model_history)").fetchall()
+    }
+
+
+def optional_signal_type_select(connection):
+    if "signal_type" in table_columns(connection):
+        return "signal_type"
+
+    return "NULL AS signal_type"
+
+
 def utc_now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -432,6 +446,7 @@ def load_performance_export_rows(model_version=None, db_path=DB_PATH):
 
     with connect(db_path) as connection:
         init_db(connection)
+        signal_type_select = optional_signal_type_select(connection)
         rows = connection.execute(
             f"""
             SELECT
@@ -442,7 +457,7 @@ def load_performance_export_rows(model_version=None, db_path=DB_PATH):
                 pick,
                 confidence,
                 score,
-                signal_type,
+                {signal_type_select},
                 result,
                 outcome AS stored_outcome,
                 status,
@@ -498,6 +513,7 @@ def load_performance_details(
 
     with connect(db_path) as connection:
         init_db(connection)
+        signal_type_select = optional_signal_type_select(connection)
         rows = connection.execute(
             f"""
             SELECT
@@ -507,7 +523,7 @@ def load_performance_details(
                 pick,
                 confidence,
                 score,
-                signal_type,
+                {signal_type_select},
                 result,
                 outcome AS stored_outcome,
                 status,

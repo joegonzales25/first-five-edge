@@ -24,14 +24,14 @@ from model_history import (
     record_model_history,
 )
 
-APP_VERSION = "2.3.20"
-MODEL_CACHE_VERSION = "edge-v2320-performance-history-date-anchor"
+APP_VERSION = "2.3.21"
+MODEL_CACHE_VERSION = "edge-v2321-performance-history-schema-guard"
 # Keep performance history stable across UI/cache releases. Change this only
 # when the model baseline, grading definition, or history schema intentionally changes.
 PERFORMANCE_TRACKING_VERSION = "2.3.6"
 FALLBACK_TIMEZONE = "America/New_York"
 MARKET_RELEASES = {
-    "MLB": "2.3.20",
+    "MLB": "2.3.21",
     "NFL": "1.0.0",
     "WNBA": "1.0.1-test",
 }
@@ -2028,6 +2028,7 @@ def direct_load_history_diagnostics(previous_error=None):
 
         with sqlite3.connect(db_path) as connection:
             connection.row_factory = sqlite3.Row
+            model_history.init_db(connection)
             row = connection.execute(
                 """
                 SELECT
@@ -2182,6 +2183,11 @@ def direct_load_performance_export_rows(model_version=None):
         with sqlite3.connect(db_path) as connection:
             connection.row_factory = sqlite3.Row
             model_history.init_db(connection)
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(model_history)").fetchall()
+            }
+            signal_type_select = "signal_type" if "signal_type" in columns else "NULL AS signal_type"
             rows = connection.execute(
                 f"""
                 SELECT
@@ -2192,7 +2198,7 @@ def direct_load_performance_export_rows(model_version=None):
                     pick,
                     confidence,
                     score,
-                    signal_type,
+                    {signal_type_select},
                     result,
                     outcome,
                     status,
