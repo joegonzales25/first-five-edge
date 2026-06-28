@@ -24,19 +24,19 @@ from model_history import (
     record_model_history,
 )
 
-APP_VERSION = "2.3.23"
-MODEL_CACHE_VERSION = "edge-v2323-first-inning-legacy-hybrid"
+APP_VERSION = "2.3.24"
+MODEL_CACHE_VERSION = "edge-v2324-schedule-fetch-retry"
 # Keep performance history stable across UI/cache releases. Change this only
 # when the model baseline, grading definition, or history schema intentionally changes.
 PERFORMANCE_TRACKING_VERSION = "2.3.8"
 FALLBACK_TIMEZONE = "America/New_York"
 MARKET_RELEASES = {
-    "MLB": "2.3.23",
+    "MLB": "2.3.24",
     "NFL": "1.0.0",
     "WNBA": "1.0.1-test",
 }
 MODEL_BASELINES = {
-    "MLB": "2.3.23",
+    "MLB": "2.3.24",
     "NFL": "1.0.0",
     "WNBA": "1.0.0-test",
 }
@@ -1068,12 +1068,136 @@ def average_available_values(values):
     numbers = [
         value
         for value in values
-        if value is not None
+        if value is not None and not pd.isna(value)
     ]
     if not numbers:
         return None
 
     return sum(numbers) / len(numbers)
+
+
+def format_pressure_value(value, suffix="", decimals=1):
+    if value is None or pd.isna(value):
+        return "N/A"
+    return f"{value:.{decimals}f}{suffix}"
+
+
+def first_inning_pressure_rows(row):
+    signals = [
+        {
+            "name": "Pitcher YRFI Avg",
+            "value": average_available_values([
+                get_numeric_value(row, "Away Pitcher YRFI %"),
+                get_numeric_value(row, "Home Pitcher YRFI %"),
+            ]),
+            "suffix": "%",
+            "decimals": 1,
+            "nrfi_threshold": 18,
+            "yrfi_threshold": 38,
+            "nrfi_read": "NRFI <= 18.0%",
+            "yrfi_read": "YRFI >= 38.0%",
+        },
+        {
+            "name": "Offense YRFI Avg",
+            "value": average_available_values([
+                get_numeric_value(row, "Away Offense YRFI %"),
+                get_numeric_value(row, "Home Offense YRFI %"),
+            ]),
+            "suffix": "%",
+            "decimals": 1,
+            "nrfi_threshold": 20,
+            "yrfi_threshold": 35,
+            "nrfi_read": "NRFI <= 20.0%",
+            "yrfi_read": "YRFI >= 35.0%",
+        },
+        {
+            "name": "1st Inning ERA Avg",
+            "value": average_available_values([
+                get_numeric_value(row, "Away 1st ERA"),
+                get_numeric_value(row, "Home 1st ERA"),
+            ]),
+            "suffix": "",
+            "decimals": 2,
+            "nrfi_threshold": 3.00,
+            "yrfi_threshold": 6.00,
+            "nrfi_read": "NRFI <= 3.00",
+            "yrfi_read": "YRFI >= 6.00",
+        },
+        {
+            "name": "1st Inning WHIP Avg",
+            "value": average_available_values([
+                get_numeric_value(row, "Away 1st WHIP"),
+                get_numeric_value(row, "Home 1st WHIP"),
+            ]),
+            "suffix": "",
+            "decimals": 2,
+            "nrfi_threshold": 1.00,
+            "yrfi_threshold": 1.60,
+            "nrfi_read": "NRFI <= 1.00",
+            "yrfi_read": "YRFI >= 1.60",
+        },
+        {
+            "name": "1st Run Avg",
+            "value": average_available_values([
+                get_numeric_value(row, "Away 1st Run Avg"),
+                get_numeric_value(row, "Home 1st Run Avg"),
+            ]),
+            "suffix": "",
+            "decimals": 2,
+            "nrfi_threshold": 0.30,
+            "yrfi_threshold": 0.60,
+            "nrfi_read": "NRFI <= 0.30",
+            "yrfi_read": "YRFI >= 0.60",
+        },
+    ]
+
+    rows = []
+    counts = {"YRFI": 0, "NRFI": 0, "Neutral": 0}
+
+    for signal in signals:
+        value = signal["value"]
+        if value is None or pd.isna(value):
+            direction = "Neutral"
+            read = "Data unavailable"
+        elif value <= signal["nrfi_threshold"]:
+            direction = "NRFI"
+            read = signal["nrfi_read"]
+        elif value >= signal["yrfi_threshold"]:
+            direction = "YRFI"
+            read = signal["yrfi_read"]
+        else:
+            direction = "Neutral"
+            read = "Between thresholds"
+
+        counts[direction] += 1
+        rows.append({
+            "Signal": signal["name"],
+            "Value": format_pressure_value(value, signal["suffix"], signal["decimals"]),
+            "Direction": direction,
+            "Model Read": read,
+        })
+
+    return rows, counts
+
+
+def first_inning_pressure_summary(row):
+    rows, counts = first_inning_pressure_rows(row)
+    pick = get_row_value(row, "First Inning Pick", "No Edge")
+    confidence = get_row_value(row, "First Inning Confidence", "No Edge")
+    score = get_row_value(row, "First Inning Score", "N/A")
+
+    if is_no_edge_pick(pick) or confidence == "No Edge":
+        model_read = "No Edge: not enough confirmed pressure signals."
+    else:
+        model_read = f"{pick} ({confidence}): confirmed pressure signals support the edge."
+
+    summary = (
+        f"YRFI signals: {counts['YRFI']} | "
+        f"NRFI signals: {counts['NRFI']} | "
+        f"Neutral: {counts['Neutral']} | "
+        f"Score: {score}"
+    )
+    return rows, summary, model_read
 
 
 def direction_alignment(pick_direction, signal_direction):
@@ -3678,6 +3802,22 @@ else:
             """)
             if first_signal_active:
                 st.caption("\\* - Edge Signal")
+
+            pressure_rows, pressure_summary, pressure_model_read = first_inning_pressure_summary(row)
+            pressure_table_rows = "\n".join(
+                f"| {pressure_row['Signal']} | {pressure_row['Value']} | "
+                f"{pressure_row['Direction']} | {pressure_row['Model Read']} |"
+                for pressure_row in pressure_rows
+            )
+
+            st.markdown("### 1st Inning Pressure")
+            st.markdown(f"""
+            | Signal | Combined Value | Direction | Model Read |
+            |---|---:|---|---|
+            {pressure_table_rows}
+            """)
+            st.caption(pressure_summary)
+            st.caption(pressure_model_read)
 
             st.markdown("### 1st Inning Matchup Pressure")
             st.markdown(f"""

@@ -4,7 +4,7 @@ import pandas as pd
 
 from datetime import date, datetime, timedelta
 from functools import lru_cache
-from time import perf_counter
+from time import perf_counter, sleep
 from zoneinfo import ZoneInfo
 
 
@@ -1828,12 +1828,19 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
         f"?sportId=1&date={slate_date}&hydrate=probablePitcher,linescore"
     )
 
-    try:
-        step_start = perf_counter()
-        data = requests.get(url, timeout=10).json()
-        profile_add(profile, "schedule/probable pitchers", perf_counter() - step_start)
-    except Exception:
-        return pd.DataFrame()
+    data = None
+    step_start = perf_counter()
+    for attempt in range(3):
+        try:
+            response = requests.get(url, timeout=15)
+            response.raise_for_status()
+            data = response.json()
+            break
+        except Exception:
+            if attempt == 2:
+                return pd.DataFrame()
+            sleep(1 + attempt)
+    profile_add(profile, "schedule/probable pitchers", perf_counter() - step_start)
 
     step_start = perf_counter()
     team_records = get_team_records(season)
