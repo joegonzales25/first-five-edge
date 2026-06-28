@@ -7,7 +7,7 @@ import csv
 import re
 import sqlite3
 from zoneinfo import ZoneInfo
-from mlb_agent import get_today_games
+from mlb_agent import get_today_games, team_abbreviation
 from nfl_agent import (
     build_current_slate,
     build_historical_lab,
@@ -1085,7 +1085,7 @@ def format_pressure_value(value, suffix="", decimals=1):
 def first_inning_pressure_rows(row):
     signals = [
         {
-            "name": "Pitcher YRFI Avg",
+            "name": "Pitcher YRFI",
             "value": average_available_values([
                 get_numeric_value(row, "Away Pitcher YRFI %"),
                 get_numeric_value(row, "Home Pitcher YRFI %"),
@@ -1098,7 +1098,7 @@ def first_inning_pressure_rows(row):
             "yrfi_read": "YRFI >= 38.0%",
         },
         {
-            "name": "Offense YRFI Avg",
+            "name": "Offense YRFI",
             "value": average_available_values([
                 get_numeric_value(row, "Away Offense YRFI %"),
                 get_numeric_value(row, "Home Offense YRFI %"),
@@ -1111,7 +1111,7 @@ def first_inning_pressure_rows(row):
             "yrfi_read": "YRFI >= 35.0%",
         },
         {
-            "name": "1st Inning ERA Avg",
+            "name": "1st ERA",
             "value": average_available_values([
                 get_numeric_value(row, "Away 1st ERA"),
                 get_numeric_value(row, "Home 1st ERA"),
@@ -1124,7 +1124,7 @@ def first_inning_pressure_rows(row):
             "yrfi_read": "YRFI >= 6.00",
         },
         {
-            "name": "1st Inning WHIP Avg",
+            "name": "1st WHIP",
             "value": average_available_values([
                 get_numeric_value(row, "Away 1st WHIP"),
                 get_numeric_value(row, "Home 1st WHIP"),
@@ -1137,7 +1137,7 @@ def first_inning_pressure_rows(row):
             "yrfi_read": "YRFI >= 1.60",
         },
         {
-            "name": "1st Run Avg",
+            "name": "Off 1st Run Avg",
             "value": average_available_values([
                 get_numeric_value(row, "Away 1st Run Avg"),
                 get_numeric_value(row, "Home 1st Run Avg"),
@@ -3559,6 +3559,8 @@ if filtered.empty:
 else:
     for _, row in filtered.iterrows():
         away_team, home_team = split_game_name(row["Game"])
+        away_short = team_abbreviation(away_team)
+        home_short = team_abbreviation(home_team)
         logo_matchup = render_logo_matchup(away_team, home_team)
         market_watch = render_market_watch(row)
         data_quality_notice = render_data_quality_notice(row)
@@ -3814,8 +3816,8 @@ else:
             st.markdown(f"""
             | Matchup | Offense YRFI% | Opp Starter YRFI% | Read |
             |---|---|---|---|
-            | {away_team} offense vs {home_team} starter | {away_offense_yrfi_display} | {home_pitcher_yrfi_display} | {get_row_value(row, "Away 1st Inning Matchup Pressure", "Neutral")} |
-            | {home_team} offense vs {away_team} starter | {home_offense_yrfi_display} | {away_pitcher_yrfi_display} | {get_row_value(row, "Home 1st Inning Matchup Pressure", "Neutral")} |
+            | {away_short} offense vs {home_short} starter | {away_offense_yrfi_display} | {home_pitcher_yrfi_display} | {get_row_value(row, "Away 1st Inning Matchup Pressure", "Neutral")} |
+            | {home_short} offense vs {away_short} starter | {home_offense_yrfi_display} | {away_pitcher_yrfi_display} | {get_row_value(row, "Home 1st Inning Matchup Pressure", "Neutral")} |
             """)
             st.caption(
                 f'Matchup summary: {get_row_value(row, "1st Inning Matchup Summary", "No clear matchup pressure")} '
