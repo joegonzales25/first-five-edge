@@ -3804,18 +3804,9 @@ else:
                 st.caption("\\* - Edge Signal")
 
             pressure_rows, pressure_summary, pressure_model_read = first_inning_pressure_summary(row)
-            pressure_table_rows = "\n".join(
-                f"| {pressure_row['Signal']} | {pressure_row['Value']} | "
-                f"{pressure_row['Direction']} | {pressure_row['Model Read']} |"
-                for pressure_row in pressure_rows
-            )
 
             st.markdown("### 1st Inning Pressure")
-            st.markdown(f"""
-            | Signal | Combined Value | Direction | Model Read |
-            |---|---:|---|---|
-            {pressure_table_rows}
-            """)
+            st.table(pd.DataFrame(pressure_rows))
             st.caption(pressure_summary)
             st.caption(pressure_model_read)
 
