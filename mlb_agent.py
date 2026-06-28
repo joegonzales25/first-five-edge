@@ -1267,6 +1267,39 @@ def cap_confidence(confidence, max_confidence):
     return "Pass"
 
 
+def legacy_first_inning_confidence(nrfi_signals, yrfi_signals):
+    dominant_signals = max(nrfi_signals, yrfi_signals)
+    opposing_signals = min(nrfi_signals, yrfi_signals)
+
+    if dominant_signals == 0:
+        return "No Edge"
+
+    if opposing_signals == 0:
+        if dominant_signals >= 5:
+            return "A+"
+        if dominant_signals >= 4:
+            return "A"
+        if dominant_signals >= 3:
+            return "B"
+        return "No Edge"
+
+    net_agreement = dominant_signals - opposing_signals
+    if dominant_signals >= 5 and net_agreement >= 3:
+        return "B"
+    if dominant_signals >= 3 and net_agreement >= 2:
+        return "No Edge"
+
+    return "No Edge"
+
+
+def legacy_first_inning_pick_from_score(score):
+    if score >= 65:
+        return "NRFI"
+    if score < 50:
+        return "YRFI"
+    return "No Edge"
+
+
 def average_available(values):
     available = [safe_float(value) for value in values]
     available = [value for value in available if value is not None]
@@ -1403,74 +1436,44 @@ def calculate_first_inning_decision(
     league_yrfi=LEAGUE_YRFI_AVG,
 ):
     score = 50
-    league_yrfi = safe_float(league_yrfi) or 32
+    nrfi_signals = 0
+    yrfi_signals = 0
 
-    # Primary drivers: observed first-inning scoring and prevention outcomes.
-    score += weighted_relative_impact(
-        average_available([away_pitcher_yrfi, home_pitcher_yrfi]),
-        league_yrfi,
-        40,
-        16,
-    )
-    score += weighted_relative_impact(
-        average_available([away_offense_yrfi, home_offense_yrfi]),
-        league_yrfi,
-        35,
-        14,
-    )
+    def add_signal(condition, score_delta, signal_side):
+        nonlocal score, nrfi_signals, yrfi_signals
+        if not condition:
+            return
+        score += score_delta
+        if signal_side == "NRFI":
+            nrfi_signals += 1
+        elif signal_side == "YRFI":
+            yrfi_signals += 1
 
-    # Supporting validation only.
-    score += weighted_relative_impact(
-        average_available([away_first_era, home_first_era]),
-        3.75,
-        10,
-        4,
-    )
-    score += weighted_relative_impact(
-        average_available([away_first_whip, home_first_whip]),
-        1.15,
-        10,
-        4,
-    )
-    score += weighted_relative_impact(
-        average_available([away_first_run_avg, home_first_run_avg]),
-        0.45,
-        5,
-        2,
-    )
+    pitcher_yrfi = average_available([away_pitcher_yrfi, home_pitcher_yrfi])
+    offense_yrfi = average_available([away_offense_yrfi, home_offense_yrfi])
+    first_era = average_available([away_first_era, home_first_era])
+    first_whip = average_available([away_first_whip, home_first_whip])
+    first_run_avg = average_available([away_first_run_avg, home_first_run_avg])
+
+    add_signal(pitcher_yrfi is not None and pitcher_yrfi <= 18, 6, "NRFI")
+    add_signal(pitcher_yrfi is not None and pitcher_yrfi >= 38, -6, "YRFI")
+    add_signal(offense_yrfi is not None and offense_yrfi <= 20, 5, "NRFI")
+    add_signal(offense_yrfi is not None and offense_yrfi >= 35, -5, "YRFI")
+    add_signal(first_era is not None and first_era <= 3.00, 5, "NRFI")
+    add_signal(first_era is not None and first_era >= 6.00, -5, "YRFI")
+    add_signal(first_whip is not None and first_whip <= 1.00, 5, "NRFI")
+    add_signal(first_whip is not None and first_whip >= 1.60, -5, "YRFI")
+    add_signal(first_run_avg is not None and first_run_avg <= 0.30, 5, "NRFI")
+    add_signal(first_run_avg is not None and first_run_avg >= 0.60, -5, "YRFI")
 
     score = max(20, min(90, round(score, 1)))
+    pick = legacy_first_inning_pick_from_score(score)
+    confidence = legacy_first_inning_confidence(nrfi_signals, yrfi_signals)
 
-    distance = abs(score - 50)
-    confidence = confidence_from_margin(distance * 2)
+    if pick == "No Edge" or confidence == "No Edge":
+        return "No Edge", "No Edge", score
 
-    away_pressure, _ = classify_first_inning_matchup_pressure(
-        away_offense_yrfi,
-        home_pitcher_yrfi,
-        league_yrfi,
-    )
-    home_pressure, _ = classify_first_inning_matchup_pressure(
-        home_offense_yrfi,
-        away_pitcher_yrfi,
-        league_yrfi,
-    )
-    signal_type = classify_first_inning_signal_type(away_pressure, home_pressure)
-
-    if signal_type == "two_sided_yrfi" and score >= 58 and confidence != "Pass":
-        return "YRFI", confidence, score
-    if signal_type == "two_sided_nrfi" and score <= 42 and confidence != "Pass":
-        return "NRFI", confidence, score
-    if signal_type == "one_sided_yrfi" and score >= 62 and confidence != "Pass":
-        return "YRFI", cap_confidence(confidence, "B"), score
-    if signal_type == "one_sided_nrfi" and score <= 38 and confidence != "Pass":
-        return "NRFI", cap_confidence(confidence, "B"), score
-    if signal_type == "mixed_yrfi_nrfi":
-        if score >= 70 and confidence != "Pass":
-            return "YRFI", cap_confidence(confidence, "C"), score
-        if score <= 30 and confidence != "Pass":
-            return "NRFI", cap_confidence(confidence, "C"), score
-
-    return "No Edge", "No Edge", score
+    return pick, confidence, score
 
 
 def calculate_f5_decision(
