@@ -1245,6 +1245,28 @@ def confidence_from_margin(margin):
     return "Pass"
 
 
+def cap_confidence(confidence, max_confidence):
+    confidence_order = {
+        "Pass": 0,
+        "No Edge": 0,
+        "C": 1,
+        "B": 2,
+        "A": 3,
+        "A+": 4,
+    }
+    confidence = confidence if confidence in confidence_order else "Pass"
+    max_confidence = max_confidence if max_confidence in confidence_order else "Pass"
+
+    if confidence_order[confidence] <= confidence_order[max_confidence]:
+        return confidence
+
+    for candidate, rank in confidence_order.items():
+        if rank == confidence_order[max_confidence]:
+            return candidate
+
+    return "Pass"
+
+
 def average_available(values):
     available = [safe_float(value) for value in values]
     available = [value for value in available if value is not None]
@@ -1422,10 +1444,31 @@ def calculate_first_inning_decision(
     distance = abs(score - 50)
     confidence = confidence_from_margin(distance * 2)
 
-    if score >= 58 and confidence != "Pass":
+    away_pressure, _ = classify_first_inning_matchup_pressure(
+        away_offense_yrfi,
+        home_pitcher_yrfi,
+        league_yrfi,
+    )
+    home_pressure, _ = classify_first_inning_matchup_pressure(
+        home_offense_yrfi,
+        away_pitcher_yrfi,
+        league_yrfi,
+    )
+    signal_type = classify_first_inning_signal_type(away_pressure, home_pressure)
+
+    if signal_type == "two_sided_yrfi" and score >= 58 and confidence != "Pass":
         return "YRFI", confidence, score
-    if score <= 42 and confidence != "Pass":
+    if signal_type == "two_sided_nrfi" and score <= 42 and confidence != "Pass":
         return "NRFI", confidence, score
+    if signal_type == "one_sided_yrfi" and score >= 62 and confidence != "Pass":
+        return "YRFI", cap_confidence(confidence, "B"), score
+    if signal_type == "one_sided_nrfi" and score <= 38 and confidence != "Pass":
+        return "NRFI", cap_confidence(confidence, "B"), score
+    if signal_type == "mixed_yrfi_nrfi":
+        if score >= 70 and confidence != "Pass":
+            return "YRFI", cap_confidence(confidence, "C"), score
+        if score <= 30 and confidence != "Pass":
+            return "NRFI", cap_confidence(confidence, "C"), score
 
     return "No Edge", "No Edge", score
 
