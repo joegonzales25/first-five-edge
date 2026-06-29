@@ -416,6 +416,19 @@ def team_abbreviation(team_name):
     return TEAM_ABBREVIATIONS.get(team_name, str(team_name)[:3].upper())
 
 
+@lru_cache(maxsize=512)
+def get_pitcher_throwing_side(player_id):
+    if not player_id:
+        return UNAVAILABLE
+
+    try:
+        url = f"https://statsapi.mlb.com/api/v1/people/{player_id}"
+        person = requests.get(url, timeout=10).json().get("people", [{}])[0]
+        return person.get("pitchHand", {}).get("code", UNAVAILABLE)
+    except Exception:
+        return UNAVAILABLE
+
+
 def format_compact_score_result(label, away_team, away_score, home_team, home_score):
     if away_score is None or home_score is None:
         return "Pending"
@@ -1904,6 +1917,8 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
 
             away_pitcher = away_pitcher_data.get("fullName", UNAVAILABLE)
             home_pitcher = home_pitcher_data.get("fullName", UNAVAILABLE)
+            away_pitcher_throws = get_pitcher_throwing_side(away_pitcher_id)
+            home_pitcher_throws = get_pitcher_throwing_side(home_pitcher_id)
 
             step_start = perf_counter()
             away_stats = get_pitcher_stats(away_pitcher_id, season)
@@ -2148,6 +2163,8 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
 
                 "Away Pitcher": away_pitcher,
                 "Home Pitcher": home_pitcher,
+                "Away Pitcher Throws": away_pitcher_throws,
+                "Home Pitcher Throws": home_pitcher_throws,
                 "Away Pitcher Record": f'{away_stats["W"]}-{away_stats["L"]}',
                 "Home Pitcher Record": f'{home_stats["W"]}-{home_stats["L"]}',
                 "Away ERA": away_stats["ERA"],

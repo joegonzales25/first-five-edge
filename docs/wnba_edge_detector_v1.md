@@ -284,6 +284,59 @@ Rest context is either validated or removed
 
 If rest context fails to improve results, remove it from v1.0 rather than keeping it for narrative value.
 
+## WNBA Performance Tracking Contract
+
+WNBA tracking is intentionally separate from MLB tracking.
+
+Do not write WNBA rows to `model_history.py` or the MLB performance dashboard.
+
+Storage:
+
+```text
+first_five_edge_wnba_model_history.sqlite3
+```
+
+Default location is the system temp directory unless `FIRST_FIVE_EDGE_WNBA_HISTORY_DB` is set.
+
+Snapshot rule:
+
+```text
+Create prediction snapshots only for scheduled/pre-game rows.
+When a game becomes final, update only result fields on an existing snapshot.
+Do not backfill final-only or in-progress-only games as if they were pregame snapshots.
+```
+
+WNBA version fields:
+
+```text
+market_version = WNBA v1.0.1-test
+model_version = WNBA v1.0.0-test
+```
+
+Tracked WNBA summary fields:
+
+```text
+snapshots
+completed
+side_signal_games
+side_signal_accuracy
+scoring_signal_games
+scoring_signal_accuracy
+margin_mae
+total_mae
+```
+
+WNBA current-slate views:
+
+```text
+All = full current slate
+Top = placeholder until tracked WNBA results define a top-signal cut
+Side = side-edge signals only
+Scoring = non-neutral scoring-environment signals only
+Early = placeholder while Early Edge remains Model Pending
+Perf = WNBA-only performance dashboard
+```
+
 ## Card Contract
 
 Collapsed card:

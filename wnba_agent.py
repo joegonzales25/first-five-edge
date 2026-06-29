@@ -248,6 +248,7 @@ def build_current_slate(season=None, today=None, days_ahead=14, slate_date=None)
             rows.append(
                 {
                     "Sport": "WNBA",
+                    "Game ID": game.get("game_id"),
                     "Season": int(game["season"]) if pd.notna(game["season"]) else None,
                     "Game Time": format_game_time(game["game_date_dt"]),
                     "Sort Date": game["game_date_dt"],

@@ -20,6 +20,12 @@ from wnba_agent import (
     backtest_schedule as build_wnba_historical_lab,
     historical_summary_tables as wnba_historical_summary_tables,
 )
+from wnba_model_history import (
+    load_wnba_history,
+    load_wnba_performance_tables,
+    load_wnba_performance_summary,
+    record_wnba_history,
+)
 from model_history import (
     record_model_history,
 )
@@ -2716,6 +2722,35 @@ def render_wnba_filter_pills(active_filter, mode="lab"):
     st.html(f'<div class="nfl-control-row">{"".join(pills)}</div>')
 
 
+def selected_wnba_view(default_view="all"):
+    view = str(get_query_param("view") or get_query_param("filter") or default_view).lower()
+    valid_views = {"all", "top", "side", "scoring", "early", "perf"}
+    if view not in valid_views:
+        return default_view
+    return view
+
+
+def render_wnba_view_pills(active_view):
+    options = [
+        ("All", "all"),
+        ("Top", "top"),
+        ("Side", "side"),
+        ("Scoring", "scoring"),
+        ("Early", "early"),
+        ("Perf", "perf"),
+    ]
+    pills = []
+    for label, value in options:
+        classes = ["nfl-control-pill"]
+        if value == active_view:
+            classes.append("active")
+        pills.append(
+            f'<a class="{" ".join(classes)}" href="{query_link({"sport": "WNBA", "mode": "current", "view": value, "filter": None})}">'
+            f'{escape(label)}</a>'
+        )
+    st.html(f'<div class="nfl-control-row">{"".join(pills)}</div>')
+
+
 def render_sport_picker(active_sport):
     pills = []
     for sport, config in SPORT_CONFIG.items():
@@ -2997,6 +3032,15 @@ def filter_nfl_games(games, view, historical=False):
     return filtered
 
 
+def filter_wnba_games(games, view):
+    filtered = games.copy()
+    if view == "side":
+        filtered = filtered[filtered["Side Edge"] != "Pass"]
+    elif view == "scoring":
+        filtered = filtered[filtered["Scoring Edge"] != "Neutral Scoring Environment"]
+    return filtered
+
+
 @st.cache_data(ttl=900)
 def load_nfl_current():
     return build_current_slate()
@@ -3173,6 +3217,21 @@ def render_wnba_current():
         format="MM/DD/YYYY",
         key="wnba_slate_date",
     )
+    selected_view = selected_wnba_view("all")
+    st.html('<div class="nfl-control-label">View</div>')
+    render_wnba_view_pills(selected_view)
+
+    if selected_view == "perf":
+        render_wnba_performance_section()
+        return
+
+    if selected_view == "top":
+        st.info("WNBA Top signals are a placeholder until the v1.0 model has enough tracked performance to define a reliable top-pick cut.")
+        return
+
+    if selected_view == "early":
+        st.info("WNBA Early edge is pending for v1.0. Current WNBA testing is focused on full-game side and scoring-environment signals.")
+        return
 
     try:
         slate, meta = load_wnba_current(selected_date)
@@ -3184,10 +3243,18 @@ def render_wnba_current():
         st.info("No WNBA games found for the selected slate date.")
         return
 
-    selected_filter = selected_nfl_filter("all")
-    st.html('<div class="nfl-control-label">Filter</div>')
-    render_wnba_filter_pills(selected_filter, mode="current")
-    filtered = filter_nfl_games(slate, selected_filter)
+    try:
+        tracking_counts = record_wnba_history(
+            slate,
+            selected_date,
+            MARKET_RELEASES["WNBA"],
+            MODEL_BASELINES["WNBA"],
+        )
+        st.session_state["wnba_tracking_counts"] = tracking_counts
+    except Exception as exc:
+        st.session_state["wnba_tracking_counts"] = {"error": str(exc)}
+
+    filtered = filter_wnba_games(slate, selected_view)
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Games", len(slate))
@@ -3199,7 +3266,7 @@ def render_wnba_current():
     )
 
     if filtered.empty:
-        st.info("No WNBA games match the selected filter.")
+        st.info("No WNBA games match the selected view.")
         return
 
     for _, row in filtered.iterrows():
@@ -3247,6 +3314,107 @@ def render_wnba_summary_tables(tables):
     if rest is not None and not rest.empty:
         st.markdown("#### Rest Context")
         st.dataframe(rest, width="stretch", hide_index=True)
+
+
+def wnba_rows_to_csv(rows):
+    if not rows:
+        return ""
+    return pd.DataFrame(rows).to_csv(index=False)
+
+
+def render_wnba_performance_section():
+    st.markdown("### WNBA Performance")
+    model_version = MODEL_BASELINES["WNBA"]
+    market_version = MARKET_RELEASES["WNBA"]
+    summary = load_wnba_performance_summary(
+        model_version=model_version,
+        market_version=market_version,
+    )
+    tables = load_wnba_performance_tables(
+        model_version=model_version,
+        market_version=market_version,
+    )
+    rows = load_wnba_history(
+        model_version=model_version,
+        market_version=market_version,
+    )
+
+    if summary["snapshots"] == 0:
+        st.info("No WNBA performance snapshots recorded yet. Open upcoming WNBA slate dates before tipoff to create pregame snapshots.")
+        return
+
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("Snapshots", summary["snapshots"])
+    c2.metric("Completed", summary["completed"])
+    c3.metric("Side Acc", f"{summary['side_signal_accuracy']:.1%}")
+    c4.metric("Scoring Acc", f"{summary['scoring_signal_accuracy']:.1%}")
+    c5.metric("Margin MAE", summary["margin_mae"])
+    c6.metric("Total MAE", summary["total_mae"])
+
+    st.download_button(
+        "Export WNBA History CSV",
+        data=wnba_rows_to_csv(rows),
+        file_name="wnba_model_history.csv",
+        mime="text/csv",
+        key="wnba_history_download",
+    )
+
+    core = pd.DataFrame(tables["core"])
+    if not core.empty:
+        st.markdown("#### Core")
+        st.dataframe(core, width="stretch", hide_index=True)
+
+    left, right = st.columns(2)
+    with left:
+        st.markdown("#### Confidence")
+        confidence = pd.DataFrame(tables["confidence"])
+        if confidence.empty:
+            st.caption("No confidence rows yet.")
+        else:
+            st.dataframe(confidence, width="stretch", hide_index=True)
+
+        st.markdown("#### Side Location")
+        side_location = pd.DataFrame(tables["side_location"])
+        st.dataframe(side_location, width="stretch", hide_index=True)
+
+        st.markdown("#### Team History")
+        history = pd.DataFrame(tables["history"])
+        st.dataframe(history, width="stretch", hide_index=True)
+
+    with right:
+        st.markdown("#### Scoring Environment")
+        scoring = pd.DataFrame(tables["scoring"])
+        st.dataframe(scoring, width="stretch", hide_index=True)
+
+        st.markdown("#### Rest Context")
+        rest = pd.DataFrame(tables["rest"])
+        st.dataframe(rest, width="stretch", hide_index=True)
+
+    recent = pd.DataFrame(tables["recent"])
+    if not recent.empty:
+        display_columns = [
+            "slate_date",
+            "game",
+            "status",
+            "side_edge",
+            "side_result",
+            "scoring_edge",
+            "scoring_result",
+            "confidence",
+            "model_margin",
+            "margin_error",
+            "projected_total",
+            "total_error",
+        ]
+        available_columns = [
+            column for column in display_columns if column in recent.columns
+        ]
+        st.markdown("#### Recent Tracked Games")
+        st.dataframe(
+            recent[available_columns],
+            width="stretch",
+            hide_index=True,
+        )
 
 
 def render_wnba_historical():
@@ -3366,6 +3534,11 @@ def render_wnba_page():
         render_wnba_historical()
 
     with st.expander("WNBA Data Sources / Model Info"):
+        tracking_counts = st.session_state.get("wnba_tracking_counts", {})
+        tracking_summary = load_wnba_performance_summary(
+            model_version=MODEL_BASELINES["WNBA"],
+            market_version=MARKET_RELEASES["WNBA"],
+        )
         st.markdown(f"""
         **Product Release**: Edge Detector v{APP_VERSION}
 
@@ -3373,9 +3546,21 @@ def render_wnba_page():
 
         **WNBA Model Baseline**: v{MODEL_BASELINES["WNBA"]}
 
-        **Current Status**: Historical Lab is enabled for uploaded current-season or historical game data.
+        **WNBA Tracking**: separate WNBA-only SQLite history
+
+        **Snapshots**: {tracking_summary["snapshots"]}
+
+        **Completed**: {tracking_summary["completed"]}
+
+        **Last Tracking Run**: {escape(str(tracking_counts))}
+
+        **Storage**: `{escape(tracking_summary["db_path"])}`
+
+        **Current Status**: Current slate views are All, Top, Side, Scoring, Early, and Perf.
 
         **Current Slate**: ESPN scoreboard feed, v1.0 test surface.
+
+        **Top / Early**: placeholders until enough WNBA-only tracked results exist to define those cuts.
 
         **Model Scope**: matchup intelligence only. No odds, market comparison, staking guidance, or betting recommendations.
         """)
@@ -3775,6 +3960,7 @@ else:
             | Metric | {away_team} Starter | {home_team} Starter |
             |---|---|---|
             | Pitcher | {row["Away Pitcher"]} | {row["Home Pitcher"]} |
+            | Throws | {get_row_value(row, "Away Pitcher Throws", "N/A")} | {get_row_value(row, "Home Pitcher Throws", "N/A")} |
             | Record | {row["Away Pitcher Record"]} | {row["Home Pitcher Record"]} |
             | IP/Start | {get_row_value(row, "Away IP/Start", "N/A")} | {get_row_value(row, "Home IP/Start", "N/A")} |
             | IP | {row["Away IP"]} | {row["Home IP"]} |
