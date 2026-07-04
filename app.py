@@ -2972,11 +2972,15 @@ def nfl_analysis_sections(row):
 
 
 def render_nfl_analysis_sections(row):
-    st.markdown("### Trust But Verify")
+    st.markdown("### Edge Breakdown")
     for section in nfl_analysis_sections(row):
         st.markdown(f"#### {section['section']}")
-        st.markdown(f"**Signal:** {section['signal']}")
-        st.caption(section["detail"])
+        st.markdown(f"""
+        | Metric | Value |
+        |---|---|
+        | Signal | {section["signal"]} |
+        | Detail | {section["detail"]} |
+        """)
 
 
 def render_nfl_card(row, historical=False):
@@ -3019,7 +3023,7 @@ def render_nfl_card(row, historical=False):
     </div>
     """)
 
-    with st.expander(f"Analysis: {row['Game']}"):
+    with st.expander(f"🔍 Analysis: {row['Game']}"):
         if historical:
             st.markdown("### Result Review")
             st.markdown(f"""

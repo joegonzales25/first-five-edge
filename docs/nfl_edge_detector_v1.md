@@ -195,21 +195,32 @@ No duplicate long factor list on the collapsed card
 No betting language
 ```
 
-Do not repeat a second Key Factors section inside the analysis expander. The expander should have a different purpose and should use the Trust But Verify structure below.
+Do not repeat a second Key Factors section inside the analysis expander. The expander should have a different purpose and should use the Edge Breakdown table structure below.
 
-## Trust But Verify Expander
+## Analysis Expander
 
-NFL cards should include a Trust But Verify expander that explains why the model surfaced the signal.
+NFL cards should include an Analysis expander that explains why the model surfaced the signal.
 
 The expander should not introduce betting language. It should help the user validate the model read by showing the major football components behind the edge.
 
 Keep the expander title aligned with the existing app pattern:
 
 ```text
-Analysis: DAL @ PHI
+🔍 Analysis: DAL @ PHI
 ```
 
-Inside the Analysis expander, use the Trust But Verify breakdown instead of a second Key Factors section.
+Inside the Analysis expander, use an Edge Breakdown section instead of a second Key Factors section.
+
+The format should match the MLB analysis pattern:
+
+```text
+### Edge Breakdown
+#### Offense Edge
+| Metric | Value |
+|---|---|
+| Signal | ... |
+| Detail | ... |
+```
 
 Do not use this as a separate expander title for v1.0:
 
