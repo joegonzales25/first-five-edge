@@ -660,6 +660,44 @@ st.markdown("""
     font-weight: 900;
     text-transform: uppercase;
 }
+.nfl-slate-label {
+    margin: 18px 0 8px;
+    color: #64748b;
+    font-size: 18px;
+    font-weight: 500;
+}
+.nfl-slate-box {
+    width: 100%;
+    border-radius: 14px;
+    padding: 18px 22px;
+    margin: 0 0 26px;
+    background: #f1f5f9;
+    color: #94a3b8;
+    font-size: 22px;
+    line-height: 1;
+}
+.nfl-filter-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin: 0 0 28px;
+}
+.nfl-filter-strip .nfl-control-pill {
+    min-height: 68px;
+    min-width: 72px;
+    padding: 14px 18px;
+    border-radius: 14px;
+    font-size: 17px;
+}
+.nfl-filter-strip .nfl-control-pill:first-child {
+    flex: 1 0 100%;
+}
+.nfl-count-caption {
+    margin: 0 0 24px;
+    color: #64748b;
+    font-size: 20px;
+    font-weight: 500;
+}
 
 div[data-testid="stRadio"] [role="radiogroup"] {
     display: grid;
@@ -2671,6 +2709,44 @@ def render_nfl_pills(options, active_value, extra_params=None):
     st.html(f'<div class="nfl-control-row">{"".join(pills)}</div>')
 
 
+def render_nfl_current_controls(slate, meta, selected_filter, filtered_count):
+    slate_date = "TBD"
+    if "Sort Date" in slate.columns and slate["Sort Date"].notna().any():
+        try:
+            slate_date = pd.to_datetime(slate["Sort Date"].dropna().min()).strftime(
+                "%m/%d/%Y"
+            )
+        except Exception:
+            slate_date = f"Season {meta['season']} - Week {meta['week']}"
+    else:
+        slate_date = f"Season {meta['season']} - Week {meta['week']}"
+
+    options = [
+        ("All", "all"),
+        ("Signals", "signals"),
+        ("Side", "side"),
+        ("Scoring", "scoring"),
+        ("A", "a"),
+        ("Pass", "pass"),
+    ]
+    pills = []
+    for label, value in options:
+        classes = ["nfl-control-pill"]
+        if value == selected_filter:
+            classes.append("active")
+        pills.append(
+            f'<a class="{" ".join(classes)}" href="{query_link({"sport": "NFL", "mode": "current", "week": "all", "filter": value})}">'
+            f'{escape(label)}</a>'
+        )
+
+    st.html(
+        '<div class="nfl-slate-label">Slate Date</div>'
+        f'<div class="nfl-slate-box">{escape(str(slate_date))}</div>'
+        f'<div class="nfl-filter-strip">{"".join(pills)}</div>'
+        f'<div class="nfl-count-caption">{filtered_count} of {len(slate)}</div>'
+    )
+
+
 def render_nfl_mode_pills(active_mode):
     options = [("Current", "current"), ("Historical Lab", "lab")]
     pills = []
@@ -3266,31 +3342,9 @@ def render_nfl_current():
         )
         return
 
-    st.caption(f"Season {meta['season']} - Week {meta['week']}")
     selected_filter = selected_nfl_filter("all")
-    st.html('<div class="nfl-control-label">Filter</div>')
-    render_nfl_pills(
-        [
-            ("All", "all"),
-            ("Signals", "signals"),
-            ("Side", "side"),
-            ("Scoring", "scoring"),
-            ("A", "a"),
-            ("Pass", "pass"),
-        ],
-        selected_filter,
-        {"mode": "current", "week": "all"},
-    )
     filtered = filter_nfl_games(slate, selected_filter)
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Games", len(slate))
-    c2.metric("Model Signals", len(slate[slate["Model Signal"] != "Pass"]))
-    c3.metric("Side Edges", len(slate[slate["Side Edge"] != "Pass"]))
-    c4.metric(
-        "Scoring Signals",
-        len(slate[slate["Scoring Edge"] != "Neutral Scoring Environment"]),
-    )
+    render_nfl_current_controls(slate, meta, selected_filter, len(filtered))
 
     if filtered.empty:
         st.info("No NFL games match the selected filter.")

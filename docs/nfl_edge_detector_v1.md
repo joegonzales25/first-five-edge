@@ -137,6 +137,49 @@ DAL @ PHI
 
 Use top filter pills only. Do not use sidebar filters for NFL v1.0.
 
+## Current Slate Filter And Count Layout
+
+The NFL Current Slate controls should follow the MLB game-card control rhythm while staying implemented with NFL-scoped classes.
+
+Layout:
+
+```text
+Slate Date
+MM/DD/YYYY display box
+Full-width All filter pill
+Secondary filter pills
+Filtered count caption
+```
+
+Initial Current Slate filters:
+
+```text
+All
+Signals
+Side
+Scoring
+A
+Pass
+```
+
+The count should use compact text:
+
+```text
+16 of 16
+9 of 16
+```
+
+Do not show the previous vertical metric block on Current Slate:
+
+```text
+Games
+Model Signals
+Side Edges
+Scoring Signals
+```
+
+Those metrics can be reconsidered later in a summary expander or dashboard, but they should not occupy the primary mobile filter area.
+
 NFL card tiles:
 
 ```text
