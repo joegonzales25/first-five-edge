@@ -171,6 +171,22 @@ Cards should show one visible Key Factors section on the card.
 
 The card-level Key Factors section should match the MLB key factor visual treatment so the sport modules feel like one product family.
 
+The selected NFL signal tile should control the visible Key Factors panel, similar to the MLB game cards:
+
+```text
+Side Edge selected = show side-specific key factors
+Scoring Environment selected = show scoring-environment key factors
+Early Edge selected = show early-edge key factors
+```
+
+For v1.0, Early Edge key factors should clearly indicate that the early model is pending:
+
+```text
+Early Edge model pending
+First-half specific inputs are not yet modeled
+Use Side Edge and Scoring Environment for v1 review
+```
+
 Key Factors should stay short and scannable:
 
 ```text

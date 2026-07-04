@@ -2793,9 +2793,70 @@ def nfl_key_factor_list(row, limit=4):
     return [str(factor) for factor in factors[:limit]]
 
 
-def render_nfl_key_factors(row):
+def nfl_factor_groups(row):
+    factors = nfl_key_factor_list(row, limit=12)
+    side_keywords = (
+        "side",
+        "team-strength",
+        "home-field",
+        "rest",
+        "margin",
+        "threshold",
+    )
+    scoring_keywords = (
+        "scoring",
+        "score",
+        "baseline",
+        "total",
+        "profile",
+        "allowed",
+    )
+    side_factors = []
+    scoring_factors = []
+
+    for factor in factors:
+        lower = factor.lower()
+        if any(keyword in lower for keyword in side_keywords):
+            side_factors.append(factor)
+        if any(keyword in lower for keyword in scoring_keywords):
+            scoring_factors.append(factor)
+
+    if not side_factors:
+        side_edge = str(row.get("Side Edge", "Pass"))
+        if side_edge != "Pass":
+            side_factors.append(f"{side_edge} clears the side-edge threshold")
+        else:
+            side_factors.append("Side edge stays below signal threshold")
+
+    if not scoring_factors:
+        scoring_edge = str(row.get("Scoring Edge", "Neutral Scoring Environment"))
+        if scoring_edge != "Neutral Scoring Environment":
+            scoring_factors.append(f"{scoring_edge} clears the scoring-environment threshold")
+        else:
+            scoring_factors.append("Scoring projection stays near the rolling league baseline")
+
+    early_factors = [
+        "Early Edge model pending",
+        "First-half specific inputs are not yet modeled",
+        "Use Side Edge and Scoring Environment for v1 review",
+    ]
+
+    return {
+        "first": side_factors[:4],
+        "f5": scoring_factors[:4],
+        "full": early_factors,
+    }
+
+
+def render_nfl_key_factor_panel(row, view):
+    headings = {
+        "first": "Key Factors: Side Edge",
+        "f5": "Key Factors: Scoring Environment",
+        "full": "Key Factors: Early Edge",
+    }
+    factors = nfl_factor_groups(row).get(view, ["Neutral model profile"])
     items = []
-    for factor in nfl_key_factor_list(row, limit=4):
+    for factor in factors:
         items.append(
             '<div class="reason-item">'
             '<span class="reason-check">&#10003;</span>'
@@ -2804,11 +2865,19 @@ def render_nfl_key_factors(row):
         )
 
     return (
-        '<div class="key-factors">'
-        '<div class="market-heading">Key Factors</div>'
+        f'<div class="key-factors edge-factor-panel edge-factor-{escape(view)}">'
+        f'<div class="market-heading">{escape(headings.get(view, "Key Factors"))}</div>'
         f'<div class="reason-stack">{"".join(items)}</div>'
         '</div>'
     )
+
+
+def render_nfl_key_factor_panels(row):
+    panels = "".join(
+        render_nfl_key_factor_panel(row, view)
+        for view in ["first", "f5", "full"]
+    )
+    return f'<div class="edge-factor-panels">{panels}</div>'
 
 
 def nfl_scoring_environment_detail(row):
@@ -2912,6 +2981,7 @@ def render_nfl_analysis_sections(row):
 
 def render_nfl_card(row, historical=False):
     away_team, home_team = split_game_name(row["Game"])
+    card_anchor = f"nfl-{game_anchor(row['Game'])}"
     result_line = ""
     if historical:
         result_line = f"""
@@ -2925,7 +2995,7 @@ def render_nfl_card(row, historical=False):
         """
 
     st.html(f"""
-    <div class="game-card">
+    <div id="{card_anchor}" class="game-card">
         <span class="badge {nfl_signal_class(row)}">{escape(str(row["Model Signal"]))}</span>
         <span class="badge badge-edge">Edge {escape(str(row["Edge Score"]))}</span>
         <span class="badge badge-edge">Confidence {escape(str(row["Confidence"]))}</span>
@@ -2933,13 +3003,17 @@ def render_nfl_card(row, historical=False):
         <div class="game-title">{escape(str(row["Game"]))}</div>
         <div class="muted">{escape(str(row["Game Time"]))} - {escape(str(row["Status"]))}</div>
 
+        <input class="edge-view-control edge-view-first" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-side" checked>
+        <input class="edge-view-control edge-view-f5" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-scoring">
+        <input class="edge-view-control edge-view-full" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-early">
+
         <div class="decision-stack">
-            <div class="decision-line decision-first">Side Edge: {escape(str(row["Side Edge"]))}</div>
-            <div class="decision-line decision-f5">Scoring Environment: {escape(str(row["Scoring Edge"]))}</div>
-            <div class="decision-line decision-full">Early Edge: {escape(str(row["Early Edge"]))}</div>
+            <label class="decision-line decision-first" for="{card_anchor}-side">Side Edge: {escape(str(row["Side Edge"]))}</label>
+            <label class="decision-line decision-f5" for="{card_anchor}-scoring">Scoring Environment: {escape(str(row["Scoring Edge"]))}</label>
+            <label class="decision-line decision-full" for="{card_anchor}-early">Early Edge: {escape(str(row["Early Edge"]))}</label>
         </div>
 
-        {render_nfl_key_factors(row)}
+        {render_nfl_key_factor_panels(row)}
 
         {result_line}
     </div>
