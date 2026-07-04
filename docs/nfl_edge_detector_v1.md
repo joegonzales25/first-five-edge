@@ -6,6 +6,25 @@ NFL Edge Detector v1.0 expands the existing First Five Edge app into the broader
 
 The NFL module should provide matchup intelligence only. It should not provide betting recommendations, staking guidance, odds comparisons, market-value language, or bankroll language.
 
+## Module Isolation Rule
+
+NFL changes must not alter MLB behavior, MLB model outputs, MLB filter controls, MLB card rendering, or shared styling unless the change is explicitly part of the shared Edge Detector shell.
+
+Implementation guardrails:
+
+```text
+Keep NFL model logic in nfl_agent.py and nfl_backtest.py.
+Keep MLB model logic in mlb_agent.py.
+Keep sport-specific rendering inside sport-specific render functions.
+Prefix NFL-only CSS and controls with nfl-.
+Do not add global Streamlit control styling for NFL-specific behavior.
+Do not reuse MLB filter state keys for NFL.
+Do not reuse MLB UI labels unless they are intentionally shared product language.
+Shared shell changes must be reviewed for impact on every sport page.
+```
+
+Future sport modules should follow the same isolation pattern.
+
 ## Brand And Navigation
 
 Parent brand:
@@ -148,7 +167,214 @@ Side Edge: PHI Edge
 Confidence: A
 ```
 
-Collapsed cards should show a short Key Factors summary. Expanded analysis should show the full Key Factors list.
+Cards should show one visible Key Factors section on the card.
+
+The card-level Key Factors section should match the MLB key factor visual treatment so the sport modules feel like one product family.
+
+Key Factors should stay short and scannable:
+
+```text
+2-4 concise factors
+No duplicate long factor list on the collapsed card
+No betting language
+```
+
+Do not repeat a second Key Factors section inside the analysis expander. The expander should have a different purpose and should use the Trust But Verify structure below.
+
+## Trust But Verify Expander
+
+NFL cards should include a Trust But Verify expander that explains why the model surfaced the signal.
+
+The expander should not introduce betting language. It should help the user validate the model read by showing the major football components behind the edge.
+
+Keep the expander title aligned with the existing app pattern:
+
+```text
+Analysis: DAL @ PHI
+```
+
+Inside the Analysis expander, use the Trust But Verify breakdown instead of a second Key Factors section.
+
+Do not use this as a separate expander title for v1.0:
+
+```text
+Trust But Verify: DAL @ PHI
+```
+
+Recommended sections:
+
+```text
+Offense Edge
+Defense Edge
+Special Teams Edge
+Tempo / Game Script
+Volatility Check
+Availability / Weather
+Signal Agreement
+```
+
+### Offense Edge
+
+Purpose:
+
+```text
+Show which offense is better positioned to create points, sustain drives, and avoid negative plays.
+```
+
+Candidate factors:
+
+```text
+Scoring efficiency
+Yards per play
+Passing efficiency
+Rushing efficiency
+Third-down conversion
+Red-zone touchdown rate
+Turnover avoidance
+QB stability
+Sack rate allowed
+```
+
+### Defense Edge
+
+Purpose:
+
+```text
+Show which defense is better positioned to limit scoring, create disruption, and prevent explosive plays.
+```
+
+Candidate factors:
+
+```text
+Points allowed
+Yards per play allowed
+Passing defense efficiency
+Rushing defense efficiency
+Pressure rate
+Sack rate
+Takeaway rate
+Third-down defense
+Red-zone defense
+Explosive plays allowed
+```
+
+### Special Teams Edge
+
+Purpose:
+
+```text
+Show hidden-yardage and field-position advantages.
+```
+
+Candidate factors:
+
+```text
+Field goal reliability
+Net punt performance
+Return efficiency
+Kick coverage
+Special teams EPA, when available
+```
+
+Special teams should generally confirm or warn on a close edge. It should not drive a high-confidence signal by itself.
+
+### Tempo / Game Script
+
+Purpose:
+
+```text
+Explain whether pace, play volume, and likely game script support the scoring environment signal.
+```
+
+Candidate factors:
+
+```text
+Plays per game
+Situation-neutral pace
+Run/pass tendency
+Close-game pace
+Expected possession count
+Leading/trailing tendencies
+```
+
+### Volatility Check
+
+Purpose:
+
+```text
+Identify whether the matchup has factors that could make the model signal less stable.
+```
+
+Candidate factors:
+
+```text
+Giveaway rate
+Takeaway rate
+Interception rate
+Fumble rate
+Pressure mismatch
+Recent turnover swings
+```
+
+Example labels:
+
+```text
+Volatility Low
+Volatility Moderate
+Volatility Elevated
+```
+
+### Availability / Weather
+
+Purpose:
+
+```text
+Surface important context that may affect the edge but may not be fully modeled in v1.0.
+```
+
+Candidate factors:
+
+```text
+Starting QB status
+Offensive line availability
+Key skill-player availability
+Defensive front availability
+Secondary availability
+Dome/outdoor venue
+Wind
+Rain/snow
+Temperature
+Field surface
+Travel/time-zone context
+```
+
+For v1.0, if reliable injury or weather data is not wired in, label this section clearly:
+
+```text
+Availability check pending
+Weather check pending
+```
+
+Do not imply that the model has live injury or weather awareness unless that data is actually included.
+
+### Signal Agreement
+
+Purpose:
+
+```text
+Summarize whether the major components agree with or conflict with the top-level model signal.
+```
+
+Example outputs:
+
+```text
+Side Edge supported by offense and defense
+Scoring Environment supported by tempo, conflicted by red-zone defense
+Special teams neutral
+Availability not fully modeled
+```
+
+The Signal Agreement section should be the quick-read conclusion of the expander.
 
 ## Shared Row Contract
 

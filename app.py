@@ -2777,6 +2777,139 @@ def nfl_signal_class(row):
     return "badge-nrfi"
 
 
+def nfl_key_factor_list(row, limit=4):
+    factors = row.get("Key Factors List", [])
+    if not isinstance(factors, list):
+        factors = [
+            note.strip()
+            for note in str(row.get("Agent Notes", "")).split(";")
+            if note.strip()
+        ]
+
+    if not factors:
+        summary = str(row.get("Key Factors Summary", "")).strip()
+        factors = [summary] if summary else ["Neutral model profile"]
+
+    return [str(factor) for factor in factors[:limit]]
+
+
+def render_nfl_key_factors(row):
+    items = []
+    for factor in nfl_key_factor_list(row, limit=4):
+        items.append(
+            '<div class="reason-item">'
+            '<span class="reason-check">&#10003;</span>'
+            f'<span>{escape(factor)}</span>'
+            '</div>'
+        )
+
+    return (
+        '<div class="key-factors">'
+        '<div class="market-heading">Key Factors</div>'
+        f'<div class="reason-stack">{"".join(items)}</div>'
+        '</div>'
+    )
+
+
+def nfl_scoring_environment_detail(row):
+    projected_total = row.get("Projected Total", "N/A")
+    baseline = row.get("League Total Baseline", "N/A")
+    scoring_edge = row.get("Scoring Edge", "Neutral Scoring Environment")
+
+    if scoring_edge == "Neutral Scoring Environment":
+        return f"Projected total {projected_total} is near the rolling league baseline {baseline}."
+
+    return f"{scoring_edge} with projected total {projected_total} vs rolling league baseline {baseline}."
+
+
+def nfl_signal_agreement(row):
+    agreements = []
+    side_edge = str(row.get("Side Edge", "Pass"))
+    scoring_edge = str(row.get("Scoring Edge", "Neutral Scoring Environment"))
+
+    if side_edge != "Pass":
+        agreements.append(f"Side Edge active: {side_edge}")
+    else:
+        agreements.append("Side Edge below signal threshold")
+
+    if scoring_edge != "Neutral Scoring Environment":
+        agreements.append(f"Scoring Environment active: {scoring_edge}")
+    else:
+        agreements.append("Scoring Environment near baseline")
+
+    agreements.append(f"Confidence: {row.get('Confidence', 'Pass')}")
+    return "; ".join(agreements)
+
+
+def nfl_analysis_sections(row):
+    side_edge = str(row.get("Side Edge", "Pass"))
+    scoring_edge = str(row.get("Scoring Edge", "Neutral Scoring Environment"))
+    confidence = str(row.get("Confidence", "Pass"))
+    model_margin = row.get("Model Margin", "N/A")
+
+    offense_signal = "Balanced / no clear separation"
+    if side_edge != "Pass":
+        offense_signal = f"{side_edge} supported by current scoring profile"
+    elif scoring_edge != "Neutral Scoring Environment":
+        offense_signal = f"{scoring_edge} supported by scoring profile"
+
+    defense_signal = "No clear defensive separation in v1 model"
+    if side_edge != "Pass":
+        defense_signal = f"{side_edge} supported by team-strength margin {model_margin}"
+
+    volatility_signal = "Moderate"
+    if confidence == "A":
+        volatility_signal = "Lower"
+    elif confidence == "Pass":
+        volatility_signal = "Elevated / no strong model separation"
+
+    return [
+        {
+            "section": "Offense Edge",
+            "signal": offense_signal,
+            "detail": "Uses rolling scoring production and matchup-adjusted team rating from completed games.",
+        },
+        {
+            "section": "Defense Edge",
+            "signal": defense_signal,
+            "detail": "Uses rolling points allowed and opponent scoring profile in the current v1 model.",
+        },
+        {
+            "section": "Special Teams Edge",
+            "signal": "Not yet modeled",
+            "detail": "Field position, kicking, punting, and return edges are reserved for a future model pass.",
+        },
+        {
+            "section": "Tempo / Game Script",
+            "signal": scoring_edge,
+            "detail": nfl_scoring_environment_detail(row),
+        },
+        {
+            "section": "Volatility Check",
+            "signal": volatility_signal,
+            "detail": "Volatility is inferred from model separation and confidence until turnover-specific inputs are added.",
+        },
+        {
+            "section": "Availability / Weather",
+            "signal": "Pending",
+            "detail": "Live injury, quarterback status, and weather inputs are not fully modeled in v1.0.",
+        },
+        {
+            "section": "Signal Agreement",
+            "signal": row.get("Model Signal", "Pass"),
+            "detail": nfl_signal_agreement(row),
+        },
+    ]
+
+
+def render_nfl_analysis_sections(row):
+    st.markdown("### Trust But Verify")
+    for section in nfl_analysis_sections(row):
+        st.markdown(f"#### {section['section']}")
+        st.markdown(f"**Signal:** {section['signal']}")
+        st.caption(section["detail"])
+
+
 def render_nfl_card(row, historical=False):
     away_team, home_team = split_game_name(row["Game"])
     result_line = ""
@@ -2806,10 +2939,7 @@ def render_nfl_card(row, historical=False):
             <div class="decision-line decision-full">Early Edge: {escape(str(row["Early Edge"]))}</div>
         </div>
 
-        <div class="key-factor-panel">
-            <div class="key-factor-heading">Key Factors</div>
-            <div class="key-factor-line">{escape(str(row["Key Factors Summary"]))}</div>
-        </div>
+        {render_nfl_key_factors(row)}
 
         {result_line}
     </div>
@@ -2828,9 +2958,7 @@ def render_nfl_card(row, historical=False):
             | Total Error | {row["Total Error"]} |
             """)
 
-        st.markdown("### Key Factors")
-        for factor in row["Key Factors List"]:
-            st.markdown(f"- {factor}")
+        render_nfl_analysis_sections(row)
 
         st.markdown("### Model Detail")
         st.markdown(f"""
