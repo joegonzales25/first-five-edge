@@ -146,8 +146,8 @@ Layout:
 ```text
 Slate Date
 MM/DD/YYYY display box
-Full-width All filter pill
-Secondary filter pills
+Compact full-width All filter pill
+Compact secondary filter pills in a 3-column mobile grid
 Filtered count caption
 ```
 
@@ -179,6 +179,8 @@ Scoring Signals
 ```
 
 Those metrics can be reconsidered later in a summary expander or dashboard, but they should not occupy the primary mobile filter area.
+
+Page-level NFL filter pills may use query-param navigation in v1.0. This means selecting a page filter can rerun the Streamlit page. That is acceptable for v1.0 to preserve simple, shareable filter URLs. Game-card signal tiles should remain local card controls and should not refresh the page.
 
 NFL card tiles:
 

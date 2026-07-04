@@ -677,20 +677,22 @@ st.markdown("""
     line-height: 1;
 }
 .nfl-filter-strip {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    margin: 0 0 28px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin: 0 0 22px;
 }
 .nfl-filter-strip .nfl-control-pill {
-    min-height: 68px;
-    min-width: 72px;
-    padding: 14px 18px;
-    border-radius: 14px;
-    font-size: 17px;
+    min-height: 50px;
+    min-width: 0;
+    padding: 10px 12px;
+    border-radius: 12px;
+    font-size: 14px;
 }
 .nfl-filter-strip .nfl-control-pill:first-child {
-    flex: 1 0 100%;
+    grid-column: 1 / -1;
+    min-height: 56px;
+    font-size: 15px;
 }
 .nfl-count-caption {
     margin: 0 0 24px;
