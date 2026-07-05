@@ -308,14 +308,6 @@ st.markdown("""
     font-weight: 800;
     line-height: 1.25;
 }
-.decision-watch {
-    display: block;
-    margin-top: 8px;
-    color: #fde68a;
-    font-size: 13px;
-    font-weight: 900;
-    line-height: 1.25;
-}
 .result-outcome {
     display: inline-flex;
     align-items: center;
@@ -1249,14 +1241,6 @@ def first_inning_watch_label(row):
         return "NRFI Watch"
 
     return None
-
-
-def render_first_inning_watch(row):
-    watch_label = first_inning_watch_label(row)
-    if watch_label is None:
-        return ""
-
-    return f'<span class="decision-watch">{escape(watch_label)}</span>'
 
 
 def first_inning_pressure_summary(row):
@@ -4097,7 +4081,6 @@ else:
             home_team,
             market="first",
         )
-        first_inning_watch = render_first_inning_watch(row)
         f5_display = format_decision_pick(
             f5_pick,
             f5_confidence,
@@ -4219,7 +4202,7 @@ else:
             <input class="edge-view-control edge-view-full" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-full">
 
             <div class="decision-stack">
-                <label class="decision-line decision-first" for="{card_anchor}-first">🎯 1st Inning: {first_inning_display}{first_inning_watch}{first_inning_result}</label>
+                <label class="decision-line decision-first" for="{card_anchor}-first">🎯 1st Inning: {first_inning_display}{first_inning_result}</label>
                 <label class="decision-line decision-f5" for="{card_anchor}-f5">⚾ First 5: {f5_display}{f5_result}</label>
                 <label class="decision-line decision-full" for="{card_anchor}-full">🏆 Full Game: {full_game_display}{full_game_result}</label>
             </div>
