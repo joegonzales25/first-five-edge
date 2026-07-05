@@ -15,11 +15,80 @@ DB_PATH = Path(
 MARKETS = ["1st Inning", "First 5", "Full Game"]
 
 
+def history_backend():
+    configured_backend = os.environ.get("HISTORY_BACKEND", "").strip().lower()
+    if configured_backend:
+        return configured_backend
+    if os.environ.get("TURSO_DATABASE_URL") and os.environ.get("TURSO_AUTH_TOKEN"):
+        return "turso"
+
+    return "sqlite"
+
+
+def using_remote_history():
+    return history_backend() == "turso"
+
+
+class ManagedConnection:
+    def __init__(self, connection):
+        self.connection = connection
+
+    def __getattr__(self, name):
+        return getattr(self.connection, name)
+
+    def __enter__(self):
+        return self.connection
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if exc_type is None and hasattr(self.connection, "commit"):
+            self.connection.commit()
+        if hasattr(self.connection, "close"):
+            self.connection.close()
+        return False
+
+
 def connect(db_path=DB_PATH):
+    if using_remote_history():
+        import libsql
+
+        return ManagedConnection(
+            libsql.connect(
+                database=os.environ["TURSO_DATABASE_URL"],
+                auth_token=os.environ["TURSO_AUTH_TOKEN"],
+            )
+        )
+
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(db_path)
     connection.row_factory = sqlite3.Row
     return connection
+
+
+def row_to_dict(row, columns=None):
+    if isinstance(row, dict):
+        return row
+    if hasattr(row, "keys"):
+        return {key: row[key] for key in row.keys()}
+    if columns:
+        return dict(zip(columns, row))
+
+    return dict(row)
+
+
+def fetch_rows(connection, query, params=()):
+    cursor = connection.execute(query, params)
+    rows = cursor.fetchall()
+    columns = [column[0] for column in cursor.description or []]
+    return [row_to_dict(row, columns) for row in rows]
+
+
+def fetch_one(connection, query, params=()):
+    cursor = connection.execute(query, params)
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    columns = [column[0] for column in cursor.description or []]
+    return row_to_dict(row, columns)
 
 
 def init_db(connection):
@@ -46,7 +115,7 @@ def init_db(connection):
     )
     columns = {
         row["name"]
-        for row in connection.execute("PRAGMA table_info(model_history)").fetchall()
+        for row in fetch_rows(connection, "PRAGMA table_info(model_history)")
     }
     if "signal_type" not in columns:
         connection.execute("ALTER TABLE model_history ADD COLUMN signal_type TEXT")
@@ -56,7 +125,7 @@ def init_db(connection):
 def table_columns(connection):
     return {
         row["name"]
-        for row in connection.execute("PRAGMA table_info(model_history)").fetchall()
+        for row in fetch_rows(connection, "PRAGMA table_info(model_history)")
     }
 
 
@@ -284,7 +353,7 @@ def load_performance_summary(
     exact_date=None,
     db_path=DB_PATH,
 ):
-    if not db_path.exists():
+    if not using_remote_history() and not db_path.exists():
         return []
 
     where_clause, params = build_history_filters(
@@ -297,7 +366,8 @@ def load_performance_summary(
 
     with connect(db_path) as connection:
         init_db(connection)
-        rows = connection.execute(
+        rows = fetch_rows(
+            connection,
             f"""
             SELECT
                 market,
@@ -313,7 +383,7 @@ def load_performance_summary(
             END
             """,
             params,
-        ).fetchall()
+        )
 
     summary = {}
     for row in rows:
@@ -346,30 +416,33 @@ def load_performance_summary(
 
 
 def load_model_versions(db_path=DB_PATH):
-    if not db_path.exists():
+    if not using_remote_history() and not db_path.exists():
         return []
 
     with connect(db_path) as connection:
         init_db(connection)
-        rows = connection.execute(
+        rows = fetch_rows(
+            connection,
             """
             SELECT model_version, MAX(updated_at) AS latest_update
             FROM model_history
             GROUP BY model_version
             ORDER BY latest_update DESC, model_version DESC
             """
-        ).fetchall()
+        )
 
     return [row["model_version"] for row in rows]
 
 
 def load_history_diagnostics(db_path=DB_PATH):
     db_path = Path(db_path)
+    remote_history = using_remote_history()
+    remote_url = os.environ.get("TURSO_DATABASE_URL", "")
     diagnostics = {
-        "storage_backend": "SQLite",
-        "db_path": str(db_path),
-        "exists": db_path.exists(),
-        "size_bytes": db_path.stat().st_size if db_path.exists() else 0,
+        "storage_backend": "Turso" if remote_history else "SQLite",
+        "db_path": remote_url if remote_history else str(db_path),
+        "exists": remote_history or db_path.exists(),
+        "size_bytes": 0 if remote_history else db_path.stat().st_size if db_path.exists() else 0,
         "total_rows": 0,
         "completed_rows": 0,
         "pending_rows": 0,
@@ -383,12 +456,13 @@ def load_history_diagnostics(db_path=DB_PATH):
         "latest_update": None,
     }
 
-    if not db_path.exists():
+    if not remote_history and not db_path.exists():
         return diagnostics
 
     with connect(db_path) as connection:
         init_db(connection)
-        row = connection.execute(
+        row = fetch_one(
+            connection,
             """
             SELECT
                 COUNT(*) AS total_rows,
@@ -403,15 +477,16 @@ def load_history_diagnostics(db_path=DB_PATH):
                 MAX(updated_at) AS latest_update
             FROM model_history
             """
-        ).fetchone()
-        versions = connection.execute(
+        )
+        versions = fetch_rows(
+            connection,
             """
             SELECT model_version
             FROM model_history
             GROUP BY model_version
             ORDER BY MAX(updated_at) DESC, model_version DESC
             """
-        ).fetchall()
+        )
 
     if row:
         diagnostics.update(
@@ -435,7 +510,7 @@ def load_history_diagnostics(db_path=DB_PATH):
 
 def load_performance_export_rows(model_version=None, db_path=DB_PATH):
     db_path = Path(db_path)
-    if not db_path.exists():
+    if not using_remote_history() and not db_path.exists():
         return []
 
     where_clause = ""
@@ -447,7 +522,8 @@ def load_performance_export_rows(model_version=None, db_path=DB_PATH):
     with connect(db_path) as connection:
         init_db(connection)
         signal_type_select = optional_signal_type_select(connection)
-        rows = connection.execute(
+        rows = fetch_rows(
+            connection,
             f"""
             SELECT
                 model_version,
@@ -471,11 +547,11 @@ def load_performance_export_rows(model_version=None, db_path=DB_PATH):
                     WHEN 'First 5' THEN 2
                     WHEN 'Full Game' THEN 3
                     ELSE 4
-                END,
+            END,
                 game
             """,
             params,
-        ).fetchall()
+        )
 
     export_rows = []
     for row in rows:
@@ -499,7 +575,7 @@ def load_performance_details(
     limit=200,
     db_path=DB_PATH,
 ):
-    if not db_path.exists():
+    if not using_remote_history() and not db_path.exists():
         return []
 
     where_clause, params = build_history_filters(
@@ -514,7 +590,8 @@ def load_performance_details(
     with connect(db_path) as connection:
         init_db(connection)
         signal_type_select = optional_signal_type_select(connection)
-        rows = connection.execute(
+        rows = fetch_rows(
+            connection,
             f"""
             SELECT
                 slate_date,
@@ -542,7 +619,7 @@ def load_performance_details(
             LIMIT ?
             """,
             params,
-        ).fetchall()
+        )
 
     detail_rows = []
     for row in rows:
