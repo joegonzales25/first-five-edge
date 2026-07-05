@@ -308,6 +308,14 @@ st.markdown("""
     font-weight: 800;
     line-height: 1.25;
 }
+.decision-watch {
+    display: block;
+    margin-top: 8px;
+    color: #fde68a;
+    font-size: 13px;
+    font-weight: 900;
+    line-height: 1.25;
+}
 .result-outcome {
     display: inline-flex;
     align-items: center;
@@ -1226,13 +1234,44 @@ def first_inning_pressure_rows(row):
     return rows, counts
 
 
+def first_inning_watch_label(row):
+    pick = get_row_value(row, "First Inning Pick", "No Edge")
+    confidence = get_row_value(row, "First Inning Confidence", "No Edge")
+    signal_type = str(get_row_value(row, "First Inning Signal Type", "")).lower()
+    score = get_numeric_value(row, "First Inning Score")
+
+    if not is_no_edge_pick(pick) or confidence != "No Edge":
+        return None
+
+    if signal_type == "two_sided_yrfi" and score is not None and score < 50:
+        return "YRFI Watch"
+    if signal_type == "two_sided_nrfi" and score is not None and score > 50:
+        return "NRFI Watch"
+
+    return None
+
+
+def render_first_inning_watch(row):
+    watch_label = first_inning_watch_label(row)
+    if watch_label is None:
+        return ""
+
+    return f'<span class="decision-watch">{escape(watch_label)}</span>'
+
+
 def first_inning_pressure_summary(row):
     rows, counts = first_inning_pressure_rows(row)
     pick = get_row_value(row, "First Inning Pick", "No Edge")
     confidence = get_row_value(row, "First Inning Confidence", "No Edge")
     score = get_row_value(row, "First Inning Score", "N/A")
+    watch_label = first_inning_watch_label(row)
 
-    if is_no_edge_pick(pick) or confidence == "No Edge":
+    if watch_label is not None:
+        model_read = (
+            f"{watch_label}: two-sided pressure is present, "
+            "but confirmation remains below pick threshold."
+        )
+    elif is_no_edge_pick(pick) or confidence == "No Edge":
         model_read = "No Edge: not enough confirmed pressure signals."
     else:
         model_read = f"{pick} ({confidence}): confirmed pressure signals support the edge."
@@ -1729,6 +1768,7 @@ def build_key_factors(row, view="first", away_team=None, home_team=None):
             "1st Inning Matchup Summary",
             "No clear matchup pressure",
         )
+        watch_label = first_inning_watch_label(row)
 
         if score is not None:
             if "YRFI" in pick.upper():
@@ -1737,6 +1777,12 @@ def build_key_factors(row, view="first", away_team=None, home_team=None):
                 factors.append(f"Score {score:g}: NRFI pressure below neutral")
             else:
                 factors.append(f"Score {score:g}: no clear first-inning edge")
+
+        if watch_label is not None:
+            watch_direction = watch_label.replace(" Watch", "")
+            factors.append(
+                f"{watch_label}: two-sided {watch_direction} pressure below pick threshold"
+            )
 
         if pitcher_yrfi is not None and league_yrfi is not None:
             direction = "above" if pitcher_yrfi >= league_yrfi else "below"
@@ -4051,6 +4097,7 @@ else:
             home_team,
             market="first",
         )
+        first_inning_watch = render_first_inning_watch(row)
         f5_display = format_decision_pick(
             f5_pick,
             f5_confidence,
@@ -4172,7 +4219,7 @@ else:
             <input class="edge-view-control edge-view-full" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-full">
 
             <div class="decision-stack">
-                <label class="decision-line decision-first" for="{card_anchor}-first">🎯 1st Inning: {first_inning_display}{first_inning_result}</label>
+                <label class="decision-line decision-first" for="{card_anchor}-first">🎯 1st Inning: {first_inning_display}{first_inning_watch}{first_inning_result}</label>
                 <label class="decision-line decision-f5" for="{card_anchor}-f5">⚾ First 5: {f5_display}{f5_result}</label>
                 <label class="decision-line decision-full" for="{card_anchor}-full">🏆 Full Game: {full_game_display}{full_game_result}</label>
             </div>
