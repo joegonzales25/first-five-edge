@@ -3729,6 +3729,8 @@ def render_wnba_performance_section():
         model_version=model_version,
         market_version=market_version,
     )
+    storage_backend = current_summary.get("storage_backend", "Unavailable")
+    storage_path = current_summary.get("db_path", "N/A")
     current_rows = load_wnba_history(
         model_version=model_version,
         market_version=market_version,
@@ -3839,8 +3841,8 @@ def render_wnba_performance_section():
             "Snapshot rule: WNBA predictions are stored only for pregame snapshots; "
             "final rows update result fields only when a matching snapshot exists."
         )
-        st.caption(f"Storage: {current_summary['storage_backend']}")
-        st.code(current_summary["db_path"], language="text")
+        st.caption(f"Storage: {storage_backend}")
+        st.code(storage_path, language="text")
         st.caption(
             f"Current market version: {market_version} | Current model baseline: {model_version}"
         )
@@ -4068,6 +4070,8 @@ def render_wnba_page():
             model_version=MODEL_BASELINES["WNBA"],
             market_version=MARKET_RELEASES["WNBA"],
         )
+        storage_backend = tracking_summary.get("storage_backend", "Unavailable")
+        storage_path = tracking_summary.get("db_path", "N/A")
         st.markdown(f"""
         **Product Release**: Edge Detector v{APP_VERSION}
 
@@ -4083,9 +4087,9 @@ def render_wnba_page():
 
         **Last Tracking Run**: {escape(str(tracking_counts))}
 
-        **Storage Backend**: {escape(tracking_summary["storage_backend"])}
+        **Storage Backend**: {escape(storage_backend)}
 
-        **Storage**: `{escape(tracking_summary["db_path"])}`
+        **Storage**: `{escape(storage_path)}`
 
         **Current Status**: Current slate views are All, Top, Side, Scoring, Early, and Perf.
 
