@@ -15,11 +15,80 @@ DB_PATH = Path(
 )
 
 
+def history_backend():
+    configured_backend = os.environ.get("HISTORY_BACKEND", "").strip().lower()
+    if configured_backend:
+        return configured_backend
+    if os.environ.get("TURSO_DATABASE_URL") and os.environ.get("TURSO_AUTH_TOKEN"):
+        return "turso"
+
+    return "sqlite"
+
+
+def using_remote_history():
+    return history_backend() == "turso"
+
+
+class ManagedConnection:
+    def __init__(self, connection):
+        self.connection = connection
+
+    def __getattr__(self, name):
+        return getattr(self.connection, name)
+
+    def __enter__(self):
+        return self.connection
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if exc_type is None and hasattr(self.connection, "commit"):
+            self.connection.commit()
+        if hasattr(self.connection, "close"):
+            self.connection.close()
+        return False
+
+
 def connect(db_path=DB_PATH):
+    if using_remote_history():
+        import libsql
+
+        return ManagedConnection(
+            libsql.connect(
+                database=os.environ["TURSO_DATABASE_URL"],
+                auth_token=os.environ["TURSO_AUTH_TOKEN"],
+            )
+        )
+
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(db_path)
     connection.row_factory = sqlite3.Row
     return connection
+
+
+def row_to_dict(row, columns=None):
+    if isinstance(row, dict):
+        return row
+    if hasattr(row, "keys"):
+        return {key: row[key] for key in row.keys()}
+    if columns:
+        return dict(zip(columns, row))
+
+    return dict(row)
+
+
+def fetch_rows(connection, query, params=()):
+    cursor = connection.execute(query, params)
+    rows = cursor.fetchall()
+    columns = [column[0] for column in cursor.description or []]
+    return [row_to_dict(row, columns) for row in rows]
+
+
+def fetch_one(connection, query, params=()):
+    cursor = connection.execute(query, params)
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    columns = [column[0] for column in cursor.description or []]
+    return row_to_dict(row, columns)
 
 
 def init_db(connection):
@@ -166,7 +235,8 @@ def result_values(row, now):
 
 
 def existing_snapshot(connection, game_id, market_version, model_version):
-    return connection.execute(
+    return fetch_one(
+        connection,
         """
         SELECT id
         FROM wnba_model_history
@@ -175,7 +245,7 @@ def existing_snapshot(connection, game_id, market_version, model_version):
           AND model_version = ?
         """,
         (str(game_id), market_version, model_version),
-    ).fetchone()
+    )
 
 
 def insert_prediction(connection, row_values):
@@ -301,7 +371,8 @@ def load_wnba_history(model_version=None, market_version=None, db_path=DB_PATH):
             params.append(market_version)
 
         where_clause = f"WHERE {' AND '.join(where)}" if where else ""
-        rows = connection.execute(
+        rows = fetch_rows(
+            connection,
             f"""
             SELECT *
             FROM wnba_model_history
@@ -309,9 +380,9 @@ def load_wnba_history(model_version=None, market_version=None, db_path=DB_PATH):
             ORDER BY slate_date DESC, game_time DESC, game
             """,
             params,
-        ).fetchall()
+        )
 
-    return [dict(row) for row in rows]
+    return rows
 
 
 def accuracy(rows, field):
@@ -399,7 +470,12 @@ def load_wnba_performance_summary(
         "total_mae": round(sum(total_errors) / len(total_errors), 2)
         if total_errors
         else 0.0,
-        "db_path": str(db_path),
+        "storage_backend": "Turso" if using_remote_history() else "SQLite",
+        "db_path": (
+            os.environ.get("TURSO_DATABASE_URL", "")
+            if using_remote_history()
+            else str(db_path)
+        ),
     }
 
 

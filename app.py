@@ -3614,99 +3614,336 @@ def wnba_rows_to_csv(rows):
     return pd.DataFrame(rows).to_csv(index=False)
 
 
+def parse_wnba_slate_date(row):
+    try:
+        return datetime.fromisoformat(str(row.get("slate_date"))).date()
+    except Exception:
+        return None
+
+
+def latest_wnba_history_date(rows):
+    dates = [parse_wnba_slate_date(row) for row in rows]
+    dates = [date_value for date_value in dates if date_value is not None]
+    return max(dates) if dates else None
+
+
+def wnba_signal_result(row, market):
+    if market == "Side":
+        if row.get("side_edge") in [None, "", "Pass"]:
+            return None
+        return row.get("side_result")
+    if market == "Scoring":
+        if row.get("scoring_edge") in [None, "", "Neutral Scoring Environment"]:
+            return None
+        return row.get("scoring_result")
+
+    return None
+
+
+def wnba_history_row_matches_filters(
+    row,
+    market="All",
+    days=None,
+    confidence="All",
+    exact_date=None,
+    anchor_date=None,
+):
+    row_date = parse_wnba_slate_date(row)
+    if exact_date is not None and row_date != exact_date:
+        return False
+    if days is not None and row_date is not None:
+        latest_date = anchor_date or row_date
+        if row_date < latest_date - timedelta(days=days - 1):
+            return False
+    if confidence != "All" and row.get("confidence") != confidence:
+        return False
+    if market != "All" and wnba_signal_result(row, market) is None:
+        return False
+
+    return True
+
+
+def summarize_wnba_performance_rows(rows, market_filter="All"):
+    markets = ["Side", "Scoring"] if market_filter == "All" else [market_filter]
+    summary_rows = []
+    for market in markets:
+        market_rows = [
+            row for row in rows if wnba_signal_result(row, market) is not None
+        ]
+        if not market_rows:
+            continue
+
+        hits = sum(
+            1 for row in market_rows if wnba_signal_result(row, market) == "Correct"
+        )
+        misses = sum(
+            1 for row in market_rows if wnba_signal_result(row, market) == "Missed"
+        )
+        pending = len(market_rows) - hits - misses
+        summary_rows.append(
+            {
+                "market": market,
+                "total": len(market_rows),
+                "hits": hits,
+                "misses": misses,
+                "pushes": 0,
+                "pending": pending,
+            }
+        )
+
+    return summary_rows
+
+
+def wnba_detail_rows(rows, market_filter="All"):
+    detail_rows = []
+    markets = ["Side", "Scoring"] if market_filter == "All" else [market_filter]
+    for row in rows:
+        for market in markets:
+            result = wnba_signal_result(row, market)
+            if result is None:
+                continue
+
+            detail = dict(row)
+            detail["market"] = market
+            detail["pick"] = (
+                row.get("predicted_winner")
+                if market == "Side"
+                else row.get("scoring_edge")
+            )
+            detail["result"] = result or "Pending"
+            detail["score"] = (
+                row.get("edge_score")
+                if market == "Side"
+                else row.get("projected_total")
+            )
+            detail_rows.append(detail)
+
+    return detail_rows
+
+
 def render_wnba_performance_section():
     st.markdown("### WNBA Performance")
     model_version = MODEL_BASELINES["WNBA"]
     market_version = MARKET_RELEASES["WNBA"]
-    summary = load_wnba_performance_summary(
+    current_summary = load_wnba_performance_summary(
         model_version=model_version,
         market_version=market_version,
     )
-    tables = load_wnba_performance_tables(
+    current_rows = load_wnba_history(
         model_version=model_version,
         market_version=market_version,
     )
-    rows = load_wnba_history(
-        model_version=model_version,
-        market_version=market_version,
-    )
+    all_rows = load_wnba_history()
 
-    if summary["snapshots"] == 0:
+    if current_summary["snapshots"] == 0:
         st.info("No WNBA performance snapshots recorded yet. Open upcoming WNBA slate dates before tipoff to create pregame snapshots.")
         return
 
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("Snapshots", summary["snapshots"])
-    c2.metric("Completed", summary["completed"])
-    c3.metric("Side Acc", f"{summary['side_signal_accuracy']:.1%}")
-    c4.metric("Scoring Acc", f"{summary['scoring_signal_accuracy']:.1%}")
-    c5.metric("Margin MAE", summary["margin_mae"])
-    c6.metric("Total MAE", summary["total_mae"])
+    model_filter_options = [f"Current {model_version}", "All"]
+    filter_cols = st.columns([1, 1, 1, 1])
+    with filter_cols[0]:
+        market_filter = st.selectbox(
+            "Signal",
+            ["All", "Side", "Scoring"],
+            key="wnba_performance_market_filter",
+        )
+    with filter_cols[1]:
+        window_filter = st.selectbox(
+            "Day(s)",
+            ["Today", "Yesterday", "Last 7", "Last 30", "All"],
+            key="wnba_performance_window_filter",
+        )
+    with filter_cols[2]:
+        confidence_filter = st.selectbox(
+            "Confidence",
+            ["All", "A", "B", "C", "Pass"],
+            key="wnba_performance_confidence_filter",
+        )
+    with filter_cols[3]:
+        selected_model_filter = st.selectbox(
+            "Model",
+            model_filter_options,
+            key="wnba_performance_model_filter",
+        )
 
-    st.download_button(
-        "Export WNBA History CSV",
-        data=wnba_rows_to_csv(rows),
-        file_name="wnba_model_history.csv",
-        mime="text/csv",
-        key="wnba_history_download",
+    selected_rows = (
+        all_rows if selected_model_filter == "All" else current_rows
+    )
+    model_label = (
+        "All models"
+        if selected_model_filter == "All"
+        else f"Current {model_version}"
+    )
+    history_today = latest_wnba_history_date(selected_rows) or datetime.now().date()
+
+    day_filters = {
+        "Today": {"exact_date": history_today, "label": f"Today ({history_today})"},
+        "Yesterday": {
+            "exact_date": history_today - timedelta(days=1),
+            "label": f"Yesterday ({history_today - timedelta(days=1)})",
+        },
+        "Last 7": 7,
+        "Last 30": 30,
+        "All": {"days": None, "exact_date": None, "label": "All history"},
+    }[window_filter]
+    if isinstance(day_filters, dict):
+        days = day_filters.get("days")
+        exact_date = day_filters.get("exact_date")
+        day_label = day_filters["label"]
+    else:
+        days = day_filters
+        exact_date = None
+        day_label = f"{window_filter} days"
+
+    if days is not None:
+        filtered_rows = [
+            row
+            for row in selected_rows
+            if wnba_history_row_matches_filters(
+                row,
+                market_filter,
+                days=days,
+                confidence=confidence_filter,
+                exact_date=None,
+                anchor_date=history_today,
+            )
+        ]
+    else:
+        filtered_rows = [
+            row
+            for row in selected_rows
+            if wnba_history_row_matches_filters(
+                row,
+                market_filter,
+                days=None,
+                confidence=confidence_filter,
+                exact_date=exact_date,
+            )
+        ]
+
+    summary_rows = summarize_wnba_performance_rows(filtered_rows, market_filter)
+    detail_rows = wnba_detail_rows(filtered_rows, market_filter)
+
+    with st.expander("WNBA Performance History Diagnostics"):
+        diag_cols = st.columns(4)
+        with diag_cols[0]:
+            st.metric("Snapshots", current_summary["snapshots"])
+        with diag_cols[1]:
+            st.metric("Completed", current_summary["completed"])
+        with diag_cols[2]:
+            st.metric("Side Signals", current_summary["side_signal_games"])
+        with diag_cols[3]:
+            st.metric("Scoring Signals", current_summary["scoring_signal_games"])
+
+        st.caption(
+            "Snapshot rule: WNBA predictions are stored only for pregame snapshots; "
+            "final rows update result fields only when a matching snapshot exists."
+        )
+        st.caption(f"Storage: {current_summary['storage_backend']}")
+        st.code(current_summary["db_path"], language="text")
+        st.caption(
+            f"Current market version: {market_version} | Current model baseline: {model_version}"
+        )
+
+        export_label = (
+            "all_models"
+            if selected_model_filter == "All"
+            else str(model_version).replace(".", "_")
+        )
+        st.download_button(
+            f"Download WNBA Performance History CSV ({len(selected_rows)} rows)",
+            data=wnba_rows_to_csv(selected_rows),
+            file_name=f"wnba_model_history_{export_label}.csv",
+            mime="text/csv",
+            key="wnba_history_download",
+        )
+
+    if not summary_rows:
+        st.info("No WNBA tracked results match the selected filters.")
+        return
+
+    result_cards = []
+    for row in summary_rows:
+        completed = (row.get("hits") or 0) + (row.get("misses") or 0)
+        pending = row.get("pending") or 0
+        record = f"{row.get('hits') or 0}-{row.get('misses') or 0}"
+        result_cards.append(
+            '<div class="performance-card">'
+            f'<div class="performance-market">{escape(row["market"])}</div>'
+            f'<div class="performance-hit-rate">{performance_hit_rate(row)}</div>'
+            f'<div class="performance-record">{escape(record)} record</div>'
+            f'<div class="performance-meta">{completed} completed - {pending} pending</div>'
+            '</div>'
+        )
+
+    filter_text = f"{model_label} - {day_label}"
+    if market_filter != "All":
+        filter_text += f" - {market_filter}"
+    if confidence_filter != "All":
+        filter_text += f" - {confidence_filter} confidence"
+
+    st.html(
+        '<div class="model-favorite top-looks">'
+        '<div class="model-label">WNBA MODEL PERFORMANCE</div>'
+        f'<div class="top-look-meta">{escape(filter_text)}</div>'
+        '<div class="performance-results">'
+        f'{"".join(result_cards)}'
+        '</div>'
+        '</div>'
     )
 
-    core = pd.DataFrame(tables["core"])
-    if not core.empty:
-        st.markdown("#### Core")
-        st.dataframe(core, width="stretch", hide_index=True)
+    if not detail_rows:
+        st.info("No detailed WNBA rows match the selected filters.")
+        return
 
-    left, right = st.columns(2)
-    with left:
-        st.markdown("#### Confidence")
-        confidence = pd.DataFrame(tables["confidence"])
-        if confidence.empty:
-            st.caption("No confidence rows yet.")
-        else:
-            st.dataframe(confidence, width="stretch", hide_index=True)
+    detail_df = pd.DataFrame(detail_rows)
+    detail_df = detail_df.rename(
+        columns={
+            "slate_date": "Slate",
+            "market": "Signal",
+            "game": "Game",
+            "pick": "Pick",
+            "confidence": "Confidence",
+            "score": "Score",
+            "result": "Result",
+            "status": "Status",
+            "model_version": "Model",
+            "market_version": "Market Version",
+        }
+    )
+    st.dataframe(
+        detail_df[
+            [
+                "Slate",
+                "Signal",
+                "Game",
+                "Pick",
+                "Confidence",
+                "Score",
+                "Result",
+                "Status",
+                "Model",
+                "Market Version",
+            ]
+        ],
+        hide_index=True,
+        use_container_width=True,
+    )
 
-        st.markdown("#### Side Location")
-        side_location = pd.DataFrame(tables["side_location"])
-        st.dataframe(side_location, width="stretch", hide_index=True)
-
-        st.markdown("#### Team History")
-        history = pd.DataFrame(tables["history"])
-        st.dataframe(history, width="stretch", hide_index=True)
-
-    with right:
-        st.markdown("#### Scoring Environment")
-        scoring = pd.DataFrame(tables["scoring"])
-        st.dataframe(scoring, width="stretch", hide_index=True)
-
-        st.markdown("#### Rest Context")
-        rest = pd.DataFrame(tables["rest"])
-        st.dataframe(rest, width="stretch", hide_index=True)
-
-    recent = pd.DataFrame(tables["recent"])
-    if not recent.empty:
-        display_columns = [
-            "slate_date",
-            "game",
-            "status",
-            "side_edge",
-            "side_result",
-            "scoring_edge",
-            "scoring_result",
-            "confidence",
-            "model_margin",
-            "margin_error",
-            "projected_total",
-            "total_error",
-        ]
-        available_columns = [
-            column for column in display_columns if column in recent.columns
-        ]
-        st.markdown("#### Recent Tracked Games")
-        st.dataframe(
-            recent[available_columns],
-            width="stretch",
-            hide_index=True,
+    with st.expander("WNBA Performance Splits"):
+        tables = load_wnba_performance_tables(
+            model_version=model_version,
+            market_version=market_version,
         )
+        split_tabs = st.tabs(["Core", "Confidence", "Side", "Scoring", "History", "Rest"])
+        split_keys = ["core", "confidence", "side_location", "scoring", "history", "rest"]
+        for tab, split_key in zip(split_tabs, split_keys):
+            with tab:
+                split_df = pd.DataFrame(tables[split_key])
+                if split_df.empty:
+                    st.caption("No split rows yet.")
+                else:
+                    st.dataframe(split_df, width="stretch", hide_index=True)
 
 
 def render_wnba_historical():
@@ -3838,13 +4075,15 @@ def render_wnba_page():
 
         **WNBA Model Baseline**: v{MODEL_BASELINES["WNBA"]}
 
-        **WNBA Tracking**: separate WNBA-only SQLite history
+        **WNBA Tracking**: separate WNBA-only history
 
         **Snapshots**: {tracking_summary["snapshots"]}
 
         **Completed**: {tracking_summary["completed"]}
 
         **Last Tracking Run**: {escape(str(tracking_counts))}
+
+        **Storage Backend**: {escape(tracking_summary["storage_backend"])}
 
         **Storage**: `{escape(tracking_summary["db_path"])}`
 
