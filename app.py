@@ -2898,24 +2898,13 @@ def selected_wnba_view(default_view="all"):
     return view
 
 
-def render_wnba_view_pills(active_view, slate=None):
-    if slate is None or slate.empty:
-        all_count = "-"
-        side_count = "-"
-        scoring_count = "-"
-    else:
-        all_count = len(slate)
-        side_count = len(slate[slate["Side Edge"] != "Pass"])
-        scoring_count = len(
-            slate[slate["Scoring Edge"] != "Neutral Scoring Environment"]
-        )
-
+def render_wnba_view_pills(active_view):
     options = [
-        (f"All\n{all_count}", "all"),
-        ("Top\n0", "top"),
-        (f"Side\n{side_count}", "side"),
-        (f"Scoring\n{scoring_count}", "scoring"),
-        ("Early\n0", "early"),
+        ("All", "all"),
+        ("Top", "top"),
+        ("Side", "side"),
+        ("Scoring", "scoring"),
+        ("Early", "early"),
         ("Perf", "perf"),
     ]
     pills = []
@@ -3589,10 +3578,11 @@ def render_wnba_current():
     except Exception as exc:
         slate_error = exc
 
-    st.html('<div class="nfl-control-label">View</div>')
-    render_wnba_view_pills(selected_view, slate)
+    render_wnba_view_pills(selected_view)
 
     if selected_view == "perf":
+        st.caption("Performance history")
+        st.divider()
         render_wnba_performance_section()
         return
 
@@ -3603,6 +3593,13 @@ def render_wnba_current():
     if slate.empty:
         st.info("No WNBA games found for the selected slate date.")
         return
+
+    if selected_view in ["top", "early"]:
+        filtered_count = 0
+    else:
+        filtered_count = len(filter_wnba_games(slate, selected_view))
+    st.caption(f"{filtered_count} of {len(slate)}")
+    st.divider()
 
     if selected_view == "top":
         st.info("WNBA Top signals are a placeholder until the v1.0 model has enough tracked performance to define a reliable top-pick cut.")
