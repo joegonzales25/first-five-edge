@@ -701,6 +701,51 @@ st.markdown("""
     font-weight: 500;
 }
 
+.wnba-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 12px;
+    margin: 12px 0 24px;
+}
+.wnba-filter-card {
+    display: flex;
+    align-items: center;
+    min-height: 78px;
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: #1e293b;
+    border: 1px solid #334155;
+    color: #f8fafc;
+    box-shadow: inset 0 0 24px rgba(14, 165, 233, 0.12);
+    font-weight: 900;
+    line-height: 1.25;
+    white-space: pre-line;
+    text-decoration: none;
+}
+.wnba-filter-card:nth-child(1) {
+    grid-column: 1 / -1;
+    border-color: #22c55e;
+}
+.wnba-filter-card:nth-child(2) {
+    border-color: #38bdf8;
+}
+.wnba-filter-card:nth-child(3) {
+    border-color: #f97316;
+}
+.wnba-filter-card:nth-child(4) {
+    border-color: #a855f7;
+}
+.wnba-filter-card:nth-child(5) {
+    border-color: #ef4444;
+}
+.wnba-filter-card:nth-child(6) {
+    border-color: #14b8a6;
+}
+.wnba-filter-card.active {
+    background: linear-gradient(135deg, #1d4ed8, #0f766e);
+    box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.28), inset 0 0 26px rgba(255, 255, 255, 0.08);
+}
+
 div[data-testid="stRadio"] [role="radiogroup"] {
     display: grid;
     grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -762,6 +807,21 @@ div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) {
 }
 
 @media (max-width: 640px) {
+    .wnba-filter-grid {
+        grid-template-columns: repeat(6, minmax(44px, 1fr));
+        gap: 6px;
+    }
+
+    .wnba-filter-card {
+        min-height: 44px;
+        padding: 8px 4px;
+        border-radius: 12px;
+        justify-content: center;
+        text-align: center;
+        font-size: 12px;
+        white-space: pre-line;
+    }
+
     div[data-testid="stRadio"] [role="radiogroup"] {
         grid-template-columns: repeat(6, minmax(44px, 1fr));
         gap: 6px;
@@ -2838,25 +2898,36 @@ def selected_wnba_view(default_view="all"):
     return view
 
 
-def render_wnba_view_pills(active_view):
+def render_wnba_view_pills(active_view, slate=None):
+    if slate is None or slate.empty:
+        all_count = "-"
+        side_count = "-"
+        scoring_count = "-"
+    else:
+        all_count = len(slate)
+        side_count = len(slate[slate["Side Edge"] != "Pass"])
+        scoring_count = len(
+            slate[slate["Scoring Edge"] != "Neutral Scoring Environment"]
+        )
+
     options = [
-        ("All", "all"),
-        ("Top", "top"),
-        ("Side", "side"),
-        ("Scoring", "scoring"),
-        ("Early", "early"),
+        (f"All\n{all_count}", "all"),
+        ("Top\n0", "top"),
+        (f"Side\n{side_count}", "side"),
+        (f"Scoring\n{scoring_count}", "scoring"),
+        ("Early\n0", "early"),
         ("Perf", "perf"),
     ]
     pills = []
     for label, value in options:
-        classes = ["nfl-control-pill"]
+        classes = ["wnba-filter-card"]
         if value == active_view:
             classes.append("active")
         pills.append(
             f'<a class="{" ".join(classes)}" href="{query_link({"sport": "WNBA", "mode": "current", "view": value, "filter": None})}">'
             f'{escape(label)}</a>'
         )
-    st.html(f'<div class="nfl-control-row">{"".join(pills)}</div>')
+    st.html(f'<div class="wnba-filter-grid">{"".join(pills)}</div>')
 
 
 def render_sport_picker(active_sport):
@@ -3510,11 +3581,27 @@ def render_wnba_current():
         key="wnba_slate_date",
     )
     selected_view = selected_wnba_view("all")
+    slate = pd.DataFrame()
+    meta = {}
+    slate_error = None
+    try:
+        slate, meta = load_wnba_current(selected_date)
+    except Exception as exc:
+        slate_error = exc
+
     st.html('<div class="nfl-control-label">View</div>')
-    render_wnba_view_pills(selected_view)
+    render_wnba_view_pills(selected_view, slate)
 
     if selected_view == "perf":
         render_wnba_performance_section()
+        return
+
+    if slate_error is not None:
+        st.error(f"Could not load WNBA current slate: {slate_error}")
+        return
+
+    if slate.empty:
+        st.info("No WNBA games found for the selected slate date.")
         return
 
     if selected_view == "top":
@@ -3523,16 +3610,6 @@ def render_wnba_current():
 
     if selected_view == "early":
         st.info("WNBA Early edge is pending for v1.0. Current WNBA testing is focused on full-game side and scoring-environment signals.")
-        return
-
-    try:
-        slate, meta = load_wnba_current(selected_date)
-    except Exception as exc:
-        st.error(f"Could not load WNBA current slate: {exc}")
-        return
-
-    if slate.empty:
-        st.info("No WNBA games found for the selected slate date.")
         return
 
     try:
