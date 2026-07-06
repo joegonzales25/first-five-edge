@@ -4055,16 +4055,25 @@ def render_wnba_historical():
         render_wnba_card(row, historical=True)
 
 
-def render_wnba_page():
-    st.title("WNBA Edge Detector")
-    mode = selected_nfl_mode()
+def render_wnba_model_info_sidebar():
+    st.sidebar.title("WNBA Controls")
+    st.sidebar.caption(f"Product release: {APP_VERSION}")
+    st.sidebar.caption(f"Market release: {MARKET_RELEASES['WNBA']}")
+    st.sidebar.caption(f"Model baseline: {MODEL_BASELINES['WNBA']}")
+    st.sidebar.divider()
+    st.sidebar.subheader("Data Sources")
+    st.sidebar.markdown("""
+**Current Slate**
+ESPN scoreboard feed
 
-    if mode == "current":
-        render_wnba_current()
-    else:
-        render_wnba_historical()
+**Performance Tracking**
+WNBA-only history table
 
-    with st.expander("WNBA Data Sources / Model Info"):
+**Model Scope**
+Matchup intelligence only. No odds, staking, or betting recommendations.
+""")
+
+    with st.sidebar.expander("WNBA Model Info"):
         tracking_counts = st.session_state.get("wnba_tracking_counts", {})
         tracking_summary = load_wnba_performance_summary(
             model_version=MODEL_BASELINES["WNBA"],
@@ -4073,32 +4082,34 @@ def render_wnba_page():
         storage_backend = tracking_summary.get("storage_backend", "Unavailable")
         storage_path = tracking_summary.get("db_path", "N/A")
         st.markdown(f"""
-        **Product Release**: Edge Detector v{APP_VERSION}
+**WNBA Tracking**: separate WNBA-only history
 
-        **WNBA Market Release**: v{MARKET_RELEASES["WNBA"]}
+**Snapshots**: {tracking_summary["snapshots"]}
 
-        **WNBA Model Baseline**: v{MODEL_BASELINES["WNBA"]}
+**Completed**: {tracking_summary["completed"]}
 
-        **WNBA Tracking**: separate WNBA-only history
+**Last Tracking Run**: {escape(str(tracking_counts))}
 
-        **Snapshots**: {tracking_summary["snapshots"]}
+**Storage Backend**: {escape(storage_backend)}
 
-        **Completed**: {tracking_summary["completed"]}
+**Storage**: `{escape(storage_path)}`
 
-        **Last Tracking Run**: {escape(str(tracking_counts))}
+**Current Status**: Current slate views are All, Top, Side, Scoring, Early, and Perf.
 
-        **Storage Backend**: {escape(storage_backend)}
+**Top / Early**: placeholders until enough WNBA-only tracked results exist to define those cuts.
+""")
 
-        **Storage**: `{escape(storage_path)}`
 
-        **Current Status**: Current slate views are All, Top, Side, Scoring, Early, and Perf.
+def render_wnba_page():
+    st.title("WNBA Edge Detector")
+    mode = selected_nfl_mode()
 
-        **Current Slate**: ESPN scoreboard feed, v1.0 test surface.
+    render_wnba_model_info_sidebar()
 
-        **Top / Early**: placeholders until enough WNBA-only tracked results exist to define those cuts.
-
-        **Model Scope**: matchup intelligence only. No odds, market comparison, staking guidance, or betting recommendations.
-        """)
+    if mode == "current":
+        render_wnba_current()
+    else:
+        render_wnba_historical()
 
 
 @st.cache_data(ttl=900)
