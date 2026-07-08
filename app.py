@@ -30,19 +30,19 @@ from model_history import (
     record_model_history,
 )
 
-APP_VERSION = "2.3.28"
-MODEL_CACHE_VERSION = "edge-v2328-first-inning-sample-cap"
+APP_VERSION = "2.3.29"
+MODEL_CACHE_VERSION = "edge-v2329-first-inning-sample-cap-refine"
 # Keep performance history stable across UI/cache releases. Change this only
 # when the model baseline, grading definition, or history schema intentionally changes.
-PERFORMANCE_TRACKING_VERSION = "2.3.28"
+PERFORMANCE_TRACKING_VERSION = "2.3.29"
 FALLBACK_TIMEZONE = "America/New_York"
 MARKET_RELEASES = {
-    "MLB": "2.3.28",
+    "MLB": "2.3.29",
     "NFL": "1.0.0",
     "WNBA": "1.0.1-test",
 }
 MODEL_BASELINES = {
-    "MLB": "2.3.28",
+    "MLB": "2.3.29",
     "NFL": "1.0.0",
     "WNBA": "1.0.0-test",
 }

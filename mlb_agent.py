@@ -1368,10 +1368,10 @@ def first_inning_sample_confidence_cap(
     if min_season_ip is None and min_first_games is None:
         return "C", "Starter sample unavailable; confidence capped at C", False
 
-    if min_season_ip is not None and min_season_ip < 15:
+    if min_season_ip is not None and min_season_ip < 10:
         max_confidence = cap_confidence(max_confidence, "C")
         watch_only = True
-        reasons.append("starter season sample below 15 IP")
+        reasons.append("starter season sample below 10 IP")
     elif min_season_ip is not None and min_season_ip < 25:
         max_confidence = cap_confidence(max_confidence, "C")
         reasons.append("starter season sample below 25 IP")
@@ -1379,10 +1379,10 @@ def first_inning_sample_confidence_cap(
         max_confidence = cap_confidence(max_confidence, "B")
         reasons.append("starter season sample below 40 IP")
 
-    if min_first_games is not None and min_first_games < 3:
+    if min_first_games is not None and min_first_games < 2:
         max_confidence = cap_confidence(max_confidence, "C")
         watch_only = True
-        reasons.append("first-inning sample below 3 games")
+        reasons.append("first-inning sample below 2 games")
     elif min_first_games is not None and min_first_games < 5:
         max_confidence = cap_confidence(max_confidence, "C")
         reasons.append("first-inning sample below 5 games")
@@ -1582,7 +1582,7 @@ def calculate_first_inning_decision(
     if pick == "No Edge" or confidence == "No Edge":
         return "No Edge", "No Edge", score, sample_cap, sample_note
 
-    if watch_only and confidence_rank(confidence) <= confidence_rank("C"):
+    if watch_only:
         return "No Edge", "No Edge", score, sample_cap, sample_note
 
     return pick, confidence, score, sample_cap, sample_note
