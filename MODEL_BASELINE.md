@@ -37,6 +37,20 @@ Thresholds:
 
 Confidence is based on distance from 50 using the shared confidence table.
 
+### First-Inning Sample Reliability Guardrail
+
+First-inning confidence is capped when starter samples are thin:
+
+- both starters at 40+ season IP or 8+ first-inning samples: no sample cap
+- either starter below 40 season IP or 8 first-inning samples: max confidence `B`
+- either starter below 25 season IP or 5 first-inning samples: max confidence `C`
+- either starter below 15 season IP or 3 first-inning samples: watch-only / no tracked pick
+- estimated first-inning pitcher splits: max confidence `B`
+- unavailable first-inning pitcher splits: max confidence `C`
+
+The signal direction can still surface as a watch/read, but confidence should
+reflect starter sample reliability instead of signal agreement alone.
+
 ## First 5 Model
 
 | Factor | Weight |

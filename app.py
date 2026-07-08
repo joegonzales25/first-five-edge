@@ -30,19 +30,19 @@ from model_history import (
     record_model_history,
 )
 
-APP_VERSION = "2.3.24"
-MODEL_CACHE_VERSION = "edge-v2324-schedule-fetch-retry"
+APP_VERSION = "2.3.28"
+MODEL_CACHE_VERSION = "edge-v2328-first-inning-sample-cap"
 # Keep performance history stable across UI/cache releases. Change this only
 # when the model baseline, grading definition, or history schema intentionally changes.
-PERFORMANCE_TRACKING_VERSION = "2.3.8"
+PERFORMANCE_TRACKING_VERSION = "2.3.28"
 FALLBACK_TIMEZONE = "America/New_York"
 MARKET_RELEASES = {
-    "MLB": "2.3.24",
+    "MLB": "2.3.28",
     "NFL": "1.0.0",
     "WNBA": "1.0.1-test",
 }
 MODEL_BASELINES = {
-    "MLB": "2.3.24",
+    "MLB": "2.3.28",
     "NFL": "1.0.0",
     "WNBA": "1.0.0-test",
 }
@@ -4592,6 +4592,7 @@ else:
             | {signal_label("1st Inning WHIP", first_signal_active)} | {away_first_whip_cell} | {home_first_whip_cell} |
             | 1st Inning Source | {get_row_value(row, "Away 1st Split Source", "N/A")} | {get_row_value(row, "Home 1st Split Source", "N/A")} |
             | 1st Inning Sample | {get_row_value(row, "Away 1st Games", "N/A")} G / {get_row_value(row, "Away 1st IP", "N/A")} IP | {get_row_value(row, "Home 1st Games", "N/A")} G / {get_row_value(row, "Home 1st IP", "N/A")} IP |
+            | Confidence Guardrail | {get_row_value(row, "First Inning Sample Cap", "N/A")} | {get_row_value(row, "First Inning Sample Note", "N/A")} |
             | 1st Inning R / ER | {get_row_value(row, "Away 1st R", "N/A")} / {get_row_value(row, "Away 1st ER", "N/A")} | {get_row_value(row, "Home 1st R", "N/A")} / {get_row_value(row, "Home 1st ER", "N/A")} |
             | 1st Inning H / BB / HR | {get_row_value(row, "Away 1st H", "N/A")} / {get_row_value(row, "Away 1st BB", "N/A")} / {get_row_value(row, "Away 1st HR", "N/A")} | {get_row_value(row, "Home 1st H", "N/A")} / {get_row_value(row, "Home 1st BB", "N/A")} / {get_row_value(row, "Home 1st HR", "N/A")} |
             """)

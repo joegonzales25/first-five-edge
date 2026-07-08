@@ -23,6 +23,7 @@ signal definitions
 output contract
 performance tracking contract
 promotion criteria
+market intake scorecard
 ```
 
 Markets can be sports, leagues, bet types, player props, team totals, futures, or any other domain where a repeatable edge-detection process can be tested.
@@ -34,8 +35,10 @@ Every new market starts from the same shell:
 ```text
 Market Identity
 Market Thesis
+Market Intake Scorecard
 Data Contract
 Model Inputs
+Context Factors
 Signal Definitions
 Output Contract
 Tracking Contract
@@ -116,7 +119,84 @@ Start isolated.
 Use the market shell.
 Reuse shared infrastructure only where boundaries are clear.
 Do not inherit another market's signal or grading assumptions without validation.
+Popularity or liquidity is a demand signal, not approval to build.
 ```
+
+## Market Intake Scorecard
+
+Before adding a new market, score the market against repeatability,
+modelability, and operational usefulness.
+
+Required intake checks:
+
+```text
+demand/liquidity signal
+repeatable event structure
+objective settlement rule
+available pre-event data
+historical data depth
+snapshot timing feasibility
+fair grading window
+data-quality risk
+integrity/insider-info risk
+fit with Edge Detector shell
+```
+
+Default decision rule:
+
+```text
+Popular markets can enter Design.
+Only markets with clear data, settlement, and tracking paths can enter Lab.
+Only markets with a written tracking contract can enter Tracked Test.
+```
+
+This keeps Edge Detector open to markets everywhere without turning the
+product into unrelated one-off predictions.
+
+## Context Factor Layer
+
+Context factors are cross-market concepts that may influence a model, but
+their interpretation must remain market-specific.
+
+Shared context-factor concepts:
+
+```text
+availability
+injuries
+starting lineups
+late scratches
+rest and schedule position
+weather
+venue/environment
+depth chart or role replacement
+usage/minutes/workload risk
+```
+
+Market-specific interpretation examples:
+
+```text
+MLB: starting pitcher, confirmed lineup, key hitter absence, bullpen availability
+WNBA/NBA: injury status, starters, minutes restriction, usage concentration
+NFL: QB status, practice participation, inactives, offensive line and secondary injuries
+NHL future: goalie confirmation, scratches, back-to-back goalie rotation
+Soccer future: starting XI, rotation, suspensions, red-card availability
+```
+
+Availability context should measure role impact, not just whether a player is
+out. A late scratch, replacement quality, position scarcity, usage share, and
+matchup interaction can matter more than a generic injury label.
+
+Tracking rule:
+
+```text
+Snapshot what was known before the event starts.
+Store or note lineup/injury source timing when availability affects a signal.
+Do not let post-event lineup knowledge change pre-event context grades.
+```
+
+Shared context concepts are allowed by default. Shared availability weights,
+thresholds, injury grading, or lineup-adjustment logic require confirmation
+before implementation.
 
 ## Versioning
 
@@ -166,6 +246,45 @@ nfl_model_history      # NFL future
 This gives one operational backend while keeping market performance separate.
 
 A unified table such as `market_model_history` can be considered later, only after multiple markets have stable and comparable tracking contracts.
+
+## Future Market Candidates
+
+Future-market interest should be tracked without committing to implementation.
+
+Nearer sports candidates:
+
+```text
+NBA
+NHL
+soccer / World Cup
+tennis
+UFC / boxing, if data quality supports it
+```
+
+Non-sports candidates:
+
+```text
+weather events
+macro releases such as CPI, unemployment, and Fed decisions
+equities earnings events
+```
+
+Equities earnings should be treated as an event market, not generic stock
+prediction.
+
+Possible Equities Earnings first shell:
+
+```text
+Market: Equities Earnings
+Initial angle: implied move vs realized move
+Other signal families: surprise risk, guidance revision risk, analyst estimate dispersion, sentiment/fundamental mismatch, post-earnings drift
+Tracking: snapshot before earnings release
+Potential grading windows: same day, next trading day, five trading days
+```
+
+Politics, personal outcomes, vague news markets, entertainment props with
+insider-leak risk, and subjective-resolution markets should be avoided or
+deferred unless a strong tracking contract and integrity review exist.
 
 ## Tracking Contracts
 
@@ -263,6 +382,7 @@ Universal minimums:
 written tracking contract
 clear signal definitions
 stable data source
+availability/context-factor policy, when relevant
 completed snapshot sample
 performance dashboard
 performance diagnostics/export

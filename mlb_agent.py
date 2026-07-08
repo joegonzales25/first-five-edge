@@ -1280,6 +1280,17 @@ def cap_confidence(confidence, max_confidence):
     return "Pass"
 
 
+def confidence_rank(confidence):
+    return {
+        "Pass": 0,
+        "No Edge": 0,
+        "C": 1,
+        "B": 2,
+        "A": 3,
+        "A+": 4,
+    }.get(str(confidence), 0)
+
+
 def legacy_first_inning_confidence(nrfi_signals, yrfi_signals):
     dominant_signals = max(nrfi_signals, yrfi_signals)
     opposing_signals = min(nrfi_signals, yrfi_signals)
@@ -1321,6 +1332,76 @@ def average_available(values):
         return None
 
     return sum(available) / len(available)
+
+
+def minimum_available(values):
+    available = [safe_float(value) for value in values]
+    available = [value for value in available if value is not None]
+
+    if not available:
+        return None
+
+    return min(available)
+
+
+def first_inning_sample_confidence_cap(
+    away_season_ip=None,
+    home_season_ip=None,
+    away_first_games=None,
+    home_first_games=None,
+    away_split_source=None,
+    home_split_source=None,
+):
+    min_season_ip = minimum_available([away_season_ip, home_season_ip])
+    min_first_games = minimum_available([away_first_games, home_first_games])
+    sources = [
+        str(source or "").strip().lower()
+        for source in [away_split_source, home_split_source]
+    ]
+    estimated_source = any(source == "estimated" for source in sources)
+    unavailable_source = any(source in ["", "unavailable"] for source in sources)
+
+    reasons = []
+    max_confidence = "A+"
+    watch_only = False
+
+    if min_season_ip is None and min_first_games is None:
+        return "C", "Starter sample unavailable; confidence capped at C", False
+
+    if min_season_ip is not None and min_season_ip < 15:
+        max_confidence = cap_confidence(max_confidence, "C")
+        watch_only = True
+        reasons.append("starter season sample below 15 IP")
+    elif min_season_ip is not None and min_season_ip < 25:
+        max_confidence = cap_confidence(max_confidence, "C")
+        reasons.append("starter season sample below 25 IP")
+    elif min_season_ip is not None and min_season_ip < 40:
+        max_confidence = cap_confidence(max_confidence, "B")
+        reasons.append("starter season sample below 40 IP")
+
+    if min_first_games is not None and min_first_games < 3:
+        max_confidence = cap_confidence(max_confidence, "C")
+        watch_only = True
+        reasons.append("first-inning sample below 3 games")
+    elif min_first_games is not None and min_first_games < 5:
+        max_confidence = cap_confidence(max_confidence, "C")
+        reasons.append("first-inning sample below 5 games")
+    elif min_first_games is not None and min_first_games < 8:
+        max_confidence = cap_confidence(max_confidence, "B")
+        reasons.append("first-inning sample below 8 games")
+
+    if estimated_source:
+        max_confidence = cap_confidence(max_confidence, "B")
+        reasons.append("estimated first-inning pitcher split")
+    if unavailable_source:
+        max_confidence = cap_confidence(max_confidence, "C")
+        reasons.append("unavailable first-inning pitcher split")
+
+    if not reasons:
+        return "A+", "Starter samples support full confidence range", False
+
+    note = f"{'; '.join(reasons)}; confidence capped at {max_confidence}"
+    return max_confidence, note, watch_only
 
 
 def weighted_relative_impact(value, neutral, factor_weight, cap):
@@ -1447,6 +1528,12 @@ def calculate_first_inning_decision(
     away_first_run_avg,
     home_first_run_avg,
     league_yrfi=LEAGUE_YRFI_AVG,
+    away_season_ip=None,
+    home_season_ip=None,
+    away_first_games=None,
+    home_first_games=None,
+    away_split_source=None,
+    home_split_source=None,
 ):
     score = 50
     nrfi_signals = 0
@@ -1482,11 +1569,23 @@ def calculate_first_inning_decision(
     score = max(20, min(90, round(score, 1)))
     pick = legacy_first_inning_pick_from_score(score)
     confidence = legacy_first_inning_confidence(nrfi_signals, yrfi_signals)
+    sample_cap, sample_note, watch_only = first_inning_sample_confidence_cap(
+        away_season_ip,
+        home_season_ip,
+        away_first_games,
+        home_first_games,
+        away_split_source,
+        home_split_source,
+    )
+    confidence = cap_confidence(confidence, sample_cap)
 
     if pick == "No Edge" or confidence == "No Edge":
-        return "No Edge", "No Edge", score
+        return "No Edge", "No Edge", score, sample_cap, sample_note
 
-    return pick, confidence, score
+    if watch_only and confidence_rank(confidence) <= confidence_rank("C"):
+        return "No Edge", "No Edge", score, sample_cap, sample_note
+
+    return pick, confidence, score, sample_cap, sample_note
 
 
 def calculate_f5_decision(
@@ -2048,7 +2147,13 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
                 home_bullpen_data["Back-to-Back Arms"],
             )
 
-            first_inning_pick, first_inning_confidence, first_inning_score = calculate_first_inning_decision(
+            (
+                first_inning_pick,
+                first_inning_confidence,
+                first_inning_score,
+                first_inning_sample_cap,
+                first_inning_sample_note,
+            ) = calculate_first_inning_decision(
                 away_pitcher_first["Pitcher YRFI %"],
                 home_pitcher_first["Pitcher YRFI %"],
                 away_first_live["Offense YRFI %"],
@@ -2060,6 +2165,12 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
                 away_first_live["1st Run Avg"],
                 home_first_live["1st Run Avg"],
                 LEAGUE_YRFI_AVG,
+                away_stats["IP"],
+                home_stats["IP"],
+                away_pitcher_first["1st Games"],
+                home_pitcher_first["1st Games"],
+                away_pitcher_first["1st Split Source"],
+                home_pitcher_first["1st Split Source"],
             )
 
             away_matchup_pressure, away_matchup_strength = classify_first_inning_matchup_pressure(
@@ -2147,6 +2258,8 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
                 "First Inning Confidence": first_inning_confidence,
                 "First Inning Score": first_inning_score,
                 "First Inning Signal Type": first_inning_signal_type,
+                "First Inning Sample Cap": first_inning_sample_cap,
+                "First Inning Sample Note": first_inning_sample_note,
                 "F5 Pick": f5_pick,
                 "F5 Confidence": f5_confidence,
                 "F5 Score": f5_score,
