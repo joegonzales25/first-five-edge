@@ -28,7 +28,6 @@ from wnba_model_history import (
 )
 from model_history import (
     load_slate_history_rows,
-    record_model_history,
 )
 
 APP_VERSION = "2.3.29"
@@ -4397,7 +4396,6 @@ if games.empty:
     st.stop()
 
 games = games.copy()
-record_model_history(games, selected_date, PERFORMANCE_TRACKING_VERSION)
 slate_history_rows = safe_load_slate_history_rows(
     PERFORMANCE_TRACKING_VERSION,
     selected_date,
