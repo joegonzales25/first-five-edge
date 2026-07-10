@@ -2,8 +2,7 @@ name: MLB Slate Snapshot
 
 on:
   schedule:
-    - cron: "*/15 13-23 * * *"
-    - cron: "*/15 0-6 * * *"
+    - cron: "*/15 * * * *"
   workflow_dispatch:
     inputs:
       slate_date:
