@@ -722,6 +722,55 @@ st.markdown("""
     white-space: pre-line;
     text-decoration: none;
 }
+.mlb-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 12px;
+    margin: 12px 0 8px 0;
+}
+.mlb-filter-card {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 78px;
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: #1e293b;
+    border: 1px solid #334155;
+    color: #f8fafc !important;
+    box-shadow: inset 0 0 24px rgba(14, 165, 233, 0.12);
+    font-size: 15px;
+    font-weight: 900;
+    line-height: 1;
+    text-decoration: none !important;
+    white-space: nowrap;
+}
+.mlb-filter-card:nth-child(1) {
+    grid-column: 1 / -1;
+    border-color: #22c55e;
+}
+.mlb-filter-card:nth-child(2) {
+    border-color: #38bdf8;
+}
+.mlb-filter-card:nth-child(3) {
+    border-color: #f97316;
+}
+.mlb-filter-card:nth-child(4) {
+    border-color: #a855f7;
+}
+.mlb-filter-card:nth-child(5) {
+    border-color: #ef4444;
+}
+.mlb-filter-card:nth-child(6) {
+    border-color: #f59e0b;
+}
+.mlb-filter-card:nth-child(7) {
+    border-color: #14b8a6;
+}
+.mlb-filter-card.active {
+    background: linear-gradient(135deg, #1d4ed8, #0f766e);
+    box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.28), inset 0 0 26px rgba(255, 255, 255, 0.08);
+}
 .wnba-filter-card:nth-child(1) {
     grid-column: 1 / -1;
     border-color: #22c55e;
@@ -746,72 +795,14 @@ st.markdown("""
     box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.28), inset 0 0 26px rgba(255, 255, 255, 0.08);
 }
 
-div[data-testid="stRadio"] [role="radiogroup"] {
-    display: grid;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    gap: 12px;
-}
-
-div[data-testid="stRadio"] [role="radiogroup"] label {
-    display: flex;
-    align-items: center;
-    min-height: 78px;
-    padding: 14px 16px;
-    border-radius: 14px;
-    background: #1e293b;
-    border: 1px solid #334155;
-    color: #f8fafc;
-    box-shadow: inset 0 0 24px rgba(14, 165, 233, 0.12);
-}
-
-div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(1) {
-    grid-column: 1 / -1;
-    border-color: #22c55e;
-}
-
-div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(2) {
-    border-color: #38bdf8;
-}
-
-div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(3) {
-    border-color: #f97316;
-}
-
-div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(4) {
-    border-color: #a855f7;
-}
-
-div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(5) {
-    border-color: #ef4444;
-}
-
-div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(6) {
-    border-color: #f59e0b;
-}
-
-div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(7) {
-    border-color: #14b8a6;
-}
-
-div[data-testid="stRadio"] [role="radiogroup"] label p {
-    color: #f8fafc;
-    font-weight: 900;
-    line-height: 1.25;
-    white-space: pre-line;
-    word-break: keep-all;
-}
-
-div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) {
-    background: linear-gradient(135deg, #1d4ed8, #0f766e);
-    box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.28), inset 0 0 26px rgba(255, 255, 255, 0.08);
-}
-
 @media (max-width: 640px) {
+    .mlb-filter-grid,
     .wnba-filter-grid {
         grid-template-columns: repeat(6, minmax(44px, 1fr));
         gap: 6px;
     }
 
+    .mlb-filter-card,
     .wnba-filter-card {
         min-height: 44px;
         padding: 8px 4px;
@@ -822,67 +813,8 @@ div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) {
         white-space: pre-line;
     }
 
-    div[data-testid="stRadio"] [role="radiogroup"] {
-        grid-template-columns: repeat(6, minmax(44px, 1fr));
-        gap: 6px;
-    }
-
     .performance-results {
         grid-template-columns: 1fr;
-    }
-
-    div[data-testid="stRadio"] [role="radiogroup"] label {
-        width: 100% !important;
-        box-sizing: border-box;
-        min-height: 44px;
-        padding: 8px 4px !important;
-        border-radius: 12px;
-        justify-content: center;
-        text-align: center;
-    }
-
-    div[data-testid="stRadio"] [role="radiogroup"] label > div:first-child {
-        display: none;
-    }
-
-    div[data-testid="stRadio"] [role="radiogroup"] label p {
-        display: none;
-    }
-
-    div[data-testid="stRadio"] [role="radiogroup"] label::after {
-        color: #f8fafc;
-        font-size: 12px;
-        font-weight: 900;
-        line-height: 1;
-        white-space: nowrap;
-    }
-
-    div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(1)::after {
-        content: "All";
-    }
-
-    div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(2)::after {
-        content: "Top";
-    }
-
-    div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(3)::after {
-        content: "NRFI";
-    }
-
-    div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(4)::after {
-        content: "YRFI";
-    }
-
-    div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(5)::after {
-        content: "F5";
-    }
-
-    div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(6)::after {
-        content: "Game";
-    }
-
-    div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(7)::after {
-        content: "Perf";
     }
 }
 
@@ -2784,6 +2716,42 @@ def query_link(params):
     return f"?{query}" if query else "?"
 
 
+def selected_mlb_filter(default_filter="All Games"):
+    filter_value = str(get_query_param("filter") or "all").lower()
+    valid_filters = {
+        "all": "All Games",
+        "top": "Top Looks",
+        "nrfi": "NRFI",
+        "yrfi": "YRFI",
+        "f5": "F5",
+        "game": "Game",
+        "perf": "Performance",
+    }
+    return valid_filters.get(filter_value, default_filter)
+
+
+def render_mlb_filter_pills(active_filter):
+    options = [
+        ("All", "All Games", "all"),
+        ("Top", "Top Looks", "top"),
+        ("NRFI", "NRFI", "nrfi"),
+        ("YRFI", "YRFI", "yrfi"),
+        ("F5", "F5", "f5"),
+        ("Game", "Game", "game"),
+        ("Perf", "Performance", "perf"),
+    ]
+    pills = []
+    for label, filter_key, value in options:
+        classes = ["mlb-filter-card"]
+        if filter_key == active_filter:
+            classes.append("active")
+        pills.append(
+            f'<a class="{" ".join(classes)}" href="{query_link({"sport": "MLB", "filter": value})}">'
+            f'{escape(label)}</a>'
+        )
+    st.html(f'<div class="mlb-filter-grid">{"".join(pills)}</div>')
+
+
 def render_nfl_pills(options, active_value, extra_params=None):
     extra_params = extra_params or {}
     pills = []
@@ -4287,31 +4255,8 @@ nrfi_mask = first_inning_pick_text.str.contains("NRFI", case=False, na=False)
 yrfi_mask = first_inning_pick_text.str.contains("YRFI", case=False, na=False)
 game_mask = ~games["Full Game Pick"].apply(is_no_edge_pick)
 f5_mask = ~games["F5 Pick"].apply(is_no_edge_pick)
-nrfi_count = int(nrfi_mask.sum())
-yrfi_count = int(yrfi_mask.sum())
-f5_count = int(f5_mask.sum())
-game_count = int(game_mask.sum())
-filter_labels = {
-    "All Games": f"All\n{len(games)}",
-    "Top Looks": f"Top\n{len(top_look_game_names)}",
-    "NRFI": f"NRFI\n{nrfi_count}",
-    "YRFI": f"YRFI\n{yrfi_count}",
-    "F5": f"F5\n{f5_count}",
-    "Game": f"Game\n{game_count}",
-    "Performance": "Perf",
-}
-
-selected_filter_label = st.radio(
-    "Game card filter",
-    list(filter_labels.values()),
-    horizontal=True,
-    label_visibility="collapsed",
-    key="game_card_filter",
-)
-selected_filter = {
-    label: key
-    for key, label in filter_labels.items()
-}[selected_filter_label]
+selected_filter = selected_mlb_filter()
+render_mlb_filter_pills(selected_filter)
 
 filtered = games.copy()
 
