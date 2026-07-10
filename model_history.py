@@ -119,6 +119,10 @@ def init_db(connection):
     }
     if "signal_type" not in columns:
         connection.execute("ALTER TABLE model_history ADD COLUMN signal_type TEXT")
+    if "locked_at" not in columns:
+        connection.execute("ALTER TABLE model_history ADD COLUMN locked_at TEXT")
+    if "snapshot_status" not in columns:
+        connection.execute("ALTER TABLE model_history ADD COLUMN snapshot_status TEXT")
     connection.commit()
 
 
@@ -141,7 +145,28 @@ def utc_now():
 
 
 def is_no_edge_pick(pick):
-    return str(pick).strip() in ["", "Pass", "No Edge", "F5 Pass", "No Edge (Pass)"]
+    return str(pick).strip() in [
+        "",
+        "Pass",
+        "No Edge",
+        "F5 Pass",
+        "No Edge (Pass)",
+        "Not Tracked",
+    ]
+
+
+def is_pregame_status(status):
+    return str(status or "").strip().lower() in [
+        "",
+        "scheduled",
+        "pre-game",
+        "preview",
+        "postponed",
+    ]
+
+
+def is_not_tracked_pick(pick):
+    return str(pick or "").strip() == "Not Tracked"
 
 
 def split_game_name(game_name):
@@ -204,6 +229,8 @@ def grade_team_pick(pick, result, completed_prefix):
 
 
 def grade_history_row(market, pick, result):
+    if is_not_tracked_pick(pick):
+        return "Not Tracked"
     if str(market) == "1st Inning":
         return grade_first_inning(pick, result)
     if str(market) == "First 5":
@@ -258,19 +285,32 @@ def market_rows_for_game(row, slate_date, model_version):
     ]
 
     for history_row in rows:
-        if history_row["market"] == "1st Inning":
-            history_row["outcome"] = grade_first_inning(
-                history_row["pick"],
-                history_row["result"],
-            )
-        else:
-            history_row["outcome"] = grade_team_pick(
-                history_row["pick"],
-                history_row["result"],
-                "After 5:" if history_row["market"] == "First 5" else "Final:",
-            )
+        history_row["locked_at"] = None
+        history_row["snapshot_status"] = "Pregame"
+        history_row["outcome"] = grade_history_row(
+            history_row["market"],
+            history_row["pick"],
+            history_row["result"],
+        )
 
     return rows
+
+
+def not_tracked_history_row(history_row, now):
+    skipped_row = dict(history_row)
+    skipped_row["pick"] = "Not Tracked"
+    skipped_row["confidence"] = "Not Tracked"
+    skipped_row["score"] = None
+    skipped_row["outcome"] = "Not Tracked"
+    skipped_row["locked_at"] = now
+    skipped_row["snapshot_status"] = "Not Tracked"
+    return skipped_row
+
+
+def stored_row_is_locked(row):
+    if row is None:
+        return False
+    return row.get("snapshot_status") in ["Locked", "Not Tracked"] or bool(row.get("locked_at"))
 
 
 def record_model_history(games, slate_date, model_version, db_path=DB_PATH):
@@ -282,40 +322,10 @@ def record_model_history(games, slate_date, model_version, db_path=DB_PATH):
         init_db(connection)
         for _, row in games.iterrows():
             for history_row in market_rows_for_game(row, slate_date, model_version):
-                connection.execute(
-                    """
-                    INSERT INTO model_history (
-                        model_version, slate_date, game, market, pick,
-                        confidence, score, signal_type, result, outcome, status,
-                        created_at, updated_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(model_version, slate_date, game, market)
-                    DO UPDATE SET
-                        result = excluded.result,
-                        status = excluded.status,
-                        updated_at = excluded.updated_at
-                    """,
-                    (
-                        history_row["model_version"],
-                        history_row["slate_date"],
-                        history_row["game"],
-                        history_row["market"],
-                        history_row["pick"],
-                        history_row["confidence"],
-                        history_row["score"],
-                        history_row["signal_type"],
-                        history_row["result"],
-                        history_row["outcome"],
-                        history_row["status"],
-                        now,
-                        now,
-                    ),
-                )
-                stored_row = fetch_one(
+                existing_row = fetch_one(
                     connection,
                     """
-                    SELECT market, pick, result
+                    SELECT market, pick, result, locked_at, snapshot_status
                     FROM model_history
                     WHERE model_version = ?
                         AND slate_date = ?
@@ -329,28 +339,137 @@ def record_model_history(games, slate_date, model_version, db_path=DB_PATH):
                         history_row["market"],
                     ),
                 )
-                if stored_row is not None:
+
+                if existing_row is None:
+                    insert_row = history_row
+                    if not is_pregame_status(history_row["status"]):
+                        insert_row = not_tracked_history_row(history_row, now)
+                    connection.execute(
+                        """
+                        INSERT INTO model_history (
+                            model_version, slate_date, game, market, pick,
+                            confidence, score, signal_type, result, outcome, status,
+                            created_at, updated_at, locked_at, snapshot_status
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            insert_row["model_version"],
+                            insert_row["slate_date"],
+                            insert_row["game"],
+                            insert_row["market"],
+                            insert_row["pick"],
+                            insert_row["confidence"],
+                            insert_row["score"],
+                            insert_row["signal_type"],
+                            insert_row["result"],
+                            insert_row["outcome"],
+                            insert_row["status"],
+                            now,
+                            now,
+                            insert_row["locked_at"],
+                            insert_row["snapshot_status"],
+                        ),
+                    )
+                    continue
+
+                if stored_row_is_locked(existing_row):
+                    outcome = grade_history_row(
+                        existing_row["market"],
+                        existing_row["pick"],
+                        history_row["result"],
+                    )
                     connection.execute(
                         """
                         UPDATE model_history
-                        SET outcome = ?
+                        SET result = ?,
+                            outcome = ?,
+                            status = ?,
+                            updated_at = ?
                         WHERE model_version = ?
                             AND slate_date = ?
                             AND game = ?
                             AND market = ?
                         """,
                         (
-                            grade_history_row(
-                                stored_row["market"],
-                                stored_row["pick"],
-                                stored_row["result"],
-                            ),
+                            history_row["result"],
+                            outcome,
+                            history_row["status"],
+                            now,
                             history_row["model_version"],
                             history_row["slate_date"],
                             history_row["game"],
                             history_row["market"],
                         ),
                     )
+                    continue
+
+                if is_pregame_status(history_row["status"]):
+                    connection.execute(
+                        """
+                        UPDATE model_history
+                        SET pick = ?,
+                            confidence = ?,
+                            score = ?,
+                            signal_type = ?,
+                            result = ?,
+                            outcome = ?,
+                            status = ?,
+                            updated_at = ?,
+                            snapshot_status = 'Pregame'
+                        WHERE model_version = ?
+                            AND slate_date = ?
+                            AND game = ?
+                            AND market = ?
+                        """,
+                        (
+                            history_row["pick"],
+                            history_row["confidence"],
+                            history_row["score"],
+                            history_row["signal_type"],
+                            history_row["result"],
+                            history_row["outcome"],
+                            history_row["status"],
+                            now,
+                            history_row["model_version"],
+                            history_row["slate_date"],
+                            history_row["game"],
+                            history_row["market"],
+                        ),
+                    )
+                    continue
+
+                outcome = grade_history_row(
+                    existing_row["market"],
+                    existing_row["pick"],
+                    history_row["result"],
+                )
+                connection.execute(
+                    """
+                    UPDATE model_history
+                    SET result = ?,
+                        outcome = ?,
+                        status = ?,
+                        locked_at = ?,
+                        snapshot_status = 'Locked',
+                        updated_at = ?
+                    WHERE model_version = ?
+                        AND slate_date = ?
+                        AND game = ?
+                        AND market = ?
+                    """,
+                    (
+                        history_row["result"],
+                        outcome,
+                        history_row["status"],
+                        now,
+                        now,
+                        history_row["model_version"],
+                        history_row["slate_date"],
+                        history_row["game"],
+                        history_row["market"],
+                    ),
+                )
         connection.commit()
 
 
@@ -361,7 +480,7 @@ def build_history_filters(
     confidence=None,
     exact_date=None,
 ):
-    where_clause = "WHERE pick NOT IN ('No Edge', 'Pass', 'F5 Pass')"
+    where_clause = "WHERE pick NOT IN ('No Edge', 'Pass', 'F5 Pass', 'Not Tracked')"
     params = []
 
     if model_version:
@@ -485,6 +604,7 @@ def load_history_diagnostics(db_path=DB_PATH):
         "completed_rows": 0,
         "pending_rows": 0,
         "no_edge_rows": 0,
+        "not_tracked_rows": 0,
         "result_updated_rows": 0,
         "model_versions": [],
         "earliest_slate_date": None,
@@ -507,6 +627,7 @@ def load_history_diagnostics(db_path=DB_PATH):
                 SUM(CASE WHEN outcome IN ('Hit', 'Miss', 'Push') THEN 1 ELSE 0 END) AS completed_rows,
                 SUM(CASE WHEN outcome = 'Pending' THEN 1 ELSE 0 END) AS pending_rows,
                 SUM(CASE WHEN outcome = 'No Edge' THEN 1 ELSE 0 END) AS no_edge_rows,
+                SUM(CASE WHEN outcome = 'Not Tracked' THEN 1 ELSE 0 END) AS not_tracked_rows,
                 SUM(CASE WHEN updated_at != created_at THEN 1 ELSE 0 END) AS result_updated_rows,
                 MIN(slate_date) AS earliest_slate_date,
                 MAX(slate_date) AS latest_slate_date,
@@ -533,6 +654,7 @@ def load_history_diagnostics(db_path=DB_PATH):
                 "completed_rows": row["completed_rows"] or 0,
                 "pending_rows": row["pending_rows"] or 0,
                 "no_edge_rows": row["no_edge_rows"] or 0,
+                "not_tracked_rows": row["not_tracked_rows"] or 0,
                 "result_updated_rows": row["result_updated_rows"] or 0,
                 "earliest_slate_date": row["earliest_slate_date"],
                 "latest_slate_date": row["latest_slate_date"],
@@ -576,7 +698,9 @@ def load_performance_export_rows(model_version=None, db_path=DB_PATH):
                 outcome AS stored_outcome,
                 status,
                 created_at,
-                updated_at
+                updated_at,
+                locked_at,
+                snapshot_status
             FROM model_history
             {where_clause}
             ORDER BY date(slate_date) DESC,
@@ -602,6 +726,40 @@ def load_performance_export_rows(model_version=None, db_path=DB_PATH):
         export_rows.append(export_row)
 
     return export_rows
+
+
+def load_slate_history_rows(model_version, slate_date, db_path=DB_PATH):
+    db_path = Path(db_path)
+    if not using_remote_history() and not db_path.exists():
+        return []
+
+    with connect(db_path) as connection:
+        init_db(connection)
+        signal_type_select = optional_signal_type_select(connection)
+        return fetch_rows(
+            connection,
+            f"""
+            SELECT
+                slate_date,
+                market,
+                game,
+                pick,
+                confidence,
+                score,
+                {signal_type_select},
+                result,
+                outcome,
+                status,
+                created_at,
+                updated_at,
+                locked_at,
+                snapshot_status
+            FROM model_history
+            WHERE model_version = ?
+                AND slate_date = ?
+            """,
+            (model_version, str(slate_date)),
+        )
 
 
 def load_performance_details(
@@ -643,7 +801,9 @@ def load_performance_details(
                 outcome AS stored_outcome,
                 status,
                 created_at,
-                updated_at
+                updated_at,
+                locked_at,
+                snapshot_status
             FROM model_history
             {where_clause}
             ORDER BY date(slate_date) DESC,

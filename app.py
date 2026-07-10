@@ -27,6 +27,7 @@ from wnba_model_history import (
     record_wnba_history,
 )
 from model_history import (
+    load_slate_history_rows,
     record_model_history,
 )
 
@@ -949,7 +950,14 @@ def get_row_value(row, column_name, default="Pass"):
 
 
 def is_no_edge_pick(pick):
-    return str(pick).strip() in ["", "Pass", "No Edge", "F5 Pass", "No Edge (Pass)"]
+    return str(pick).strip() in [
+        "",
+        "Pass",
+        "No Edge",
+        "F5 Pass",
+        "No Edge (Pass)",
+        "Not Tracked",
+    ]
 
 
 def replace_home_away(value, away_team, home_team):
@@ -969,6 +977,8 @@ def replace_home_away(value, away_team, home_team):
 
 
 def format_decision_pick(pick, confidence, away_team=None, home_team=None, market=None):
+    if str(pick).strip() == "Not Tracked":
+        return "Not Tracked"
     if is_no_edge_pick(pick):
         return "No Edge"
 
@@ -2090,6 +2100,8 @@ def parse_history_score_result(result):
 
 
 def grade_history_first_inning(pick, result):
+    if str(pick).strip() == "Not Tracked":
+        return "Not Tracked"
     if is_no_edge_pick(pick):
         return "No Edge"
 
@@ -2103,6 +2115,8 @@ def grade_history_first_inning(pick, result):
 
 
 def grade_history_team_pick(pick, result, completed_prefix):
+    if str(pick).strip() == "Not Tracked":
+        return "Not Tracked"
     if is_no_edge_pick(pick):
         return "No Edge"
 
@@ -2139,7 +2153,7 @@ def summarize_history_rows(rows):
 
     for row in rows:
         outcome = row.get("outcome") or grade_history_outcome(row)
-        if outcome == "No Edge":
+        if outcome in ["No Edge", "Not Tracked"]:
             continue
 
         market = row.get("market")
@@ -2186,6 +2200,7 @@ def empty_history_diagnostics(storage_backend="Unavailable", module_path="N/A", 
         "completed_rows": 0,
         "pending_rows": 0,
         "no_edge_rows": 0,
+        "not_tracked_rows": 0,
         "result_updated_rows": 0,
         "model_versions": [],
         "earliest_slate_date": None,
@@ -2228,6 +2243,7 @@ def direct_load_history_diagnostics(previous_error=None):
                     SUM(CASE WHEN outcome IN ('Hit', 'Miss', 'Push') THEN 1 ELSE 0 END) AS completed_rows,
                     SUM(CASE WHEN outcome = 'Pending' THEN 1 ELSE 0 END) AS pending_rows,
                     SUM(CASE WHEN outcome = 'No Edge' THEN 1 ELSE 0 END) AS no_edge_rows,
+                    SUM(CASE WHEN outcome = 'Not Tracked' THEN 1 ELSE 0 END) AS not_tracked_rows,
                     SUM(CASE WHEN updated_at != created_at THEN 1 ELSE 0 END) AS result_updated_rows,
                     MIN(slate_date) AS earliest_slate_date,
                     MAX(slate_date) AS latest_slate_date,
@@ -2253,6 +2269,7 @@ def direct_load_history_diagnostics(previous_error=None):
                     "completed_rows": row["completed_rows"] or 0,
                     "pending_rows": row["pending_rows"] or 0,
                     "no_edge_rows": row["no_edge_rows"] or 0,
+                    "not_tracked_rows": row["not_tracked_rows"] or 0,
                     "result_updated_rows": row["result_updated_rows"] or 0,
                     "earliest_slate_date": row["earliest_slate_date"],
                     "latest_slate_date": row["latest_slate_date"],
@@ -2336,6 +2353,48 @@ def history_row_matches_filters(row, market=None, days=None, confidence=None, ex
     return True
 
 
+def format_snapshot_time(value):
+    if value in [None, "", "N/A"]:
+        return "N/A"
+
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=ZoneInfo("UTC"))
+        eastern = parsed.astimezone(ZoneInfo("America/New_York"))
+        hour = eastern.hour % 12 or 12
+        suffix = "AM" if eastern.hour < 12 else "PM"
+        return f"{eastern.month}/{eastern.day}/{eastern.year}, {hour}:{eastern.minute:02d} {suffix} ET"
+    except Exception:
+        return str(value)
+
+
+def format_snapshot_caption(history_rows):
+    timestamps = [
+        row.get("updated_at") or row.get("created_at")
+        for row in history_rows
+        if row.get("updated_at") or row.get("created_at")
+    ]
+    if not timestamps:
+        return "Snapshot as of: N/A"
+
+    return f"Snapshot as of: {format_snapshot_time(max(timestamps))}"
+
+
+def format_game_status_line(row):
+    game_time = get_row_value(row, "Game Time", "N/A")
+    status = get_row_value(row, "Status", "N/A")
+    snapshot_status = str(get_row_value(row, "Snapshot Status", "")).strip()
+    base_line = f"{game_time} - {status}"
+
+    if snapshot_status == "Locked":
+        return f"🔒 {base_line}"
+    if snapshot_status == "Not Tracked":
+        return f"⚠ Not Tracked - {base_line}"
+
+    return base_line
+
+
 def safe_load_performance_summary(
     model_version=None,
     market=None,
@@ -2356,6 +2415,95 @@ def safe_load_performance_summary(
         )
     ]
     return summarize_history_rows(filtered_rows)
+
+
+def safe_load_slate_history_rows(model_version, slate_date):
+    try:
+        return load_slate_history_rows(model_version, slate_date)
+    except Exception:
+        return []
+
+
+def apply_tracked_snapshot_to_games(games, model_version, slate_date, history_rows=None):
+    history_rows = (
+        history_rows
+        if history_rows is not None
+        else safe_load_slate_history_rows(model_version, slate_date)
+    )
+    if not history_rows:
+        return games
+
+    snapshot = {
+        (row.get("game"), row.get("market")): row
+        for row in history_rows
+    }
+    market_columns = {
+        "1st Inning": {
+            "pick": "First Inning Pick",
+            "confidence": "First Inning Confidence",
+            "score": "First Inning Score",
+            "signal_type": "First Inning Signal Type",
+        },
+        "First 5": {
+            "pick": "F5 Pick",
+            "confidence": "F5 Confidence",
+            "score": "F5 Score",
+        },
+        "Full Game": {
+            "pick": "Full Game Pick",
+            "confidence": "Full Game Confidence",
+            "score": "Full Game Score",
+        },
+    }
+
+    tracked_games = games.copy()
+    for column_name in ["Snapshot Status", "Locked At", "Snapshot Updated At"]:
+        if column_name not in tracked_games.columns:
+            tracked_games[column_name] = ""
+
+    for index, row in tracked_games.iterrows():
+        game_name = row.get("Game")
+        game_snapshot_rows = [
+            snapshot_row
+            for (snapshot_game, _), snapshot_row in snapshot.items()
+            if snapshot_game == game_name
+        ]
+        if game_snapshot_rows:
+            if any(
+                snapshot_row.get("snapshot_status") == "Not Tracked"
+                for snapshot_row in game_snapshot_rows
+            ):
+                tracked_games.at[index, "Snapshot Status"] = "Not Tracked"
+            elif any(
+                snapshot_row.get("snapshot_status") == "Locked"
+                for snapshot_row in game_snapshot_rows
+            ):
+                tracked_games.at[index, "Snapshot Status"] = "Locked"
+            else:
+                tracked_games.at[index, "Snapshot Status"] = "Pregame"
+            locked_values = [
+                snapshot_row.get("locked_at")
+                for snapshot_row in game_snapshot_rows
+                if snapshot_row.get("locked_at")
+            ]
+            updated_values = [
+                snapshot_row.get("updated_at")
+                for snapshot_row in game_snapshot_rows
+                if snapshot_row.get("updated_at")
+            ]
+            tracked_games.at[index, "Locked At"] = max(locked_values) if locked_values else ""
+            tracked_games.at[index, "Snapshot Updated At"] = max(updated_values) if updated_values else ""
+
+        for market, columns in market_columns.items():
+            tracked_row = snapshot.get((game_name, market))
+            if not tracked_row:
+                continue
+            for source_key, column_name in columns.items():
+                value = tracked_row.get(source_key)
+                if value is not None and column_name in tracked_games.columns:
+                    tracked_games.at[index, column_name] = value
+
+    return tracked_games
 
 
 def direct_load_performance_export_rows(model_version=None):
@@ -2395,7 +2543,9 @@ def direct_load_performance_export_rows(model_version=None):
                     outcome,
                     status,
                     created_at,
-                    updated_at
+                    updated_at,
+                    locked_at,
+                    snapshot_status
                 FROM model_history
                 {where_clause}
                 ORDER BY date(slate_date) DESC,
@@ -2578,8 +2728,8 @@ def render_model_performance(model_version, slate_date):
             st.metric("No Edge", diagnostics["no_edge_rows"])
 
         st.caption(
-            "Snapshot rule: pick, confidence, and score are stored once on first snapshot; "
-            "later page loads update only result, outcome, status, and updated timestamp."
+            "Snapshot rule: pick, confidence, and score can update before lock; "
+            "locked rows update only result, outcome, status, and updated timestamp."
         )
         st.caption(f"Storage: {diagnostics['storage_backend']}")
         st.code(diagnostics["db_path"], language="text")
@@ -4248,6 +4398,16 @@ if games.empty:
 
 games = games.copy()
 record_model_history(games, selected_date, PERFORMANCE_TRACKING_VERSION)
+slate_history_rows = safe_load_slate_history_rows(
+    PERFORMANCE_TRACKING_VERSION,
+    selected_date,
+)
+games = apply_tracked_snapshot_to_games(
+    games,
+    PERFORMANCE_TRACKING_VERSION,
+    selected_date,
+    history_rows=slate_history_rows,
+)
 
 top_look_game_names = top_look_games(games)
 first_inning_pick_text = games["First Inning Pick"].fillna("").astype(str)
@@ -4289,6 +4449,7 @@ if selected_filter == "Performance":
     st.caption(f"{performance_total} results")
 else:
     st.caption(f"{len(filtered)} of {len(games)}")
+st.caption(format_snapshot_caption(slate_history_rows))
 
 st.divider()
 
@@ -4467,7 +4628,7 @@ else:
             {logo_matchup}
 
             <div class="game-title">{row["Game"]}</div>
-            <div class="muted">{row["Game Time"]} - {row["Status"]}</div>
+            <div class="muted">{escape(format_game_status_line(row))}</div>
 
             {data_quality_notice}
             <input class="edge-view-control edge-view-first" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-first" checked>

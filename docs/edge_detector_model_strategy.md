@@ -314,6 +314,66 @@ Do not backfill final-only rows as if they were pre-event predictions.
 
 This protects the review process from hindsight bias.
 
+### Snapshot and Lock Contract
+
+Snapshot and lock rules are product-level Edge Detector rules. They apply to
+MLB, WNBA, NFL, and future markets unless a market-specific tracking contract
+explicitly overrides them.
+
+Definitions:
+
+```text
+Current Read: latest model output before event lock; can change.
+Tracked Pick: official frozen pick used for performance.
+Locked Pick: tracked pick after the event has reached lock.
+Not Tracked: event started or resolved before a valid pre-lock snapshot existed.
+Result: resolved event outcome.
+```
+
+Universal rules:
+
+```text
+1. Current reads may update until event lock.
+2. At lock, pick, confidence, score, and signal metadata freeze.
+3. After lock, only result, status, outcome, and updated timestamp may change.
+4. Performance cards grade locked tracked picks only.
+5. Event/game cards must show the same locked pick that performance grades.
+6. If no pre-lock snapshot exists, mark the row Not Tracked and exclude it from performance.
+7. Current/live recalculated reads may be shown after lock only if clearly labeled Current Read.
+8. The UI should show global snapshot freshness and per-event lock state.
+```
+
+Default lock timing:
+
+```text
+Sports markets: scheduled event start / game start.
+MLB: game start for v1 lock implementation; future target is T-minus 30 minutes.
+WNBA: game start for v1 lock implementation; future target is T-minus 30 minutes.
+NFL: game start for v1 lock implementation; future target is T-minus 60 to 90 minutes.
+Earnings: earnings release or market/session cutoff defined by contract.
+Other event markets: market close or event timestamp defined by contract.
+```
+
+Display rules:
+
+```text
+Under filter counts:
+Snapshot as of: M/D/YYYY, H:MM AM/PM ET
+
+Event card status:
+Scheduled / unlocked: 3:45 PM PDT - Scheduled
+Locked: 🔒 3:45 PM PDT - In Progress
+Not tracked: ⚠ Not Tracked - 3:45 PM PDT - In Progress
+```
+
+Scheduling rule:
+
+```text
+Streamlit page loads are not scheduled snapshots.
+Use an external scheduler, initially GitHub Actions, to refresh pregame snapshots.
+Run every 10-15 minutes during the active market window until per-event lock logic is mature.
+```
+
 ## Maturity Stages
 
 Markets move through explicit maturity stages:
