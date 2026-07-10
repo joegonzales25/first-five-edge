@@ -1,5 +1,5 @@
-requests
-pandas
-streamlit
-pybaseball
-libsql
+requests==2.34.2
+pandas==3.0.3
+streamlit==1.59.1
+pybaseball==2.2.7
+libsql==0.1.11
