@@ -31,11 +31,13 @@ As of `v2.3.1`, Model 2.3 is the active product model. This v2.2.7 baseline is r
 
 Thresholds:
 
-- `score >= 58`: YRFI
-- `score <= 42`: NRFI
+- `score >= 65`: NRFI
+- `score < 50`: YRFI
 - Otherwise: No Edge
 
-Confidence is based on distance from 50 using the shared confidence table.
+Confidence is based on same-side first-inning signal agreement. A score-based
+lean becomes a tracked pick only when enough supporting factors agree and the
+starter sample reliability guardrail does not force watch-only.
 
 ### First-Inning Sample Reliability Guardrail
 

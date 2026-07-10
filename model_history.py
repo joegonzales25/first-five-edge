@@ -293,7 +293,6 @@ def record_model_history(games, slate_date, model_version, db_path=DB_PATH):
                     ON CONFLICT(model_version, slate_date, game, market)
                     DO UPDATE SET
                         result = excluded.result,
-                        outcome = excluded.outcome,
                         status = excluded.status,
                         updated_at = excluded.updated_at
                     """,
@@ -313,6 +312,45 @@ def record_model_history(games, slate_date, model_version, db_path=DB_PATH):
                         now,
                     ),
                 )
+                stored_row = fetch_one(
+                    connection,
+                    """
+                    SELECT market, pick, result
+                    FROM model_history
+                    WHERE model_version = ?
+                        AND slate_date = ?
+                        AND game = ?
+                        AND market = ?
+                    """,
+                    (
+                        history_row["model_version"],
+                        history_row["slate_date"],
+                        history_row["game"],
+                        history_row["market"],
+                    ),
+                )
+                if stored_row is not None:
+                    connection.execute(
+                        """
+                        UPDATE model_history
+                        SET outcome = ?
+                        WHERE model_version = ?
+                            AND slate_date = ?
+                            AND game = ?
+                            AND market = ?
+                        """,
+                        (
+                            grade_history_row(
+                                stored_row["market"],
+                                stored_row["pick"],
+                                stored_row["result"],
+                            ),
+                            history_row["model_version"],
+                            history_row["slate_date"],
+                            history_row["game"],
+                            history_row["market"],
+                        ),
+                    )
         connection.commit()
 
 
