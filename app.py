@@ -3058,7 +3058,6 @@ def render_discovery_labels(row):
         '<div class="discovery-strip">'
         '<span>Discovery: </span>'
         f'{"".join(label_html)}'
-        '<span>Not graded.</span>'
         '</div>'
     )
 
@@ -4817,7 +4816,6 @@ else:
             <div class="muted">{escape(format_game_status_line(row))}</div>
 
             {data_quality_notice}
-            {discovery_label_html}
             <input class="edge-view-control edge-view-first" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-first" checked>
             <input class="edge-view-control edge-view-f5" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-f5">
             <input class="edge-view-control edge-view-full" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-full">
@@ -4835,6 +4833,8 @@ else:
         """)
 
         with st.expander(f"🔍 Analysis: {row['Game']}"):
+            if discovery_label_html:
+                st.html(discovery_label_html)
             st.markdown("### Edge Breakdown")
 
             st.markdown("#### Starter Edge")
