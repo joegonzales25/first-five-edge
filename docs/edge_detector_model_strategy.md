@@ -231,6 +231,10 @@ Bump when model inputs, weights, signal rules, or grading assumptions change.
 
 Pure copy or visual cleanup does not require a market/model version bump unless it changes how users evaluate that market.
 
+Watch/Lean display layers do not require a model baseline bump when they are
+derived from existing model outputs and remain ungraded. They may require a
+market release note if they change the user-facing market workflow.
+
 ## Database Strategy
 
 Use one Turso database with separate market tables while markets are still maturing.
@@ -372,6 +376,55 @@ Scheduling rule:
 Streamlit page loads are not scheduled snapshots.
 Use an external scheduler, initially GitHub Actions, to refresh pregame snapshots.
 Run every 10-15 minutes during the active market window until per-event lock logic is mature.
+```
+
+### Watch and Lean Discovery Layer
+
+Watch and Lean labels are a product discovery layer, not tracked picks. They
+help users review near-threshold model reads without changing the model baseline
+or polluting performance records.
+
+Definitions:
+
+```text
+Pick: official tracked model signal; locked and graded.
+Watch: strong non-pick signal below the pick threshold; not graded.
+Lean: weaker directional read; not graded.
+No Edge: no official pick, watch, or lean.
+```
+
+Universal rules:
+
+```text
+1. Watch and Lean labels must be derived from existing model output fields unless a model change is explicitly approved.
+2. Watch and Lean rows are excluded from performance summaries, hit rates, and Top signal promotion logic.
+3. Watch and Lean labels must not be stored as official picks in market performance tables.
+4. Event/game cards may display Watch and Lean labels only if clearly separated from Picks.
+5. Filters may expose Watch and Lean views for review, but those views are discovery views.
+6. Promotion from Watch/Lean to Pick requires tracked review and a confirmed model baseline change.
+```
+
+Initial MLB discovery thresholds:
+
+```text
+1st Inning NRFI Watch: No Edge pick, NRFI-leaning signal, score 58-64.
+1st Inning NRFI Lean: No Edge pick, NRFI-leaning signal, score 55-57.
+1st Inning YRFI Watch: No Edge pick, YRFI-leaning signal, score 25-34.
+1st Inning YRFI Lean: No Edge pick, YRFI-leaning signal, score 35-39.
+
+F5 Watch: No official F5 pick, directional team read, score 7.0-11.9.
+F5 Lean: No official F5 pick, directional team read, score 4.0-6.9.
+
+Full Game Watch: No official Full Game pick, directional team read, score 6.5-8.9.
+Full Game Lean: No official Full Game pick, directional team read, score 4.0-6.4.
+```
+
+Market-specific notes:
+
+```text
+MLB: Watches and Leans can be added first as UI filters beneath the primary filter pills.
+WNBA/NFL: Use the same product meaning, but define thresholds separately before implementation.
+Future markets: Do not inherit MLB thresholds.
 ```
 
 ## Maturity Stages

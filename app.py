@@ -771,6 +771,30 @@ st.markdown("""
     background: linear-gradient(135deg, #1d4ed8, #0f766e);
     box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.28), inset 0 0 26px rgba(255, 255, 255, 0.08);
 }
+.discovery-strip {
+    margin: 12px 0 10px 0;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.72);
+    border: 1px solid rgba(56, 189, 248, 0.32);
+    color: #e0f2fe;
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 1.3;
+}
+.discovery-label {
+    display: inline-flex;
+    align-items: center;
+    margin: 3px 6px 3px 0;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: rgba(14, 165, 233, 0.18);
+    color: #f8fafc;
+    white-space: nowrap;
+}
+.discovery-label.lean {
+    background: rgba(245, 158, 11, 0.18);
+}
 .wnba-filter-card:nth-child(1) {
     grid-column: 1 / -1;
     border-color: #22c55e;
@@ -1236,12 +1260,117 @@ def first_inning_watch_label(row):
     if not is_no_edge_pick(pick) or confidence != "No Edge":
         return None
 
-    if signal_type == "two_sided_yrfi" and score is not None and score < 50:
-        return "YRFI Watch"
-    if signal_type == "two_sided_nrfi" and score is not None and score > 50:
-        return "NRFI Watch"
+    if score is None:
+        return None
+
+    nrfi_signals = ["one_sided_nrfi", "two_sided_nrfi", "mixed_yrfi_nrfi", "neutral"]
+    yrfi_signals = ["one_sided_yrfi", "two_sided_yrfi", "mixed_yrfi_nrfi", "neutral"]
+
+    if signal_type in nrfi_signals:
+        if 58 <= score <= 64:
+            return "NRFI Watch"
+        if 55 <= score <= 57:
+            return "NRFI Lean"
+    if signal_type in yrfi_signals:
+        if 25 <= score <= 34:
+            return "YRFI Watch"
+        if 35 <= score <= 39:
+            return "YRFI Lean"
 
     return None
+
+
+def directional_team_label(row, winner_column, away_team=None, home_team=None):
+    winner = get_row_value(row, winner_column, "")
+    if is_no_edge_pick(winner):
+        return None
+    return replace_home_away(winner, away_team, home_team)
+
+
+def range_label(score, watch_min, watch_max, lean_min, lean_max, watch_label, lean_label):
+    if score is None:
+        return None
+    if watch_min <= score <= watch_max:
+        return watch_label
+    if lean_min <= score <= lean_max:
+        return lean_label
+    return None
+
+
+def f5_watch_label(row, away_team=None, home_team=None):
+    pick = get_row_value(row, "F5 Pick", "No Edge")
+    if not is_no_edge_pick(pick):
+        return None
+
+    score = get_numeric_value(row, "F5 Score")
+    label = range_label(score, 7.0, 11.9, 4.0, 6.9, "F5 Watch", "F5 Lean")
+    if label is None:
+        return None
+
+    team = directional_team_label(row, "Starter Edge Winner", away_team, home_team)
+    if team is None:
+        team = directional_team_label(row, "Offensive Edge Winner", away_team, home_team)
+    if team is None:
+        return None
+
+    return f"{team} {label}"
+
+
+def full_game_watch_label(row, away_team=None, home_team=None):
+    pick = get_row_value(row, "Full Game Pick", "No Edge")
+    if not is_no_edge_pick(pick):
+        return None
+
+    score = get_numeric_value(row, "Full Game Score")
+    label = range_label(score, 6.5, 8.9, 4.0, 6.4, "Game Watch", "Game Lean")
+    if label is None:
+        return None
+
+    for winner_column in ["Starter Edge Winner", "Offensive Edge Winner", "Bullpen Edge Winner"]:
+        team = directional_team_label(row, winner_column, away_team, home_team)
+        if team is not None:
+            return f"{team} {label}"
+
+    return None
+
+
+def discovery_labels(row):
+    away_team, home_team = split_game_name(get_row_value(row, "Game", ""))
+    labels = [
+        first_inning_watch_label(row),
+        f5_watch_label(row, away_team, home_team),
+        full_game_watch_label(row, away_team, home_team),
+    ]
+    return [label for label in labels if label]
+
+
+def has_watch_label(row):
+    return any("Watch" in label for label in discovery_labels(row))
+
+
+def has_lean_label(row):
+    return any("Lean" in label for label in discovery_labels(row))
+
+
+def discovery_label_matches_filter(label, selected_filter):
+    if selected_filter in ["All Games", "Top Looks"]:
+        return True
+    if selected_filter == "NRFI":
+        return str(label).startswith("NRFI")
+    if selected_filter == "YRFI":
+        return str(label).startswith("YRFI")
+    if selected_filter == "F5":
+        return "F5" in str(label)
+    if selected_filter == "Game":
+        return "Game" in str(label)
+    return False
+
+
+def has_discovery_label(row, selected_filter, label_type):
+    return any(
+        label_type in label and discovery_label_matches_filter(label, selected_filter)
+        for label in discovery_labels(row)
+    )
 
 
 def first_inning_pressure_summary(row):
@@ -1253,7 +1382,7 @@ def first_inning_pressure_summary(row):
 
     if watch_label is not None:
         model_read = (
-            f"{watch_label}: two-sided pressure is present, "
+            f"{watch_label}: directional pressure is present, "
             "but confirmation remains below pick threshold."
         )
     elif is_no_edge_pick(pick) or confidence == "No Edge":
@@ -1765,8 +1894,9 @@ def build_key_factors(row, view="first", away_team=None, home_team=None):
 
         if watch_label is not None:
             watch_direction = watch_label.replace(" Watch", "")
+            watch_direction = watch_direction.replace(" Lean", "")
             factors.append(
-                f"{watch_label}: two-sided {watch_direction} pressure below pick threshold"
+                f"{watch_label}: {watch_direction} pressure below pick threshold"
             )
 
         if pitcher_yrfi is not None and league_yrfi is not None:
@@ -2899,6 +3029,38 @@ def render_mlb_filter_pills(active_filter):
             f'{escape(label)}</a>'
         )
     st.html(f'<div class="mlb-filter-grid">{"".join(pills)}</div>')
+
+
+def render_mlb_discovery_controls():
+    columns = st.columns(2)
+    with columns[0]:
+        show_watches = st.checkbox("Show Watches", key="mlb_show_watches")
+    with columns[1]:
+        show_leans = st.checkbox("Show Leans", key="mlb_show_leans")
+    return show_watches, show_leans
+
+
+def render_discovery_labels(row):
+    labels = discovery_labels(row)
+    if not labels:
+        return ""
+
+    label_html = []
+    for label in labels:
+        classes = ["discovery-label"]
+        if "Lean" in label:
+            classes.append("lean")
+        label_html.append(
+            f'<span class="{" ".join(classes)}">{escape(str(label))}</span>'
+        )
+
+    return (
+        '<div class="discovery-strip">'
+        '<span>Discovery: </span>'
+        f'{"".join(label_html)}'
+        '<span>Not graded.</span>'
+        '</div>'
+    )
 
 
 def render_nfl_pills(options, active_value, extra_params=None):
@@ -4415,19 +4577,44 @@ game_mask = ~games["Full Game Pick"].apply(is_no_edge_pick)
 f5_mask = ~games["F5 Pick"].apply(is_no_edge_pick)
 selected_filter = selected_mlb_filter()
 render_mlb_filter_pills(selected_filter)
+show_watches, show_leans = render_mlb_discovery_controls()
 
 filtered = games.copy()
+base_mask = pd.Series(True, index=games.index)
 
 if selected_filter == "Top Looks":
-    filtered = filtered[filtered["Game"].isin(top_look_game_names)]
+    base_mask = games["Game"].isin(top_look_game_names)
 elif selected_filter == "NRFI":
-    filtered = filtered[nrfi_mask]
+    base_mask = nrfi_mask
 elif selected_filter == "YRFI":
-    filtered = filtered[yrfi_mask]
+    base_mask = yrfi_mask
 elif selected_filter == "F5":
-    filtered = filtered[f5_mask]
+    base_mask = f5_mask
 elif selected_filter == "Game":
-    filtered = filtered[game_mask]
+    base_mask = game_mask
+
+if selected_filter == "Performance":
+    filtered = games.copy()
+else:
+    discovery_mask = pd.Series(False, index=games.index)
+    if show_watches:
+        discovery_mask = discovery_mask | games.apply(
+            lambda row: has_discovery_label(row, selected_filter, "Watch"),
+            axis=1,
+        )
+    if show_leans:
+        discovery_mask = discovery_mask | games.apply(
+            lambda row: has_discovery_label(row, selected_filter, "Lean"),
+            axis=1,
+        )
+
+    if show_watches or show_leans:
+        if selected_filter == "All Games":
+            filtered = games[discovery_mask]
+        else:
+            filtered = games[base_mask | discovery_mask]
+    else:
+        filtered = games[base_mask]
 
 filtered = filtered.sort_values(
     ["Status Sort", "Game Sort Time"],
@@ -4475,6 +4662,7 @@ else:
         data_quality_notice = render_data_quality_notice(row)
         card_anchor = game_anchor(row["Game"])
         key_factors = render_key_factor_panels(row, away_team, home_team)
+        discovery_label_html = render_discovery_labels(row)
         first_inning_pick = get_row_value(row, "First Inning Pick")
         first_inning_confidence = get_row_value(row, "First Inning Confidence")
         f5_pick = get_row_value(row, "F5 Pick")
@@ -4629,6 +4817,7 @@ else:
             <div class="muted">{escape(format_game_status_line(row))}</div>
 
             {data_quality_notice}
+            {discovery_label_html}
             <input class="edge-view-control edge-view-first" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-first" checked>
             <input class="edge-view-control edge-view-f5" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-f5">
             <input class="edge-view-control edge-view-full" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-full">
