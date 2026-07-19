@@ -81,7 +81,7 @@ graded outcome unless a separate regulation market is explicitly launched later.
 
 ## Model Philosophy
 
-NHL v0 uses a conservative hybrid model:
+NHL v0 target model uses a conservative hybrid model:
 
 ```text
 35% Team Shot / Expected Goal Profile
@@ -243,11 +243,13 @@ The first implementation should avoid a dependency on paid data.
 
 ## Implementation Notes
 
-Expected future files:
+Implemented v0 files:
 
 ```text
+nhl_data.py
 nhl_agent.py
-nhl_model.py
+nhl_model_history.py
+snapshot_nhl_slate.py
 .github/workflows/nhl-snapshot.yml
 ```
 
@@ -257,17 +259,41 @@ Expected future storage:
 nhl_model_history
 ```
 
+Current v0 data source:
+
+```text
+NHL public web schedule endpoint
+```
+
+Current v0 model limitations:
+
+```text
+Uses rolling goals, margin, recent form, rest, and home-ice context.
+Does not yet include confirmed goalie, expected-goals, injuries, odds, or special teams.
+Because goalie context is not modeled yet, confidence remains conservative.
+Goal environment is displayed as discovery context, not official performance.
+```
+
 Shared UI components may be reused, but NHL model logic and performance tracking
 should remain isolated from MLB, NBA, WNBA, and NFL logic.
 
-## Open Questions
-
-Before implementation:
+The NHL UI follows the cross-agent snapshot display standard:
 
 ```text
-1. Choose the first reliable free NHL data source.
-2. Decide whether regulation result is included in exports from day one.
-3. Define initial score thresholds from backtest data.
-4. Decide how goalie uncertainty is represented in exports.
-5. Decide whether free expected-goals data is reliable enough for v0.
+Snapshot as of: M/D/YYYY, H:MM AM/PM ET
+```
+
+This timestamp is displayed under the result count on the current-slate page and
+is sourced from NHL snapshot history, not page-load time.
+
+## Open Questions
+
+Still open after v0 implementation:
+
+```text
+1. Add confirmed/projected goalie data.
+2. Decide whether regulation result is included in exports.
+3. Define score thresholds from a larger historical backtest dataset.
+4. Decide whether free expected-goals data is reliable enough for v0.
+5. Decide when First Period, puck line, totals, or regulation markets should launch.
 ```
