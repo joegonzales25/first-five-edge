@@ -310,6 +310,15 @@ snapshot_wnba_slate.py
 WNBA should migrate away from Streamlit page-load history writes. The scheduled
 snapshot job should own WNBA history writes, matching the MLB pattern.
 
+UI snapshot freshness:
+
+```text
+Display `Snapshot as of: M/D/YYYY, H:MM AM/PM ET` under the current-slate
+filter/result count and in the WNBA performance view header area. Derive this
+from WNBA history `updated_at` / `created_at` values for the selected slate date,
+not from Streamlit page-load time.
+```
+
 Snapshot rule:
 
 ```text

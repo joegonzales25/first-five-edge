@@ -216,6 +216,9 @@ Pregame snapshots can update picks.
 Picks freeze once the game is locked/live.
 Performance must match locked game-card picks.
 Streamlit should read current snapshots, not mutate history during page loads.
+The current-slate UI must display `Snapshot as of: M/D/YYYY, H:MM AM/PM ET`
+under the filter/result count, sourced from NHL snapshot history rather than
+Streamlit page-load time.
 ```
 
 Because NHL is goalie-sensitive, the final useful snapshot may be closer to game

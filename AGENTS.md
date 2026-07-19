@@ -10,6 +10,7 @@ First Five Edge is a Streamlit MLB betting intelligence prototype. Treat model o
 - Prefer small, testable changes.
 - Keep UI and data-model changes narrowly scoped to the request.
 - Maintain existing Streamlit flows, including game cards and analysis expanders, unless explicitly asked to change them.
+- For every current-slate market UI, display snapshot freshness under the filter/result count using `Snapshot as of: M/D/YYYY, H:MM AM/PM ET`; derive it from that market's stored snapshot history, not from page-load time.
 
 ## Validation
 

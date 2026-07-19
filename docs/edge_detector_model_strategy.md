@@ -431,7 +431,7 @@ Universal rules:
 5. Event/game cards must show the same locked pick that performance grades.
 6. If no pre-lock snapshot exists, mark the row Not Tracked and exclude it from performance.
 7. Current/live recalculated reads may be shown after lock only if clearly labeled Current Read.
-8. The UI should show global snapshot freshness and per-event lock state.
+8. The UI must show global snapshot freshness and per-event lock state for every current-slate market.
 ```
 
 Default lock timing:
@@ -448,8 +448,12 @@ Other event markets: market close or event timestamp defined by contract.
 Display rules:
 
 ```text
-Under filter counts:
+Under every current-slate filter/result count:
 Snapshot as of: M/D/YYYY, H:MM AM/PM ET
+
+Timestamp source:
+Use the market's stored snapshot history updated_at/created_at values.
+Do not use Streamlit page-load time as the snapshot timestamp.
 
 Event card status:
 Scheduled / unlocked: 3:45 PM PDT - Scheduled
