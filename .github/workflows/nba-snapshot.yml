@@ -1,8 +1,8 @@
 name: NBA Slate Snapshot
 
 on:
-  schedule:
-    - cron: "*/15 * * * *"
+  # Schedule disabled until NBA season tracking is ready.
+  # Keep workflow_dispatch enabled for manual test snapshots.
   workflow_dispatch:
     inputs:
       slate_date:
