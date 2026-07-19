@@ -24,7 +24,6 @@ from wnba_model_history import (
     load_wnba_history,
     load_wnba_performance_tables,
     load_wnba_performance_summary,
-    record_wnba_history,
 )
 from model_history import (
     load_slate_history_rows,
@@ -3887,17 +3886,6 @@ def render_wnba_current():
         st.info("WNBA Early edge is pending for v1.0. Current WNBA testing is focused on full-game side and scoring-environment signals.")
         return
 
-    try:
-        tracking_counts = record_wnba_history(
-            slate,
-            selected_date,
-            MARKET_RELEASES["WNBA"],
-            MODEL_BASELINES["WNBA"],
-        )
-        st.session_state["wnba_tracking_counts"] = tracking_counts
-    except Exception as exc:
-        st.session_state["wnba_tracking_counts"] = {"error": str(exc)}
-
     filtered = filter_wnba_games(slate, selected_view)
 
     c1, c2, c3, c4 = st.columns(4)
@@ -4090,7 +4078,7 @@ def render_wnba_performance_section():
     all_rows = load_wnba_history()
 
     if current_summary["snapshots"] == 0:
-        st.info("No WNBA performance snapshots recorded yet. Open upcoming WNBA slate dates before tipoff to create pregame snapshots.")
+        st.info("No WNBA performance snapshots recorded yet. The scheduled WNBA snapshot workflow will create pregame snapshots when it runs.")
         return
 
     model_filter_options = [f"Current {model_version}", "All"]
@@ -4426,7 +4414,6 @@ Matchup intelligence only. No odds, staking, or betting recommendations.
 """)
 
     with st.sidebar.expander("WNBA Model Info"):
-        tracking_counts = st.session_state.get("wnba_tracking_counts", {})
         tracking_summary = load_wnba_performance_summary(
             model_version=MODEL_BASELINES["WNBA"],
             market_version=MARKET_RELEASES["WNBA"],
@@ -4440,7 +4427,7 @@ Matchup intelligence only. No odds, staking, or betting recommendations.
 
 **Completed**: {tracking_summary["completed"]}
 
-**Last Tracking Run**: {escape(str(tracking_counts))}
+**Tracking Writes**: scheduled snapshot workflow
 
 **Storage Backend**: {escape(storage_backend)}
 

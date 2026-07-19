@@ -1,125 +1,241 @@
-# Basketball Edge Detector v0 Plan
+# NBA Edge Detector v0 Plan
 
 ## Product Scope
 
-NBA and WNBA models should follow the NFL module shape: matchup intelligence only, no odds, staking guidance, market-value language, or betting recommendations.
+NBA is a separate Edge Detector market. It should reuse the shared product shell,
+snapshot discipline, lock logic, and performance philosophy from MLB, but the
+model assumptions, thresholds, confidence rules, and historical performance must
+remain NBA-specific.
 
-The initial implementation is model-first. UI enablement should wait until a backtest data source is selected and the thresholds are validated.
+Model output is informational only. The agent should not produce staking
+guidance, betting recommendations, or cross-sport performance comparisons.
 
-## Shared Row Contract
+WNBA remains governed by `docs/wnba_edge_detector_v1.md`.
 
-Basketball model output should preserve the shared multi-sport fields:
+## Initial Market Scope
+
+NBA v0 starts with:
 
 ```text
-Sport
-Game Time
-Game
-Model Signal
-Edge Score
+Full Game
+First Half
+```
+
+First Quarter can be considered later after Full Game and First Half have
+enough tracked history.
+
+## Output Contract
+
+NBA output should mirror the MLB user-facing contract:
+
+```text
+Pick
 Confidence
-Side Edge
-Scoring Edge
-Early Edge
-Agent Notes
-Status
+Score
+Watch
+Lean
+No Edge
 ```
 
-Historical rows also include:
+Official picks are locked and graded. Watches and leans are discovery signals
+only until validated by tracked history.
+
+Historical rows should preserve a market-specific version of the shared fields:
 
 ```text
-Away Score
-Home Score
-Actual Winner
-Predicted Winner
-Winner Correct
-Model Margin
-Actual Margin
-Margin Error
-Projected Total
-Actual Total
-Total Error
-Scoring Correct
-League Total Baseline
+model_version
+slate_date
+market
+game
+pick
+confidence
+score
+signal_type
+result
+stored_outcome
+status
+created_at
+updated_at
+locked_at
+snapshot_status
+outcome
 ```
 
-## Initial Model
+NBA-specific analysis fields can be added to exports once the model contract is
+finalized, but they should not replace the shared fields above.
 
-The first NBA/WNBA model uses rolling pregame team state:
+## Model Philosophy
+
+NBA v0 uses a conservative hybrid model:
 
 ```text
-Team strength = offense vs league baseline + defense vs league baseline + season margin + recent form
-Side edge = projected home margin including home-court and rest context
-Scoring environment = projected total vs rolling league total baseline
+45% Team Strength / Efficiency
+25% Situational Spot
+20% Injury / Availability
+10% Market Context
 ```
 
-Default thresholds are intentionally conservative placeholders until backtests are run.
+Market context is optional in v0 and should use free/public data only unless a
+paid data source is explicitly approved later.
 
-NBA defaults:
+## Model Pillars
+
+### Team Strength / Efficiency
+
+Baseline team quality should include:
 
 ```text
-A side edge: model margin >= 9.0
-B side edge: model margin >= 6.5
-C side edge: model margin >= 4.0
-Scoring environment threshold: +/- 5.0 points vs rolling league baseline
-Default total baseline: 226.0
+Offensive efficiency
+Defensive efficiency
+Net rating
+Pace
+Home/away splits
+Recent form
 ```
 
-WNBA defaults:
+This pillar should carry the most weight because it is the most stable starting
+point for NBA game-level modeling.
+
+### Situational Spot
+
+Schedule and context should include:
 
 ```text
-A side edge: model margin >= 7.0
-B side edge: model margin >= 5.0
-C side edge: model margin >= 3.0
-Scoring environment threshold: +/- 4.0 points vs rolling league baseline
-Default total baseline: 164.0
+Rest advantage
+Back-to-back
+Three games in four nights
+Travel / road trip context
+Home stand context
+Potential lookahead or schedule compression
 ```
 
-## Input Data Contract
+Situational logic should adjust the baseline. It should not override team
+strength by itself unless later backtesting supports that behavior.
 
-The CSV backtest path expects one row per completed game with:
+### Injury / Availability
+
+Injury and availability should affect confidence and score:
 
 ```text
-season
-game_date
-away_team
-home_team
-away_score
-home_score
+Confirmed key player out
+Questionable key player
+Probable key player
+Multiple rotation players unavailable
+Late-breaking uncertainty
 ```
 
-Optional columns:
+NBA v0 may still allow official picks with injury risk, but confidence should
+be downgraded when key availability is uncertain.
+
+### Market Context
+
+Market context is optional in v0 and should be lightweight:
 
 ```text
-game_id
-away_rest
-home_rest
+Available spread or moneyline
+Line movement if available
+Implied market expectation
+Model-vs-market gap
 ```
+
+If reliable free market data is unavailable, this pillar should be omitted from
+pick gating rather than filled with weak data.
+
+## Pick Rules
+
+Official NBA picks should be very selective:
+
+```text
+Require at least two model pillars to agree.
+Downgrade confidence for injury uncertainty.
+Avoid official picks when the model edge depends on unavailable or stale data.
+Use Watch or Lean when only one strong pillar is present.
+Use No Edge when direction is weak or conflicting.
+```
+
+Initial confidence bands should mirror MLB style:
+
+```text
+A+ = strongest agreement and clean availability
+A  = strong agreement with manageable uncertainty
+B  = clear agreement but lower margin or moderate uncertainty
+C  = thin official edge
+No Edge = below official threshold
+```
+
+Exact score thresholds should not be finalized until a backtest dataset is
+selected.
+
+## Watch And Lean Rules
+
+Watches and leans are discovery only:
+
+```text
+Watch = strong non-pick signal below official threshold
+Lean = weaker directional read below Watch strength
+```
+
+They should appear in the analysis layer and may be filtered in the UI, but they
+should not be counted in official performance.
+
+Discovery performance can be tracked separately once enough rows exist.
+
+## Snapshot And Lock Rules
+
+NBA should follow the MLB snapshot philosophy:
+
+```text
+Pregame snapshots can update picks.
+Picks freeze once the game is locked/live.
+Performance must match locked game-card picks.
+Streamlit should read current snapshots, not mutate history during page loads.
+```
+
+Because NBA is injury-sensitive, the final useful snapshot may be closer to game
+time than MLB. The initial implementation should still use the MLB-style live
+lock unless a later workflow adds a dedicated pre-tip lock window.
+
+## Data Source Position
+
+NBA v0 should start with free/public data. Paid APIs may be considered later for:
+
+```text
+Injuries
+Confirmed lineups
+Odds
+Line movement
+Advanced team efficiency
+```
+
+The first implementation should avoid a dependency on paid data.
 
 ## Implementation Notes
 
-Files:
+Expected future files:
 
 ```text
-basketball_model.py
 nba_agent.py
-wnba_agent.py
+nba_model.py
+.github/workflows/nba-snapshot.yml
 ```
 
-Run a local CSV backtest with:
-
-```powershell
-python basketball_model.py --league NBA --games-csv path\to\nba_games.csv --season 2025
-python basketball_model.py --league WNBA --games-csv path\to\wnba_games.csv --season 2025
-```
-
-Next steps:
+Expected future storage:
 
 ```text
-1. Choose canonical WNBA historical game data source.
-2. Generate WNBA historical backtests.
-3. Tune WNBA side and scoring thresholds.
-4. Decide which WNBA features survive v1.0 validation.
-5. Revisit NBA only after the WNBA model has been kicked.
+nba_model_history
 ```
 
-See `docs/wnba_edge_detector_v1.md` for the WNBA v1.0 agent interview.
+Shared UI components may be reused, but NBA model logic and performance
+tracking should remain isolated from MLB, WNBA, NFL, and future NHL logic.
+
+## Open Questions
+
+Before implementation:
+
+```text
+1. Choose the first reliable free NBA data source.
+2. Decide whether Full Game and First Half launch together or sequentially.
+3. Define initial score thresholds from backtest data.
+4. Decide how injury uncertainty is represented in exports.
+5. Decide whether free odds data is reliable enough for the 10% market pillar.
+```

@@ -244,6 +244,8 @@ Initial structure:
 ```text
 model_history          # MLB
 wnba_model_history     # WNBA
+nba_model_history      # NBA future
+nhl_model_history      # NHL future
 nfl_model_history      # NFL future
 ```
 
@@ -317,6 +319,91 @@ Do not backfill final-only rows as if they were pre-event predictions.
 ```
 
 This protects the review process from hindsight bias.
+
+### Performance Report Standard
+
+Every market should use the same report shape while keeping calculations,
+thresholds, grading rules, and promotion criteria market-specific.
+
+Required report sections:
+
+```text
+Official Performance
+Discovery Performance
+Diagnostics / Splits
+Export
+```
+
+Official Performance includes locked official picks only:
+
+```text
+hits
+misses
+pushes
+pending
+completed
+win rate
+market split
+confidence split
+score band split
+signal type split, when applicable
+date range
+```
+
+Discovery Performance includes watches and leans only:
+
+```text
+watch outcomes
+lean outcomes
+hit/miss by discovery label
+volume by discovery label
+promotion candidates
+```
+
+Discovery results are calibration signals. They do not affect official model
+record until a market-specific rule promotes a discovery bucket into an
+official pick rule.
+
+Diagnostics / Splits are used for model tuning:
+
+```text
+score bands
+confidence bands
+signal types
+snapshot timing
+locked vs stale rows
+data uncertainty flags, such as injuries or goalie status
+push / no-action handling
+market-specific context fields
+```
+
+Exports must include enough fields to reproduce the report:
+
+```text
+model_version
+market_version
+slate_date
+sport
+market
+game
+pick
+confidence
+score
+signal_type
+discovery_label
+discovery_type
+discovery_side
+result
+outcome
+status
+created_at
+updated_at
+locked_at
+snapshot_status
+```
+
+Market-specific fields may be added. They should not replace the shared
+reporting fields unless a market-specific tracking contract explicitly says so.
 
 ### Snapshot and Lock Contract
 
@@ -600,6 +687,7 @@ The first implementation should be narrow. Add shared abstractions only after re
 Use "Market" as the primary domain term.
 Use one Turso database with separate tables.
 Do not create a unified performance table yet.
+Use the same performance report shape with separate market calculations.
 Require a tracking contract before persistent tracking.
 Allow shared UI helpers by default.
 Keep shared UI shell patterns visually consistent across markets.

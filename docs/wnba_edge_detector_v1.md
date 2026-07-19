@@ -293,10 +293,22 @@ Do not write WNBA rows to `model_history.py` or the MLB performance dashboard.
 Storage:
 
 ```text
-first_five_edge_wnba_model_history.sqlite3
+wnba_model_history
 ```
 
-Default location is the system temp directory unless `FIRST_FIVE_EDGE_WNBA_HISTORY_DB` is set.
+Target backend is the shared Turso database with a WNBA-only table. Local SQLite
+history is legacy/test plumbing only and should not be treated as the future
+production-style path.
+
+Scheduled load target:
+
+```text
+snapshot_wnba_slate.py
+.github/workflows/wnba-snapshot.yml
+```
+
+WNBA should migrate away from Streamlit page-load history writes. The scheduled
+snapshot job should own WNBA history writes, matching the MLB pattern.
 
 Snapshot rule:
 
@@ -306,11 +318,20 @@ When a game becomes final, update only result fields on an existing snapshot.
 Do not backfill final-only or in-progress-only games as if they were pregame snapshots.
 ```
 
+Lock rule:
+
+```text
+Pregame snapshots may update current reads.
+At game lock, official side/scoring signal fields freeze.
+After lock, only result, status, outcome, and updated timestamp should change.
+Performance must match the locked WNBA game card.
+```
+
 WNBA version fields:
 
 ```text
-market_version = WNBA v1.0.1-test
-model_version = WNBA v1.0.0-test
+market_version = 1.0.1-test
+model_version = 1.0.0-test
 ```
 
 Tracked WNBA summary fields:
@@ -336,6 +357,19 @@ Scoring = non-neutral scoring-environment signals only
 Early = placeholder while Early Edge remains Model Pending
 Perf = WNBA-only performance dashboard
 ```
+
+WNBA performance report sections:
+
+```text
+Official Performance
+Discovery Performance
+Diagnostics / Splits
+Export
+```
+
+Official Performance includes locked official WNBA side and scoring signals
+only. Discovery Performance is reserved for future WNBA watches and leans and
+must not affect the official WNBA model record until validated.
 
 ## Card Contract
 

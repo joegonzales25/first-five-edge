@@ -129,10 +129,22 @@ def init_db(connection):
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             graded_at TEXT,
+            locked_at TEXT,
+            snapshot_status TEXT,
             UNIQUE(game_id, market_version, model_version)
         )
         """
     )
+    columns = {
+        row["name"]
+        for row in fetch_rows(connection, "PRAGMA table_info(wnba_model_history)")
+    }
+    if "locked_at" not in columns:
+        connection.execute("ALTER TABLE wnba_model_history ADD COLUMN locked_at TEXT")
+    if "snapshot_status" not in columns:
+        connection.execute(
+            "ALTER TABLE wnba_model_history ADD COLUMN snapshot_status TEXT"
+        )
     connection.commit()
 
 
@@ -171,6 +183,16 @@ def is_snapshot_eligible(row):
     return status in ["scheduled", "pre-game", "preview"]
 
 
+def is_pregame_status(status):
+    return str(status or "").strip().lower() in [
+        "",
+        "scheduled",
+        "pre-game",
+        "preview",
+        "postponed",
+    ]
+
+
 def prediction_values(row, slate_date, market_version, model_version, now):
     return {
         "game_id": str(row.get("Game ID") or row.get("game_id") or ""),
@@ -197,6 +219,8 @@ def prediction_values(row, slate_date, market_version, model_version, now):
         "status": row.get("Status"),
         "created_at": now,
         "updated_at": now,
+        "locked_at": None,
+        "snapshot_status": "Pregame",
     }
 
 
@@ -261,6 +285,7 @@ def insert_prediction(connection, row_values):
 
 
 def update_result(connection, game_id, market_version, model_version, values):
+    should_lock = not is_pregame_status(values["status"])
     connection.execute(
         """
         UPDATE wnba_model_history
@@ -274,7 +299,15 @@ def update_result(connection, game_id, market_version, model_version, values):
             margin_error = ?,
             total_error = ?,
             updated_at = ?,
-            graded_at = COALESCE(graded_at, ?)
+            graded_at = COALESCE(graded_at, ?),
+            locked_at = CASE
+                WHEN ? THEN COALESCE(locked_at, ?)
+                ELSE locked_at
+            END,
+            snapshot_status = CASE
+                WHEN ? THEN 'Locked'
+                ELSE COALESCE(snapshot_status, 'Pregame')
+            END
         WHERE game_id = ?
           AND market_version = ?
           AND model_version = ?
@@ -291,6 +324,9 @@ def update_result(connection, game_id, market_version, model_version, values):
             values["total_error"],
             values["updated_at"],
             values["graded_at"],
+            should_lock,
+            values["updated_at"],
+            should_lock,
             str(game_id),
             market_version,
             model_version,
