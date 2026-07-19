@@ -2552,6 +2552,23 @@ def safe_load_slate_history_rows(model_version, slate_date):
         return []
 
 
+def safe_load_wnba_slate_history_rows(model_version, market_version, slate_date):
+    try:
+        rows = load_wnba_history(
+            model_version=model_version,
+            market_version=market_version,
+        )
+    except Exception:
+        return []
+
+    target_date = str(slate_date)
+    return [
+        row
+        for row in rows
+        if str(row.get("slate_date", "")) == target_date
+    ]
+
+
 def apply_tracked_snapshot_to_games(games, model_version, slate_date, history_rows=None):
     history_rows = (
         history_rows
@@ -3855,10 +3872,17 @@ def render_wnba_current():
     except Exception as exc:
         slate_error = exc
 
+    wnba_history_rows = safe_load_wnba_slate_history_rows(
+        MODEL_BASELINES["WNBA"],
+        MARKET_RELEASES["WNBA"],
+        selected_date,
+    )
+
     render_wnba_view_pills(selected_view)
 
     if selected_view == "perf":
         st.caption("Performance history")
+        st.caption(format_snapshot_caption(wnba_history_rows))
         st.divider()
         render_wnba_performance_section()
         return
@@ -3876,6 +3900,7 @@ def render_wnba_current():
     else:
         filtered_count = len(filter_wnba_games(slate, selected_view))
     st.caption(f"{filtered_count} of {len(slate)}")
+    st.caption(format_snapshot_caption(wnba_history_rows))
     st.divider()
 
     if selected_view == "top":
