@@ -20,10 +20,21 @@ from wnba_agent import (
     backtest_schedule as build_wnba_historical_lab,
     historical_summary_tables as wnba_historical_summary_tables,
 )
+from nba_agent import (
+    build_current_season_lab as build_nba_current_season_lab,
+    build_current_slate as build_nba_current_slate,
+    backtest_schedule as build_nba_historical_lab,
+    historical_summary_tables as nba_historical_summary_tables,
+)
 from wnba_model_history import (
     load_wnba_history,
     load_wnba_performance_tables,
     load_wnba_performance_summary,
+)
+from nba_model_history import (
+    load_nba_history,
+    load_nba_performance_tables,
+    load_nba_performance_summary,
 )
 from model_history import (
     load_slate_history_rows,
@@ -39,17 +50,19 @@ MARKET_RELEASES = {
     "MLB": "2.3.29",
     "NFL": "1.0.0",
     "WNBA": "1.0.1-test",
+    "NBA": "0.1.0-test",
 }
 MODEL_BASELINES = {
     "MLB": "2.3.29",
     "NFL": "1.0.0",
     "WNBA": "1.0.0-test",
+    "NBA": "0.1.0-test",
 }
 SPORT_CONFIG = {
     "MLB": {"enabled": True},
     "NFL": {"enabled": True},
     "WNBA": {"enabled": True},
-    "NBA": {"enabled": False},
+    "NBA": {"enabled": True},
     "NHL": {"enabled": False},
     "CBB": {"enabled": False},
 }
@@ -2569,6 +2582,23 @@ def safe_load_wnba_slate_history_rows(model_version, market_version, slate_date)
     ]
 
 
+def safe_load_nba_slate_history_rows(model_version, market_version, slate_date):
+    try:
+        rows = load_nba_history(
+            model_version=model_version,
+            market_version=market_version,
+        )
+    except Exception:
+        return []
+
+    target_date = str(slate_date)
+    return [
+        row
+        for row in rows
+        if str(row.get("slate_date", "")) == target_date
+    ]
+
+
 def apply_tracked_snapshot_to_games(games, model_version, slate_date, history_rows=None):
     history_rows = (
         history_rows
@@ -3213,6 +3243,72 @@ def render_wnba_view_pills(active_view):
     st.html(f'<div class="wnba-filter-grid">{"".join(pills)}</div>')
 
 
+def render_nba_mode_pills(active_mode):
+    options = [("Current Slate", "current"), ("Historical Lab", "lab")]
+    pills = []
+    for label, mode in options:
+        classes = ["nfl-control-pill"]
+        if mode == active_mode:
+            classes.append("active")
+        pills.append(
+            f'<a class="{" ".join(classes)}" href="{query_link({"sport": "NBA", "mode": mode, "filter": "all"})}">'
+            f'{escape(label)}</a>'
+        )
+    st.html(f'<div class="nfl-control-row">{"".join(pills)}</div>')
+
+
+def render_nba_filter_pills(active_filter, mode="lab"):
+    options = [
+        ("All", "all"),
+        ("Signals", "signals"),
+        ("Correct", "correct"),
+        ("Missed", "missed"),
+        ("Side", "side"),
+        ("Scoring", "scoring"),
+        ("A", "a"),
+        ("Pass", "pass"),
+    ]
+    pills = []
+    for label, value in options:
+        classes = ["nfl-control-pill"]
+        if value == active_filter:
+            classes.append("active")
+        pills.append(
+            f'<a class="{" ".join(classes)}" href="{query_link({"sport": "NBA", "mode": mode, "filter": value})}">'
+            f'{escape(label)}</a>'
+        )
+    st.html(f'<div class="nfl-control-row">{"".join(pills)}</div>')
+
+
+def selected_nba_view(default_view="all"):
+    view = str(get_query_param("view") or get_query_param("filter") or default_view).lower()
+    valid_views = {"all", "top", "side", "scoring", "first_half", "perf"}
+    if view not in valid_views:
+        return default_view
+    return view
+
+
+def render_nba_view_pills(active_view):
+    options = [
+        ("All", "all"),
+        ("Top", "top"),
+        ("Side", "side"),
+        ("Scoring", "scoring"),
+        ("1H", "first_half"),
+        ("Perf", "perf"),
+    ]
+    pills = []
+    for label, value in options:
+        classes = ["wnba-filter-card"]
+        if value == active_view:
+            classes.append("active")
+        pills.append(
+            f'<a class="{" ".join(classes)}" href="{query_link({"sport": "NBA", "mode": "current", "view": value, "filter": None})}">'
+            f'{escape(label)}</a>'
+        )
+    st.html(f'<div class="wnba-filter-grid">{"".join(pills)}</div>')
+
+
 def render_sport_picker(active_sport):
     pills = []
     for sport, config in SPORT_CONFIG.items():
@@ -3618,6 +3714,7 @@ def render_wnba_result_strip(row):
 
 
 def render_wnba_card(row, historical=False):
+    half_label = "First Half" if row.get("Sport") == "NBA" else "Early Edge"
     result_line = ""
     if historical:
         result_line = f"""
@@ -3642,7 +3739,7 @@ def render_wnba_card(row, historical=False):
         <div class="decision-stack">
             <div class="decision-line decision-first">Side Edge: {escape(str(row["Side Edge"]))}</div>
             <div class="decision-line decision-f5">Scoring Environment: {escape(str(row["Scoring Edge"]))}</div>
-            <div class="decision-line decision-full">Early Edge: {escape(str(row["Early Edge"]))}</div>
+            <div class="decision-line decision-full">{escape(half_label)}: {escape(str(row["Early Edge"]))}</div>
         </div>
 
         {render_wnba_result_strip(row)}
@@ -3666,7 +3763,7 @@ def render_wnba_card(row, historical=False):
         | Side Result | {row.get("Side Result", row.get("Winner Result", "Pending"))} |
         | Scoring Environment | {row["Scoring Edge"]} |
         | Scoring Result | {row.get("Scoring Result", "Pending")} |
-        | Early Edge | {row["Early Edge"]} |
+        | {half_label} | {row["Early Edge"]} |
         | Edge Score | {row["Edge Score"]} |
         | Confidence | {row["Confidence"]} |
         | Model Margin | {row["Model Margin"]} |
@@ -4420,6 +4517,392 @@ def render_wnba_historical():
         render_wnba_card(row, historical=True)
 
 
+def render_nba_current():
+    default_date = current_date_for_timezone(FALLBACK_TIMEZONE)
+    selected_date = st.date_input(
+        "Slate Date",
+        value=default_date,
+        format="MM/DD/YYYY",
+        key="nba_slate_date",
+    )
+    selected_view = selected_nba_view("all")
+    slate = pd.DataFrame()
+    slate_error = None
+    try:
+        slate, _ = load_nba_current(selected_date)
+    except Exception as exc:
+        slate_error = exc
+
+    nba_history_rows = safe_load_nba_slate_history_rows(
+        MODEL_BASELINES["NBA"],
+        MARKET_RELEASES["NBA"],
+        selected_date,
+    )
+
+    render_nba_view_pills(selected_view)
+
+    if selected_view == "perf":
+        st.caption("Performance history")
+        st.caption(format_snapshot_caption(nba_history_rows))
+        st.divider()
+        render_nba_performance_section()
+        return
+
+    if slate_error is not None:
+        st.error(f"Could not load NBA current slate: {slate_error}")
+        return
+
+    if slate.empty:
+        st.info("No NBA games found for the selected slate date.")
+        return
+
+    if selected_view in ["top", "first_half"]:
+        filtered_count = 0
+    else:
+        filtered_count = len(filter_wnba_games(slate, selected_view))
+    st.caption(f"{filtered_count} of {len(slate)}")
+    st.caption(format_snapshot_caption(nba_history_rows))
+    st.divider()
+
+    if selected_view == "top":
+        st.info("NBA Top signals are a placeholder until the v0 model has enough tracked performance to define a reliable top-pick cut.")
+        return
+
+    if selected_view == "first_half":
+        st.info("NBA First Half is pending until a reliable halftime-result data source is added. Full-game side and scoring signals are active in v0.")
+        return
+
+    filtered = filter_wnba_games(slate, selected_view)
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Games", len(slate))
+    c2.metric("Model Signals", len(slate[slate["Model Signal"] != "Pass"]))
+    c3.metric("Side Edges", len(slate[slate["Side Edge"] != "Pass"]))
+    c4.metric(
+        "Scoring Signals",
+        len(slate[slate["Scoring Edge"] != "Neutral Scoring Environment"]),
+    )
+
+    if filtered.empty:
+        st.info("No NBA games match the selected view.")
+        return
+
+    for _, row in filtered.iterrows():
+        render_wnba_card(row)
+
+
+def render_nba_performance_section():
+    st.markdown("### NBA Performance")
+    model_version = MODEL_BASELINES["NBA"]
+    market_version = MARKET_RELEASES["NBA"]
+    current_summary = load_nba_performance_summary(
+        model_version=model_version,
+        market_version=market_version,
+    )
+    storage_backend = current_summary.get("storage_backend", "Unavailable")
+    storage_path = current_summary.get("db_path", "N/A")
+    current_rows = load_nba_history(
+        model_version=model_version,
+        market_version=market_version,
+    )
+    all_rows = load_nba_history()
+
+    if current_summary["snapshots"] == 0:
+        st.info("No NBA performance snapshots recorded yet. The scheduled NBA snapshot workflow will create pregame snapshots when it runs.")
+        return
+
+    model_filter_options = [f"Current {model_version}", "All"]
+    filter_cols = st.columns([1, 1, 1, 1])
+    with filter_cols[0]:
+        market_filter = st.selectbox(
+            "Signal",
+            ["All", "Side", "Scoring"],
+            key="nba_performance_market_filter",
+        )
+    with filter_cols[1]:
+        window_filter = st.selectbox(
+            "Day(s)",
+            ["Today", "Yesterday", "Last 7", "Last 30", "All"],
+            key="nba_performance_window_filter",
+        )
+    with filter_cols[2]:
+        confidence_filter = st.selectbox(
+            "Confidence",
+            ["All", "A", "B", "C", "Pass"],
+            key="nba_performance_confidence_filter",
+        )
+    with filter_cols[3]:
+        selected_model_filter = st.selectbox(
+            "Model",
+            model_filter_options,
+            key="nba_performance_model_filter",
+        )
+
+    selected_rows = all_rows if selected_model_filter == "All" else current_rows
+    model_label = (
+        "All models"
+        if selected_model_filter == "All"
+        else f"Current {model_version}"
+    )
+    history_today = latest_wnba_history_date(selected_rows) or datetime.now().date()
+
+    day_filters = {
+        "Today": {"exact_date": history_today, "label": f"Today ({history_today})"},
+        "Yesterday": {
+            "exact_date": history_today - timedelta(days=1),
+            "label": f"Yesterday ({history_today - timedelta(days=1)})",
+        },
+        "Last 7": 7,
+        "Last 30": 30,
+        "All": {"days": None, "exact_date": None, "label": "All history"},
+    }[window_filter]
+    if isinstance(day_filters, dict):
+        days = day_filters.get("days")
+        exact_date = day_filters.get("exact_date")
+        day_label = day_filters["label"]
+    else:
+        days = day_filters
+        exact_date = None
+        day_label = f"{window_filter} days"
+
+    if days is not None:
+        filtered_rows = [
+            row
+            for row in selected_rows
+            if wnba_history_row_matches_filters(
+                row,
+                market_filter,
+                days=days,
+                confidence=confidence_filter,
+                exact_date=None,
+                anchor_date=history_today,
+            )
+        ]
+    else:
+        filtered_rows = [
+            row
+            for row in selected_rows
+            if wnba_history_row_matches_filters(
+                row,
+                market_filter,
+                days=None,
+                confidence=confidence_filter,
+                exact_date=exact_date,
+            )
+        ]
+
+    summary_rows = summarize_wnba_performance_rows(filtered_rows, market_filter)
+    detail_rows = wnba_detail_rows(filtered_rows, market_filter)
+
+    with st.expander("NBA Performance History Diagnostics"):
+        diag_cols = st.columns(4)
+        with diag_cols[0]:
+            st.metric("Snapshots", current_summary["snapshots"])
+        with diag_cols[1]:
+            st.metric("Completed", current_summary["completed"])
+        with diag_cols[2]:
+            st.metric("Side Signals", current_summary["side_signal_games"])
+        with diag_cols[3]:
+            st.metric("Scoring Signals", current_summary["scoring_signal_games"])
+
+        st.caption(
+            "Snapshot rule: NBA predictions are stored only for pregame snapshots; "
+            "final rows update result fields only when a matching snapshot exists."
+        )
+        st.caption(f"Storage: {storage_backend}")
+        st.code(storage_path, language="text")
+        st.caption(
+            f"Current market version: {market_version} | Current model baseline: {model_version}"
+        )
+
+        export_label = (
+            "all_models"
+            if selected_model_filter == "All"
+            else str(model_version).replace(".", "_")
+        )
+        st.download_button(
+            f"Download NBA Performance History CSV ({len(selected_rows)} rows)",
+            data=wnba_rows_to_csv(selected_rows),
+            file_name=f"nba_model_history_{export_label}.csv",
+            mime="text/csv",
+            key="nba_history_download",
+        )
+
+    if not summary_rows:
+        st.info("No NBA tracked results match the selected filters.")
+        return
+
+    result_cards = []
+    for row in summary_rows:
+        completed = (row.get("hits") or 0) + (row.get("misses") or 0)
+        pending = row.get("pending") or 0
+        record = f"{row.get('hits') or 0}-{row.get('misses') or 0}"
+        result_cards.append(
+            '<div class="performance-card">'
+            f'<div class="performance-market">{escape(row["market"])}</div>'
+            f'<div class="performance-hit-rate">{performance_hit_rate(row)}</div>'
+            f'<div class="performance-record">{escape(record)} record</div>'
+            f'<div class="performance-meta">{completed} completed - {pending} pending</div>'
+            '</div>'
+        )
+
+    filter_text = f"{model_label} - {day_label}"
+    if market_filter != "All":
+        filter_text += f" - {market_filter}"
+    if confidence_filter != "All":
+        filter_text += f" - {confidence_filter} confidence"
+
+    st.html(
+        '<div class="model-favorite top-looks">'
+        '<div class="model-label">NBA MODEL PERFORMANCE</div>'
+        f'<div class="top-look-meta">{escape(filter_text)}</div>'
+        '<div class="performance-results">'
+        f'{"".join(result_cards)}'
+        '</div>'
+        '</div>'
+    )
+
+    if not detail_rows:
+        st.info("No detailed NBA rows match the selected filters.")
+        return
+
+    detail_df = pd.DataFrame(detail_rows)
+    detail_df = detail_df.rename(
+        columns={
+            "slate_date": "Slate",
+            "market": "Signal",
+            "game": "Game",
+            "pick": "Pick",
+            "confidence": "Confidence",
+            "score": "Score",
+            "result": "Result",
+            "status": "Status",
+            "model_version": "Model",
+            "market_version": "Market Version",
+        }
+    )
+    st.dataframe(
+        detail_df[
+            [
+                "Slate",
+                "Signal",
+                "Game",
+                "Pick",
+                "Confidence",
+                "Score",
+                "Result",
+                "Status",
+                "Model",
+                "Market Version",
+            ]
+        ],
+        hide_index=True,
+        use_container_width=True,
+    )
+
+    with st.expander("NBA Performance Splits"):
+        tables = load_nba_performance_tables(
+            model_version=model_version,
+            market_version=market_version,
+        )
+        split_tabs = st.tabs(["Core", "Confidence", "Side", "Scoring", "History", "Rest"])
+        split_keys = ["core", "confidence", "side_location", "scoring", "history", "rest"]
+        for tab, split_key in zip(split_tabs, split_keys):
+            with tab:
+                split_df = pd.DataFrame(tables[split_key])
+                if split_df.empty:
+                    st.caption("No split rows yet.")
+                else:
+                    st.dataframe(split_df, width="stretch", hide_index=True)
+
+
+def render_nba_historical():
+    uploaded = st.file_uploader(
+        "NBA historical/current-season CSV",
+        type=["csv"],
+        key="nba_historical_csv",
+    )
+    if uploaded is None:
+        st.info("Upload a normalized NBA games CSV to run the v0 model lab, or use Current Slate for the live ESPN-fed test surface.")
+        return
+
+    try:
+        games = pd.read_csv(uploaded)
+        results, summary = build_nba_historical_lab(games)
+    except Exception as exc:
+        st.error(f"Could not run NBA model: {exc}")
+        return
+
+    if results.empty:
+        st.info("No completed NBA games found for the selected data.")
+        return
+
+    st.subheader("NBA Historical Lab")
+    cols = st.columns(4)
+    cols[0].metric("Games", int(summary["games"]))
+    cols[1].metric("Winner Accuracy", f"{summary['winner_accuracy']:.1%}")
+    cols[2].metric("Side Signals", int(summary["side_signal_games"]))
+    cols[3].metric("Margin MAE", summary["margin_mae"])
+
+    render_wnba_summary_tables(nba_historical_summary_tables(results))
+
+    selected_filter = str(get_query_param("filter") or "all").lower()
+    render_nba_filter_pills(selected_filter, mode="lab")
+    filtered = filter_nfl_games(results, selected_filter, historical=True)
+    if filtered.empty:
+        st.info("No NBA games match the selected filter.")
+        return
+
+    for _, row in filtered.iterrows():
+        render_wnba_card(row, historical=True)
+
+
+def render_nba_model_info_sidebar():
+    st.sidebar.title("NBA Controls")
+    st.sidebar.caption(f"Market release: {MARKET_RELEASES['NBA']}")
+    st.sidebar.caption(f"Model baseline: {MODEL_BASELINES['NBA']}")
+    tracking_summary = load_nba_performance_summary(
+        model_version=MODEL_BASELINES["NBA"],
+        market_version=MARKET_RELEASES["NBA"],
+    )
+    storage_backend = tracking_summary.get("storage_backend", "Unavailable")
+    storage_path = tracking_summary.get("db_path", "N/A")
+
+    with st.sidebar.expander("NBA Model Info"):
+        st.markdown(f"""
+**Model Scope**: Full-game side and scoring environment
+
+**First Half**: placeholder until a reliable halftime-result feed is added
+
+**NBA Tracking**: separate NBA-only history table
+
+**Snapshots**: {tracking_summary["snapshots"]}
+
+**Completed**: {tracking_summary["completed"]}
+
+**Tracking Writes**: scheduled snapshot workflow
+
+**Storage Backend**: {escape(storage_backend)}
+
+**Storage**: `{escape(storage_path)}`
+
+**Current Status**: Current slate views are All, Top, Side, Scoring, 1H, and Perf.
+""")
+
+
+def render_nba_page():
+    st.title("NBA Edge Detector")
+    mode = selected_nfl_mode()
+
+    render_nba_model_info_sidebar()
+    render_nba_mode_pills(mode)
+
+    if mode == "current":
+        render_nba_current()
+    else:
+        render_nba_historical()
+
+
 def render_wnba_model_info_sidebar():
     st.sidebar.title("WNBA Controls")
     st.sidebar.caption(f"Product release: {APP_VERSION}")
@@ -4486,8 +4969,22 @@ def load_wnba_current(selected_date):
 
 
 @st.cache_data(ttl=900)
+def load_nba_current(selected_date):
+    return build_nba_current_slate(
+        today=selected_date,
+        days_ahead=0,
+        slate_date=selected_date,
+    )
+
+
+@st.cache_data(ttl=900)
 def load_wnba_current_lab():
     return build_wnba_current_season_lab()
+
+
+@st.cache_data(ttl=900)
+def load_nba_current_lab():
+    return build_nba_current_season_lab()
 
 
 @st.cache_data(ttl=900)
@@ -4504,6 +5001,10 @@ if active_sport == "NFL":
 
 if active_sport == "WNBA":
     render_wnba_page()
+    st.stop()
+
+if active_sport == "NBA":
+    render_nba_page()
     st.stop()
 
 if active_sport != "MLB":

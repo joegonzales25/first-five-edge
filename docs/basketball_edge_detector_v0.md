@@ -18,11 +18,16 @@ NBA v0 starts with:
 
 ```text
 Full Game
-First Half
+First Half placeholder
 ```
 
 First Quarter can be considered later after Full Game and First Half have
 enough tracked history.
+
+Implementation note: v0 launches with full-game side and scoring-environment
+signals because the free ESPN scoreboard feed reliably supplies game/final
+scores. First Half remains a visible `Model Pending` placeholder until a
+reliable halftime-result source is added.
 
 ## Output Contract
 
@@ -218,7 +223,9 @@ Expected future files:
 
 ```text
 nba_agent.py
-nba_model.py
+nba_data.py
+nba_model_history.py
+snapshot_nba_slate.py
 .github/workflows/nba-snapshot.yml
 ```
 
