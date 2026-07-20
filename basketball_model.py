@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 
-SUPPORTED_LEAGUES = {"NBA", "WNBA"}
+SUPPORTED_LEAGUES = {"NBA", "WNBA", "CBB"}
 
 
 @dataclass(frozen=True)
@@ -59,6 +59,23 @@ WNBA_CONFIG = BasketballModelConfig(
 )
 
 
+CBB_CONFIG = BasketballModelConfig(
+    league="CBB",
+    side_a=10.0,
+    side_b=7.5,
+    side_c=5.5,
+    min_a_games=12,
+    min_b_games=8,
+    min_c_games=5,
+    total_threshold=6.0,
+    home_court=2.8,
+    rest_weight=0.18,
+    recent_margin_weight=0.22,
+    pace_weight=0.14,
+    default_total=145.0,
+)
+
+
 @dataclass
 class TeamState:
     games: int = 0
@@ -103,6 +120,8 @@ def config_for_league(league: str) -> BasketballModelConfig:
         return NBA_CONFIG
     if normalized == "WNBA":
         return WNBA_CONFIG
+    if normalized == "CBB":
+        return CBB_CONFIG
     raise ValueError(f"unsupported league: {league}")
 
 

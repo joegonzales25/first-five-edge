@@ -1,0 +1,42 @@
+name: CBB Slate Snapshot
+
+on:
+  # Schedule disabled until college basketball season tracking is ready.
+  # Keep workflow_dispatch enabled for manual test snapshots.
+  workflow_dispatch:
+    inputs:
+      slate_date:
+        description: "Slate date in YYYY-MM-DD format. Leave blank for today ET."
+        required: false
+        type: string
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      HISTORY_BACKEND: turso
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      SNAPSHOT_SLATE_DATE: ${{ github.event.inputs.slate_date }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Record CBB snapshot
+        run: |
+          if [ -n "$SNAPSHOT_SLATE_DATE" ]; then
+            python snapshot_cbb_slate.py --date "$SNAPSHOT_SLATE_DATE"
+          else
+            python snapshot_cbb_slate.py
+          fi

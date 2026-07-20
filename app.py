@@ -32,6 +32,12 @@ from nhl_agent import (
     backtest_schedule as build_nhl_historical_lab,
     historical_summary_tables as nhl_historical_summary_tables,
 )
+from cbb_agent import (
+    build_current_season_lab as build_cbb_current_season_lab,
+    build_current_slate as build_cbb_current_slate,
+    backtest_schedule as build_cbb_historical_lab,
+    historical_summary_tables as cbb_historical_summary_tables,
+)
 from wnba_model_history import (
     load_wnba_history,
     load_wnba_performance_tables,
@@ -46,6 +52,11 @@ from nhl_model_history import (
     load_nhl_history,
     load_nhl_performance_tables,
     load_nhl_performance_summary,
+)
+from cbb_model_history import (
+    load_cbb_history,
+    load_cbb_performance_tables,
+    load_cbb_performance_summary,
 )
 from model_history import (
     load_slate_history_rows,
@@ -63,6 +74,7 @@ MARKET_RELEASES = {
     "WNBA": "1.0.1-test",
     "NBA": "0.1.0-test",
     "NHL": "0.1.0-test",
+    "CBB": "0.1.0-test",
 }
 MODEL_BASELINES = {
     "MLB": "2.3.29",
@@ -70,6 +82,7 @@ MODEL_BASELINES = {
     "WNBA": "1.0.0-test",
     "NBA": "0.1.0-test",
     "NHL": "0.1.0-test",
+    "CBB": "0.1.0-test",
 }
 SPORT_CONFIG = {
     "MLB": {"enabled": True},
@@ -77,7 +90,7 @@ SPORT_CONFIG = {
     "WNBA": {"enabled": True},
     "NBA": {"enabled": True},
     "NHL": {"enabled": True},
-    "CBB": {"enabled": False},
+    "CBB": {"enabled": True},
 }
 
 team_logo_map = {
@@ -2629,6 +2642,23 @@ def safe_load_nhl_slate_history_rows(model_version, market_version, slate_date):
     ]
 
 
+def safe_load_cbb_slate_history_rows(model_version, market_version, slate_date):
+    try:
+        rows = load_cbb_history(
+            model_version=model_version,
+            market_version=market_version,
+        )
+    except Exception:
+        return []
+
+    target_date = str(slate_date)
+    return [
+        row
+        for row in rows
+        if str(row.get("slate_date", "")) == target_date
+    ]
+
+
 def apply_tracked_snapshot_to_games(games, model_version, slate_date, history_rows=None):
     history_rows = (
         history_rows
@@ -3334,6 +3364,72 @@ def render_nba_view_pills(active_view):
             classes.append("active")
         pills.append(
             f'<a class="{" ".join(classes)}" href="{query_link({"sport": "NBA", "mode": "current", "view": value, "filter": None})}">'
+            f'{escape(label)}</a>'
+        )
+    st.html(f'<div class="wnba-filter-grid">{"".join(pills)}</div>')
+
+
+def render_cbb_mode_pills(active_mode):
+    options = [("Current Slate", "current"), ("Historical Lab", "lab")]
+    pills = []
+    for label, mode in options:
+        classes = ["nfl-control-pill"]
+        if mode == active_mode:
+            classes.append("active")
+        pills.append(
+            f'<a class="{" ".join(classes)}" href="{query_link({"sport": "CBB", "mode": mode, "filter": "all"})}">'
+            f'{escape(label)}</a>'
+        )
+    st.html(f'<div class="nfl-control-row">{"".join(pills)}</div>')
+
+
+def render_cbb_filter_pills(active_filter, mode="lab"):
+    options = [
+        ("All", "all"),
+        ("Signals", "signals"),
+        ("Correct", "correct"),
+        ("Missed", "missed"),
+        ("Side", "side"),
+        ("Scoring", "scoring"),
+        ("A", "a"),
+        ("Pass", "pass"),
+    ]
+    pills = []
+    for label, value in options:
+        classes = ["nfl-control-pill"]
+        if value == active_filter:
+            classes.append("active")
+        pills.append(
+            f'<a class="{" ".join(classes)}" href="{query_link({"sport": "CBB", "mode": mode, "filter": value})}">'
+            f'{escape(label)}</a>'
+        )
+    st.html(f'<div class="nfl-control-row">{"".join(pills)}</div>')
+
+
+def selected_cbb_view(default_view="all"):
+    view = str(get_query_param("view") or get_query_param("filter") or default_view).lower()
+    valid_views = {"all", "top", "side", "scoring", "first_half", "perf"}
+    if view not in valid_views:
+        return default_view
+    return view
+
+
+def render_cbb_view_pills(active_view):
+    options = [
+        ("All", "all"),
+        ("Top", "top"),
+        ("Side", "side"),
+        ("Scoring", "scoring"),
+        ("1H", "first_half"),
+        ("Perf", "perf"),
+    ]
+    pills = []
+    for label, value in options:
+        classes = ["wnba-filter-card"]
+        if value == active_view:
+            classes.append("active")
+        pills.append(
+            f'<a class="{" ".join(classes)}" href="{query_link({"sport": "CBB", "mode": "current", "view": value, "filter": None})}">'
             f'{escape(label)}</a>'
         )
     st.html(f'<div class="wnba-filter-grid">{"".join(pills)}</div>')
@@ -5026,6 +5122,397 @@ def render_nba_page():
         render_nba_historical()
 
 
+def render_cbb_current():
+    default_date = current_date_for_timezone(FALLBACK_TIMEZONE)
+    selected_date = st.date_input(
+        "Slate Date",
+        value=default_date,
+        format="MM/DD/YYYY",
+        key="cbb_slate_date",
+    )
+    selected_view = selected_cbb_view("all")
+    slate = pd.DataFrame()
+    slate_error = None
+    try:
+        slate, _ = load_cbb_current(selected_date)
+    except Exception as exc:
+        slate_error = exc
+
+    cbb_history_rows = safe_load_cbb_slate_history_rows(
+        MODEL_BASELINES["CBB"],
+        MARKET_RELEASES["CBB"],
+        selected_date,
+    )
+
+    render_cbb_view_pills(selected_view)
+
+    if selected_view == "perf":
+        st.caption("Performance history")
+        st.caption(format_snapshot_caption(cbb_history_rows))
+        st.divider()
+        render_cbb_performance_section()
+        return
+
+    if slate_error is not None:
+        st.error(f"Could not load CBB current slate: {slate_error}")
+        return
+
+    if slate.empty:
+        st.caption("0 of 0")
+        st.caption(format_snapshot_caption(cbb_history_rows))
+        st.divider()
+        st.info("No CBB games found for the selected slate date.")
+        return
+
+    if selected_view in ["top", "first_half"]:
+        filtered_count = 0
+    else:
+        filtered_count = len(filter_wnba_games(slate, selected_view))
+    st.caption(f"{filtered_count} of {len(slate)}")
+    st.caption(format_snapshot_caption(cbb_history_rows))
+    st.divider()
+
+    if selected_view == "top":
+        st.info("CBB Top signals are a placeholder until the v0 model has enough tracked performance to define a reliable top-pick cut.")
+        return
+
+    if selected_view == "first_half":
+        st.info("CBB First Half is included in v0 planning, but official grading is pending until reliable halftime scores are verified.")
+        return
+
+    filtered = filter_wnba_games(slate, selected_view)
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Games", len(slate))
+    c2.metric("Model Signals", len(slate[slate["Model Signal"] != "Pass"]))
+    c3.metric("Side Edges", len(slate[slate["Side Edge"] != "Pass"]))
+    c4.metric(
+        "Scoring Notes",
+        len(slate[slate["Scoring Edge"] != "Neutral Scoring Environment"]),
+    )
+
+    if filtered.empty:
+        st.info("No CBB games match the selected view.")
+        return
+
+    for _, row in filtered.iterrows():
+        render_wnba_card(row)
+
+
+def render_cbb_performance_section():
+    st.markdown("### CBB Performance")
+    model_version = MODEL_BASELINES["CBB"]
+    market_version = MARKET_RELEASES["CBB"]
+    current_summary = load_cbb_performance_summary(
+        model_version=model_version,
+        market_version=market_version,
+    )
+    storage_backend = current_summary.get("storage_backend", "Unavailable")
+    storage_path = current_summary.get("db_path", "N/A")
+    current_rows = load_cbb_history(
+        model_version=model_version,
+        market_version=market_version,
+    )
+    all_rows = load_cbb_history()
+
+    if current_summary["snapshots"] == 0:
+        st.info("No CBB performance snapshots recorded yet. Manual CBB snapshots can be run from GitHub Actions once season tracking is ready.")
+        return
+
+    model_filter_options = [f"Current {model_version}", "All"]
+    filter_cols = st.columns([1, 1, 1, 1])
+    with filter_cols[0]:
+        market_filter = st.selectbox(
+            "Signal",
+            ["All", "Side", "Scoring"],
+            key="cbb_performance_market_filter",
+        )
+    with filter_cols[1]:
+        window_filter = st.selectbox(
+            "Day(s)",
+            ["Today", "Yesterday", "Last 7", "Last 30", "All"],
+            key="cbb_performance_window_filter",
+        )
+    with filter_cols[2]:
+        confidence_filter = st.selectbox(
+            "Confidence",
+            ["All", "A", "B", "C", "Pass"],
+            key="cbb_performance_confidence_filter",
+        )
+    with filter_cols[3]:
+        selected_model_filter = st.selectbox(
+            "Model",
+            model_filter_options,
+            key="cbb_performance_model_filter",
+        )
+
+    selected_rows = all_rows if selected_model_filter == "All" else current_rows
+    model_label = (
+        "All models"
+        if selected_model_filter == "All"
+        else f"Current {model_version}"
+    )
+    history_today = latest_wnba_history_date(selected_rows) or datetime.now().date()
+
+    day_filters = {
+        "Today": {"exact_date": history_today, "label": f"Today ({history_today})"},
+        "Yesterday": {
+            "exact_date": history_today - timedelta(days=1),
+            "label": f"Yesterday ({history_today - timedelta(days=1)})",
+        },
+        "Last 7": 7,
+        "Last 30": 30,
+        "All": {"days": None, "exact_date": None, "label": "All history"},
+    }[window_filter]
+    if isinstance(day_filters, dict):
+        days = day_filters.get("days")
+        exact_date = day_filters.get("exact_date")
+        day_label = day_filters["label"]
+    else:
+        days = day_filters
+        exact_date = None
+        day_label = f"{window_filter} days"
+
+    if days is not None:
+        filtered_rows = [
+            row
+            for row in selected_rows
+            if wnba_history_row_matches_filters(
+                row,
+                market_filter,
+                days=days,
+                confidence=confidence_filter,
+                exact_date=None,
+                anchor_date=history_today,
+            )
+        ]
+    else:
+        filtered_rows = [
+            row
+            for row in selected_rows
+            if wnba_history_row_matches_filters(
+                row,
+                market_filter,
+                days=None,
+                confidence=confidence_filter,
+                exact_date=exact_date,
+            )
+        ]
+
+    summary_rows = summarize_wnba_performance_rows(filtered_rows, market_filter)
+    detail_rows = wnba_detail_rows(filtered_rows, market_filter)
+
+    with st.expander("CBB Performance History Diagnostics"):
+        diag_cols = st.columns(4)
+        with diag_cols[0]:
+            st.metric("Snapshots", current_summary["snapshots"])
+        with diag_cols[1]:
+            st.metric("Completed", current_summary["completed"])
+        with diag_cols[2]:
+            st.metric("Side Signals", current_summary["side_signal_games"])
+        with diag_cols[3]:
+            st.metric("Scoring Notes", current_summary["scoring_signal_games"])
+
+        st.caption(
+            "Snapshot rule: CBB predictions are stored only for pregame snapshots; "
+            "final rows update result fields only when a matching snapshot exists."
+        )
+        st.caption(f"Storage: {storage_backend}")
+        st.code(storage_path, language="text")
+        st.caption(
+            f"Current market version: {market_version} | Current model baseline: {model_version}"
+        )
+
+        export_label = (
+            "all_models"
+            if selected_model_filter == "All"
+            else str(model_version).replace(".", "_")
+        )
+        st.download_button(
+            f"Download CBB Performance History CSV ({len(selected_rows)} rows)",
+            data=wnba_rows_to_csv(selected_rows),
+            file_name=f"cbb_model_history_{export_label}.csv",
+            mime="text/csv",
+            key="cbb_history_download",
+        )
+
+    if not summary_rows:
+        st.info("No CBB tracked results match the selected filters.")
+        return
+
+    result_cards = []
+    for row in summary_rows:
+        completed = (row.get("hits") or 0) + (row.get("misses") or 0)
+        pending = row.get("pending") or 0
+        record = f"{row.get('hits') or 0}-{row.get('misses') or 0}"
+        result_cards.append(
+            '<div class="performance-card">'
+            f'<div class="performance-market">{escape(row["market"])}</div>'
+            f'<div class="performance-hit-rate">{performance_hit_rate(row)}</div>'
+            f'<div class="performance-record">{escape(record)} record</div>'
+            f'<div class="performance-meta">{completed} completed - {pending} pending</div>'
+            '</div>'
+        )
+
+    filter_text = f"{model_label} - {day_label}"
+    if market_filter != "All":
+        filter_text += f" - {market_filter}"
+    if confidence_filter != "All":
+        filter_text += f" - {confidence_filter} confidence"
+
+    st.html(
+        '<div class="model-favorite top-looks">'
+        '<div class="model-label">CBB MODEL PERFORMANCE</div>'
+        f'<div class="top-look-meta">{escape(filter_text)}</div>'
+        '<div class="performance-results">'
+        f'{"".join(result_cards)}'
+        '</div>'
+        '</div>'
+    )
+
+    if not detail_rows:
+        st.info("No detailed CBB rows match the selected filters.")
+        return
+
+    detail_df = pd.DataFrame(detail_rows)
+    detail_df = detail_df.rename(
+        columns={
+            "slate_date": "Slate",
+            "market": "Signal",
+            "game": "Game",
+            "pick": "Pick",
+            "confidence": "Confidence",
+            "score": "Score",
+            "result": "Result",
+            "status": "Status",
+            "model_version": "Model",
+            "market_version": "Market Version",
+        }
+    )
+    st.dataframe(
+        detail_df[
+            [
+                "Slate",
+                "Signal",
+                "Game",
+                "Pick",
+                "Confidence",
+                "Score",
+                "Result",
+                "Status",
+                "Model",
+                "Market Version",
+            ]
+        ],
+        hide_index=True,
+        use_container_width=True,
+    )
+
+    with st.expander("CBB Performance Splits"):
+        tables = load_cbb_performance_tables(
+            model_version=model_version,
+            market_version=market_version,
+        )
+        split_tabs = st.tabs(["Core", "Confidence", "Side", "Scoring", "History", "Rest"])
+        split_keys = ["core", "confidence", "side_location", "scoring", "history", "rest"]
+        for tab, split_key in zip(split_tabs, split_keys):
+            with tab:
+                split_df = pd.DataFrame(tables[split_key])
+                if split_df.empty:
+                    st.caption("No split rows yet.")
+                else:
+                    st.dataframe(split_df, width="stretch", hide_index=True)
+
+
+def render_cbb_historical():
+    uploaded = st.file_uploader(
+        "CBB historical/current-season CSV",
+        type=["csv"],
+        key="cbb_historical_csv",
+    )
+    if uploaded is None:
+        st.info("Upload a normalized CBB games CSV to run the v0 model lab, or use Current Slate for the live ESPN-fed test surface.")
+        return
+
+    try:
+        games = pd.read_csv(uploaded)
+        results, summary = build_cbb_historical_lab(games)
+    except Exception as exc:
+        st.error(f"Could not run CBB model: {exc}")
+        return
+
+    if results.empty:
+        st.info("No completed CBB games found for the selected data.")
+        return
+
+    st.subheader("CBB Historical Lab")
+    cols = st.columns(4)
+    cols[0].metric("Games", int(summary["games"]))
+    cols[1].metric("Winner Accuracy", f"{summary['winner_accuracy']:.1%}")
+    cols[2].metric("Side Signals", int(summary["side_signal_games"]))
+    cols[3].metric("Margin MAE", summary["margin_mae"])
+
+    render_wnba_summary_tables(cbb_historical_summary_tables(results))
+
+    selected_filter = str(get_query_param("filter") or "all").lower()
+    render_cbb_filter_pills(selected_filter, mode="lab")
+    filtered = filter_nfl_games(results, selected_filter, historical=True)
+    if filtered.empty:
+        st.info("No CBB games match the selected filter.")
+        return
+
+    for _, row in filtered.iterrows():
+        render_wnba_card(row, historical=True)
+
+
+def render_cbb_model_info_sidebar():
+    st.sidebar.title("CBB Controls")
+    st.sidebar.caption(f"Market release: {MARKET_RELEASES['CBB']}")
+    st.sidebar.caption(f"Model baseline: {MODEL_BASELINES['CBB']}")
+    tracking_summary = load_cbb_performance_summary(
+        model_version=MODEL_BASELINES["CBB"],
+        market_version=MARKET_RELEASES["CBB"],
+    )
+    storage_backend = tracking_summary.get("storage_backend", "Unavailable")
+    storage_path = tracking_summary.get("db_path", "N/A")
+
+    with st.sidebar.expander("CBB Model Info"):
+        st.markdown(f"""
+**Model Scope**: Men's college basketball full-game side and scoring environment
+
+**First Half**: included in v0 planning; official grading waits for reliable halftime scores
+
+**Data Gate**: official picks require enough prior team history and schedule context
+
+**CBB Tracking**: separate CBB-only history table
+
+**Snapshots**: {tracking_summary["snapshots"]}
+
+**Completed**: {tracking_summary["completed"]}
+
+**Tracking Writes**: manual snapshot workflow until season schedule is enabled
+
+**Storage Backend**: {escape(storage_backend)}
+
+**Storage**: `{escape(storage_path)}`
+
+**Current Status**: Current slate views are All, Top, Side, Scoring, 1H, and Perf.
+""")
+
+
+def render_cbb_page():
+    st.title("CBB Edge Detector")
+    mode = selected_nfl_mode()
+
+    render_cbb_model_info_sidebar()
+    render_cbb_mode_pills(mode)
+
+    if mode == "current":
+        render_cbb_current()
+    else:
+        render_cbb_historical()
+
+
 def render_nhl_current():
     default_date = current_date_for_timezone(FALLBACK_TIMEZONE)
     selected_date = st.date_input(
@@ -5527,6 +6014,15 @@ def load_nhl_current(selected_date):
 
 
 @st.cache_data(ttl=900)
+def load_cbb_current(selected_date):
+    return build_cbb_current_slate(
+        today=selected_date,
+        days_ahead=0,
+        slate_date=selected_date,
+    )
+
+
+@st.cache_data(ttl=900)
 def load_wnba_current_lab():
     return build_wnba_current_season_lab()
 
@@ -5539,6 +6035,11 @@ def load_nba_current_lab():
 @st.cache_data(ttl=900)
 def load_nhl_current_lab():
     return build_nhl_current_season_lab()
+
+
+@st.cache_data(ttl=900)
+def load_cbb_current_lab():
+    return build_cbb_current_season_lab()
 
 
 @st.cache_data(ttl=900)
@@ -5563,6 +6064,10 @@ if active_sport == "NBA":
 
 if active_sport == "NHL":
     render_nhl_page()
+    st.stop()
+
+if active_sport == "CBB":
+    render_cbb_page()
     st.stop()
 
 if active_sport != "MLB":
