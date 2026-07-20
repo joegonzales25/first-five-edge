@@ -13,6 +13,8 @@ DB_PATH = Path(
     )
 )
 MARKETS = ["1st Inning", "First 5", "Full Game"]
+TRACKING_SEGMENT_OFFICIAL = "Official"
+TRACKING_SEGMENTS = [TRACKING_SEGMENT_OFFICIAL, "Watch", "Lean"]
 
 
 def history_backend():
@@ -123,6 +125,16 @@ def init_db(connection):
         connection.execute("ALTER TABLE model_history ADD COLUMN locked_at TEXT")
     if "snapshot_status" not in columns:
         connection.execute("ALTER TABLE model_history ADD COLUMN snapshot_status TEXT")
+    if "tracking_segment" not in columns:
+        connection.execute("ALTER TABLE model_history ADD COLUMN tracking_segment TEXT")
+    if "base_market" not in columns:
+        connection.execute("ALTER TABLE model_history ADD COLUMN base_market TEXT")
+    if "discovery_label" not in columns:
+        connection.execute("ALTER TABLE model_history ADD COLUMN discovery_label TEXT")
+    if "discovery_type" not in columns:
+        connection.execute("ALTER TABLE model_history ADD COLUMN discovery_type TEXT")
+    if "discovery_side" not in columns:
+        connection.execute("ALTER TABLE model_history ADD COLUMN discovery_side TEXT")
     connection.commit()
 
 
@@ -140,6 +152,13 @@ def optional_signal_type_select(connection):
     return "NULL AS signal_type"
 
 
+def optional_column_select(connection, column_name, fallback_sql):
+    if column_name in table_columns(connection):
+        return column_name
+
+    return f"{fallback_sql} AS {column_name}"
+
+
 def utc_now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -153,6 +172,25 @@ def is_no_edge_pick(pick):
         "No Edge (Pass)",
         "Not Tracked",
     ]
+
+
+def base_market_name(market):
+    text = str(market or "")
+    for suffix in [" Watch", " Lean"]:
+        if text.endswith(suffix):
+            return text[: -len(suffix)]
+
+    return text
+
+
+def tracking_segment_for_market(market):
+    text = str(market or "")
+    if text.endswith(" Watch"):
+        return "Watch"
+    if text.endswith(" Lean"):
+        return "Lean"
+
+    return TRACKING_SEGMENT_OFFICIAL
 
 
 def is_pregame_status(status):
@@ -231,14 +269,170 @@ def grade_team_pick(pick, result, completed_prefix):
 def grade_history_row(market, pick, result):
     if is_not_tracked_pick(pick):
         return "Not Tracked"
-    if str(market) == "1st Inning":
+    market_name = base_market_name(market)
+    if market_name == "1st Inning":
         return grade_first_inning(pick, result)
-    if str(market) == "First 5":
+    if market_name == "First 5":
         return grade_team_pick(pick, result, "After 5:")
-    if str(market) == "Full Game":
+    if market_name == "Full Game":
         return grade_team_pick(pick, result, "Final:")
 
     return "No Edge" if is_no_edge_pick(pick) else "Pending"
+
+
+def normalized_text(value):
+    return str(value or "").strip()
+
+
+def replace_home_away(value, away_team, home_team):
+    text = normalized_text(value)
+    if text.lower() == "away":
+        return away_team
+    if text.lower() == "home":
+        return home_team
+
+    return text or None
+
+
+def directional_team_label(row, winner_column, away_team, home_team):
+    winner = replace_home_away(row.get(winner_column, ""), away_team, home_team)
+    if is_no_edge_pick(winner):
+        return None
+
+    return winner
+
+
+def first_inning_discovery(row):
+    pick = row.get("First Inning Pick", "No Edge")
+    confidence = row.get("First Inning Confidence", "No Edge")
+    signal_type = normalized_text(row.get("First Inning Signal Type", "")).lower()
+    score = safe_float(row.get("First Inning Score"))
+
+    if not is_no_edge_pick(pick) or confidence != "No Edge" or score is None:
+        return None
+
+    nrfi_signals = ["one_sided_nrfi", "two_sided_nrfi", "mixed_yrfi_nrfi", "neutral"]
+    yrfi_signals = ["one_sided_yrfi", "two_sided_yrfi", "mixed_yrfi_nrfi", "neutral"]
+
+    if signal_type in nrfi_signals:
+        if 58 <= score <= 64:
+            return {
+                "base_market": "1st Inning",
+                "discovery_type": "Watch",
+                "discovery_side": "NRFI",
+                "discovery_label": "NRFI Watch",
+                "pick": "NRFI",
+                "confidence": "Watch",
+                "score": score,
+                "signal_type": signal_type,
+                "result": row.get("First Inning Result", "Pending"),
+            }
+        if 55 <= score <= 57:
+            return {
+                "base_market": "1st Inning",
+                "discovery_type": "Lean",
+                "discovery_side": "NRFI",
+                "discovery_label": "NRFI Lean",
+                "pick": "NRFI",
+                "confidence": "Lean",
+                "score": score,
+                "signal_type": signal_type,
+                "result": row.get("First Inning Result", "Pending"),
+            }
+
+    if signal_type in yrfi_signals:
+        if 25 <= score <= 34:
+            return {
+                "base_market": "1st Inning",
+                "discovery_type": "Watch",
+                "discovery_side": "YRFI",
+                "discovery_label": "YRFI Watch",
+                "pick": "YRFI",
+                "confidence": "Watch",
+                "score": score,
+                "signal_type": signal_type,
+                "result": row.get("First Inning Result", "Pending"),
+            }
+        if 35 <= score <= 39:
+            return {
+                "base_market": "1st Inning",
+                "discovery_type": "Lean",
+                "discovery_side": "YRFI",
+                "discovery_label": "YRFI Lean",
+                "pick": "YRFI",
+                "confidence": "Lean",
+                "score": score,
+                "signal_type": signal_type,
+                "result": row.get("First Inning Result", "Pending"),
+            }
+
+    return None
+
+
+def range_discovery_type(score, watch_min, watch_max, lean_min, lean_max):
+    if score is None:
+        return None
+    if watch_min <= score <= watch_max:
+        return "Watch"
+    if lean_min <= score <= lean_max:
+        return "Lean"
+
+    return None
+
+
+def f5_discovery(row, away_team, home_team):
+    if not is_no_edge_pick(row.get("F5 Pick", "No Edge")):
+        return None
+
+    score = safe_float(row.get("F5 Score"))
+    discovery_type = range_discovery_type(score, 7.0, 11.9, 4.0, 6.9)
+    if discovery_type is None:
+        return None
+
+    team = directional_team_label(row, "Starter Edge Winner", away_team, home_team)
+    if team is None:
+        team = directional_team_label(row, "Offensive Edge Winner", away_team, home_team)
+    if team is None:
+        return None
+
+    return {
+        "base_market": "First 5",
+        "discovery_type": discovery_type,
+        "discovery_side": team,
+        "discovery_label": f"{team} F5 {discovery_type}",
+        "pick": team,
+        "confidence": discovery_type,
+        "score": score,
+        "signal_type": None,
+        "result": row.get("F5 Result", "Pending"),
+    }
+
+
+def full_game_discovery(row, away_team, home_team):
+    if not is_no_edge_pick(row.get("Full Game Pick", "No Edge")):
+        return None
+
+    score = safe_float(row.get("Full Game Score"))
+    discovery_type = range_discovery_type(score, 6.5, 8.9, 4.0, 6.4)
+    if discovery_type is None:
+        return None
+
+    for winner_column in ["Starter Edge Winner", "Offensive Edge Winner", "Bullpen Edge Winner"]:
+        team = directional_team_label(row, winner_column, away_team, home_team)
+        if team is not None:
+            return {
+                "base_market": "Full Game",
+                "discovery_type": discovery_type,
+                "discovery_side": team,
+                "discovery_label": f"{team} Game {discovery_type}",
+                "pick": team,
+                "confidence": discovery_type,
+                "score": score,
+                "signal_type": None,
+                "result": row.get("Full Game Result", "Pending"),
+            }
+
+    return None
 
 
 def market_rows_for_game(row, slate_date, model_version):
@@ -257,6 +451,11 @@ def market_rows_for_game(row, slate_date, model_version):
             "signal_type": row.get("First Inning Signal Type", "neutral"),
             "result": row.get("First Inning Result", "Pending"),
             "status": status,
+            "tracking_segment": TRACKING_SEGMENT_OFFICIAL,
+            "base_market": "1st Inning",
+            "discovery_label": None,
+            "discovery_type": None,
+            "discovery_side": None,
         },
         {
             "model_version": model_version,
@@ -269,6 +468,11 @@ def market_rows_for_game(row, slate_date, model_version):
             "signal_type": None,
             "result": row.get("F5 Result", "Pending"),
             "status": status,
+            "tracking_segment": TRACKING_SEGMENT_OFFICIAL,
+            "base_market": "First 5",
+            "discovery_label": None,
+            "discovery_type": None,
+            "discovery_side": None,
         },
         {
             "model_version": model_version,
@@ -281,8 +485,42 @@ def market_rows_for_game(row, slate_date, model_version):
             "signal_type": None,
             "result": row.get("Full Game Result", "Pending"),
             "status": status,
+            "tracking_segment": TRACKING_SEGMENT_OFFICIAL,
+            "base_market": "Full Game",
+            "discovery_label": None,
+            "discovery_type": None,
+            "discovery_side": None,
         },
     ]
+
+    away_team, home_team = split_game_name(game)
+    for discovery in [
+        first_inning_discovery(row),
+        f5_discovery(row, away_team, home_team),
+        full_game_discovery(row, away_team, home_team),
+    ]:
+        if not discovery:
+            continue
+        segment = discovery["discovery_type"]
+        rows.append(
+            {
+                "model_version": model_version,
+                "slate_date": str(slate_date),
+                "game": game,
+                "market": f"{discovery['base_market']} {segment}",
+                "pick": discovery["pick"],
+                "confidence": discovery["confidence"],
+                "score": discovery["score"],
+                "signal_type": discovery["signal_type"],
+                "result": discovery["result"],
+                "status": status,
+                "tracking_segment": segment,
+                "base_market": discovery["base_market"],
+                "discovery_label": discovery["discovery_label"],
+                "discovery_type": segment,
+                "discovery_side": discovery["discovery_side"],
+            }
+        )
 
     for history_row in rows:
         history_row["locked_at"] = None
@@ -321,11 +559,13 @@ def record_model_history(games, slate_date, model_version, db_path=DB_PATH):
     with connect(db_path) as connection:
         init_db(connection)
         for _, row in games.iterrows():
-            for history_row in market_rows_for_game(row, slate_date, model_version):
+            history_rows = market_rows_for_game(row, slate_date, model_version)
+            active_markets = {history_row["market"] for history_row in history_rows}
+            for history_row in history_rows:
                 existing_row = fetch_one(
                     connection,
                     """
-                    SELECT market, pick, result, locked_at, snapshot_status
+                    SELECT market, pick, result, locked_at, snapshot_status, tracking_segment, base_market
                     FROM model_history
                     WHERE model_version = ?
                         AND slate_date = ?
@@ -349,9 +589,11 @@ def record_model_history(games, slate_date, model_version, db_path=DB_PATH):
                         INSERT INTO model_history (
                             model_version, slate_date, game, market, pick,
                             confidence, score, signal_type, result, outcome, status,
-                            created_at, updated_at, locked_at, snapshot_status
+                            created_at, updated_at, locked_at, snapshot_status,
+                            tracking_segment, base_market, discovery_label,
+                            discovery_type, discovery_side
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             insert_row["model_version"],
@@ -369,6 +611,11 @@ def record_model_history(games, slate_date, model_version, db_path=DB_PATH):
                             now,
                             insert_row["locked_at"],
                             insert_row["snapshot_status"],
+                            insert_row.get("tracking_segment") or tracking_segment_for_market(insert_row["market"]),
+                            insert_row.get("base_market") or base_market_name(insert_row["market"]),
+                            insert_row.get("discovery_label"),
+                            insert_row.get("discovery_type"),
+                            insert_row.get("discovery_side"),
                         ),
                     )
                     continue
@@ -416,7 +663,12 @@ def record_model_history(games, slate_date, model_version, db_path=DB_PATH):
                             outcome = ?,
                             status = ?,
                             updated_at = ?,
-                            snapshot_status = 'Pregame'
+                            snapshot_status = 'Pregame',
+                            tracking_segment = ?,
+                            base_market = ?,
+                            discovery_label = ?,
+                            discovery_type = ?,
+                            discovery_side = ?
                         WHERE model_version = ?
                             AND slate_date = ?
                             AND game = ?
@@ -431,6 +683,11 @@ def record_model_history(games, slate_date, model_version, db_path=DB_PATH):
                             history_row["outcome"],
                             history_row["status"],
                             now,
+                            history_row.get("tracking_segment") or tracking_segment_for_market(history_row["market"]),
+                            history_row.get("base_market") or base_market_name(history_row["market"]),
+                            history_row.get("discovery_label"),
+                            history_row.get("discovery_type"),
+                            history_row.get("discovery_side"),
                             history_row["model_version"],
                             history_row["slate_date"],
                             history_row["game"],
@@ -470,6 +727,24 @@ def record_model_history(games, slate_date, model_version, db_path=DB_PATH):
                         history_row["market"],
                     ),
                 )
+            placeholders = ", ".join("?" for _ in active_markets)
+            connection.execute(
+                f"""
+                DELETE FROM model_history
+                WHERE model_version = ?
+                    AND slate_date = ?
+                    AND game = ?
+                    AND COALESCE(tracking_segment, 'Official') IN ('Watch', 'Lean')
+                    AND COALESCE(snapshot_status, 'Pregame') = 'Pregame'
+                    AND market NOT IN ({placeholders})
+                """,
+                (
+                    model_version,
+                    str(slate_date),
+                    row.get("Game", ""),
+                    *active_markets,
+                ),
+            )
         connection.commit()
 
 
@@ -479,6 +754,7 @@ def build_history_filters(
     days=None,
     confidence=None,
     exact_date=None,
+    tracking_segment=TRACKING_SEGMENT_OFFICIAL,
 ):
     where_clause = "WHERE pick NOT IN ('No Edge', 'Pass', 'F5 Pass', 'Not Tracked')"
     params = []
@@ -487,8 +763,11 @@ def build_history_filters(
         where_clause += " AND model_version = ?"
         params.append(model_version)
     if market and market != "All":
-        where_clause += " AND market = ?"
+        where_clause += " AND COALESCE(base_market, market) = ?"
         params.append(market)
+    if tracking_segment and tracking_segment != "All":
+        where_clause += " AND COALESCE(tracking_segment, 'Official') = ?"
+        params.append(tracking_segment)
     if exact_date:
         where_clause += " AND slate_date = ?"
         params.append(str(exact_date))
@@ -508,6 +787,7 @@ def load_performance_summary(
     days=None,
     confidence=None,
     exact_date=None,
+    tracking_segment=TRACKING_SEGMENT_OFFICIAL,
     db_path=DB_PATH,
 ):
     if not using_remote_history() and not db_path.exists():
@@ -519,6 +799,7 @@ def load_performance_summary(
         days,
         confidence,
         exact_date,
+        tracking_segment,
     )
 
     with connect(db_path) as connection:
@@ -528,6 +809,8 @@ def load_performance_summary(
             f"""
             SELECT
                 market,
+                COALESCE(base_market, market) AS base_market,
+                COALESCE(tracking_segment, 'Official') AS tracking_segment,
                 pick,
                 result
             FROM model_history
@@ -544,9 +827,9 @@ def load_performance_summary(
 
     summary = {}
     for row in rows:
-        market_name = row["market"]
+        market_name = row["base_market"] or base_market_name(row["market"])
         outcome = grade_history_row(market_name, row["pick"], row["result"])
-        if outcome == "No Edge":
+        if outcome in ["No Edge", "Not Tracked"]:
             continue
 
         if market_name not in summary:
@@ -682,6 +965,11 @@ def load_performance_export_rows(model_version=None, db_path=DB_PATH):
     with connect(db_path) as connection:
         init_db(connection)
         signal_type_select = optional_signal_type_select(connection)
+        tracking_segment_select = optional_column_select(connection, "tracking_segment", "'Official'")
+        base_market_select = optional_column_select(connection, "base_market", "market")
+        discovery_label_select = optional_column_select(connection, "discovery_label", "NULL")
+        discovery_type_select = optional_column_select(connection, "discovery_type", "NULL")
+        discovery_side_select = optional_column_select(connection, "discovery_side", "NULL")
         rows = fetch_rows(
             connection,
             f"""
@@ -689,6 +977,11 @@ def load_performance_export_rows(model_version=None, db_path=DB_PATH):
                 model_version,
                 slate_date,
                 market,
+                {base_market_select},
+                {tracking_segment_select},
+                {discovery_label_select},
+                {discovery_type_select},
+                {discovery_side_select},
                 game,
                 pick,
                 confidence,
@@ -704,12 +997,18 @@ def load_performance_export_rows(model_version=None, db_path=DB_PATH):
             FROM model_history
             {where_clause}
             ORDER BY date(slate_date) DESC,
-                CASE market
+                CASE COALESCE(base_market, market)
                     WHEN '1st Inning' THEN 1
                     WHEN 'First 5' THEN 2
                     WHEN 'Full Game' THEN 3
                     ELSE 4
-            END,
+                END,
+                CASE COALESCE(tracking_segment, 'Official')
+                    WHEN 'Official' THEN 1
+                    WHEN 'Watch' THEN 2
+                    WHEN 'Lean' THEN 3
+                    ELSE 4
+                END,
                 game
             """,
             params,
@@ -719,7 +1018,7 @@ def load_performance_export_rows(model_version=None, db_path=DB_PATH):
     for row in rows:
         export_row = dict(row)
         export_row["outcome"] = grade_history_row(
-            export_row["market"],
+            export_row.get("base_market") or export_row["market"],
             export_row["pick"],
             export_row["result"],
         )
@@ -736,12 +1035,22 @@ def load_slate_history_rows(model_version, slate_date, db_path=DB_PATH):
     with connect(db_path) as connection:
         init_db(connection)
         signal_type_select = optional_signal_type_select(connection)
+        tracking_segment_select = optional_column_select(connection, "tracking_segment", "'Official'")
+        base_market_select = optional_column_select(connection, "base_market", "market")
+        discovery_label_select = optional_column_select(connection, "discovery_label", "NULL")
+        discovery_type_select = optional_column_select(connection, "discovery_type", "NULL")
+        discovery_side_select = optional_column_select(connection, "discovery_side", "NULL")
         return fetch_rows(
             connection,
             f"""
             SELECT
                 slate_date,
                 market,
+                {base_market_select},
+                {tracking_segment_select},
+                {discovery_label_select},
+                {discovery_type_select},
+                {discovery_side_select},
                 game,
                 pick,
                 confidence,
@@ -768,6 +1077,7 @@ def load_performance_details(
     days=None,
     confidence=None,
     exact_date=None,
+    tracking_segment=TRACKING_SEGMENT_OFFICIAL,
     limit=200,
     db_path=DB_PATH,
 ):
@@ -780,18 +1090,29 @@ def load_performance_details(
         days,
         confidence,
         exact_date,
+        tracking_segment,
     )
     params.append(limit)
 
     with connect(db_path) as connection:
         init_db(connection)
         signal_type_select = optional_signal_type_select(connection)
+        tracking_segment_select = optional_column_select(connection, "tracking_segment", "'Official'")
+        base_market_select = optional_column_select(connection, "base_market", "market")
+        discovery_label_select = optional_column_select(connection, "discovery_label", "NULL")
+        discovery_type_select = optional_column_select(connection, "discovery_type", "NULL")
+        discovery_side_select = optional_column_select(connection, "discovery_side", "NULL")
         rows = fetch_rows(
             connection,
             f"""
             SELECT
                 slate_date,
                 market,
+                {base_market_select},
+                {tracking_segment_select},
+                {discovery_label_select},
+                {discovery_type_select},
+                {discovery_side_select},
                 game,
                 pick,
                 confidence,
@@ -807,10 +1128,16 @@ def load_performance_details(
             FROM model_history
             {where_clause}
             ORDER BY date(slate_date) DESC,
-                CASE market
+                CASE COALESCE(base_market, market)
                     WHEN '1st Inning' THEN 1
                     WHEN 'First 5' THEN 2
                     WHEN 'Full Game' THEN 3
+                    ELSE 4
+                END,
+                CASE COALESCE(tracking_segment, 'Official')
+                    WHEN 'Official' THEN 1
+                    WHEN 'Watch' THEN 2
+                    WHEN 'Lean' THEN 3
                     ELSE 4
                 END,
                 game
@@ -823,7 +1150,7 @@ def load_performance_details(
     for row in rows:
         detail_row = dict(row)
         detail_row["outcome"] = grade_history_row(
-            detail_row["market"],
+            detail_row.get("base_market") or detail_row["market"],
             detail_row["pick"],
             detail_row["result"],
         )

@@ -69,7 +69,7 @@ MODEL_CACHE_VERSION = "edge-v2329-first-inning-sample-cap-refine"
 PERFORMANCE_TRACKING_VERSION = "2.3.29"
 FALLBACK_TIMEZONE = "America/New_York"
 MARKET_RELEASES = {
-    "MLB": "2.3.29",
+    "MLB": "2.3.30",
     "NFL": "1.0.0",
     "WNBA": "1.0.1-test",
     "NBA": "0.1.0-test",
@@ -1373,6 +1373,21 @@ def full_game_watch_label(row, away_team=None, home_team=None):
 
 
 def discovery_labels(row):
+    tracked_labels = get_row_value(row, "Tracked Discovery Labels", "")
+    if tracked_labels:
+        return [
+            label.strip()
+            for label in str(tracked_labels).split("|")
+            if label.strip()
+        ]
+
+    snapshot_status = str(get_row_value(row, "Snapshot Status", "")).strip()
+    game_status = str(get_row_value(row, "Status", "")).strip().lower()
+    if snapshot_status == "Not Tracked":
+        return []
+    if snapshot_status == "Locked" and game_status not in ["", "scheduled", "pre-game", "preview", "postponed"]:
+        return []
+
     away_team, home_team = split_game_name(get_row_value(row, "Game", ""))
     labels = [
         first_inning_watch_label(row),
@@ -2303,7 +2318,7 @@ def grade_history_team_pick(pick, result, completed_prefix):
 
 
 def grade_history_outcome(row):
-    market = str(row.get("market") or "")
+    market = str(row.get("base_market") or row.get("market") or "")
     if market == "1st Inning":
         return grade_history_first_inning(row.get("pick"), row.get("result"))
     if market == "First 5":
@@ -2314,19 +2329,23 @@ def grade_history_outcome(row):
     return "No Edge" if is_no_edge_pick(row.get("pick")) else "Pending"
 
 
-def summarize_history_rows(rows):
+def summarize_history_rows(rows, tracking_segment="Official"):
     summary = {}
     market_order = {"1st Inning": 1, "First 5": 2, "Full Game": 3}
 
     for row in rows:
+        row_segment = row.get("tracking_segment") or "Official"
+        if tracking_segment != "All" and row_segment != tracking_segment:
+            continue
         outcome = row.get("outcome") or grade_history_outcome(row)
         if outcome in ["No Edge", "Not Tracked"]:
             continue
 
-        market = row.get("market")
+        market = row.get("base_market") or row.get("market")
         if market not in summary:
             summary[market] = {
                 "market": market,
+                "tracking_segment": row_segment,
                 "total": 0,
                 "hits": 0,
                 "misses": 0,
@@ -2502,7 +2521,7 @@ def recompute_export_outcomes(rows):
 def history_row_matches_filters(row, market=None, days=None, confidence=None, exact_date=None):
     if is_no_edge_pick(row.get("pick")):
         return False
-    if market and market != "All" and row.get("market") != market:
+    if market and market != "All" and (row.get("base_market") or row.get("market")) != market:
         return False
     if confidence and confidence != "All" and row.get("confidence") != confidence:
         return False
@@ -2568,8 +2587,10 @@ def safe_load_performance_summary(
     days=None,
     confidence=None,
     exact_date=None,
+    tracking_segment="Official",
 ):
     rows = safe_load_performance_export_rows(model_version)
+    effective_confidence = confidence if tracking_segment == "Official" else "All"
     filtered_rows = [
         row
         for row in rows
@@ -2577,11 +2598,11 @@ def safe_load_performance_summary(
             row,
             market=market,
             days=days,
-            confidence=confidence,
+            confidence=effective_confidence,
             exact_date=exact_date,
         )
     ]
-    return summarize_history_rows(filtered_rows)
+    return summarize_history_rows(filtered_rows, tracking_segment=tracking_segment)
 
 
 def safe_load_slate_history_rows(model_version, slate_date):
@@ -2692,7 +2713,7 @@ def apply_tracked_snapshot_to_games(games, model_version, slate_date, history_ro
     }
 
     tracked_games = games.copy()
-    for column_name in ["Snapshot Status", "Locked At", "Snapshot Updated At"]:
+    for column_name in ["Snapshot Status", "Locked At", "Snapshot Updated At", "Tracked Discovery Labels"]:
         if column_name not in tracked_games.columns:
             tracked_games[column_name] = ""
 
@@ -2704,14 +2725,24 @@ def apply_tracked_snapshot_to_games(games, model_version, slate_date, history_ro
             if snapshot_game == game_name
         ]
         if game_snapshot_rows:
+            discovery_labels_for_game = [
+                snapshot_row.get("discovery_label")
+                for snapshot_row in game_snapshot_rows
+                if (snapshot_row.get("tracking_segment") or "Official") in ["Watch", "Lean"]
+                and snapshot_row.get("snapshot_status") != "Not Tracked"
+                and snapshot_row.get("discovery_label")
+            ]
+            tracked_games.at[index, "Tracked Discovery Labels"] = " | ".join(discovery_labels_for_game)
             if any(
                 snapshot_row.get("snapshot_status") == "Not Tracked"
                 for snapshot_row in game_snapshot_rows
+                if (snapshot_row.get("tracking_segment") or "Official") == "Official"
             ):
                 tracked_games.at[index, "Snapshot Status"] = "Not Tracked"
             elif any(
                 snapshot_row.get("snapshot_status") == "Locked"
                 for snapshot_row in game_snapshot_rows
+                if (snapshot_row.get("tracking_segment") or "Official") == "Official"
             ):
                 tracked_games.at[index, "Snapshot Status"] = "Locked"
             else:
@@ -2763,12 +2794,38 @@ def direct_load_performance_export_rows(model_version=None):
                 for row in connection.execute("PRAGMA table_info(model_history)").fetchall()
             }
             signal_type_select = "signal_type" if "signal_type" in columns else "NULL AS signal_type"
+            base_market_select = "base_market" if "base_market" in columns else "market AS base_market"
+            tracking_segment_select = (
+                "tracking_segment"
+                if "tracking_segment" in columns
+                else "'Official' AS tracking_segment"
+            )
+            discovery_label_select = (
+                "discovery_label"
+                if "discovery_label" in columns
+                else "NULL AS discovery_label"
+            )
+            discovery_type_select = (
+                "discovery_type"
+                if "discovery_type" in columns
+                else "NULL AS discovery_type"
+            )
+            discovery_side_select = (
+                "discovery_side"
+                if "discovery_side" in columns
+                else "NULL AS discovery_side"
+            )
             rows = connection.execute(
                 f"""
                 SELECT
                     model_version,
                     slate_date,
                     market,
+                    {base_market_select},
+                    {tracking_segment_select},
+                    {discovery_label_select},
+                    {discovery_type_select},
+                    {discovery_side_select},
                     game,
                     pick,
                     confidence,
@@ -2784,10 +2841,16 @@ def direct_load_performance_export_rows(model_version=None):
                 FROM model_history
                 {where_clause}
                 ORDER BY date(slate_date) DESC,
-                    CASE market
+                    CASE COALESCE(base_market, market)
                         WHEN '1st Inning' THEN 1
                         WHEN 'First 5' THEN 2
                         WHEN 'Full Game' THEN 3
+                        ELSE 4
+                    END,
+                    CASE COALESCE(tracking_segment, 'Official')
+                        WHEN 'Official' THEN 1
+                        WHEN 'Watch' THEN 2
+                        WHEN 'Lean' THEN 3
                         ELSE 4
                     END,
                     game
@@ -2947,6 +3010,23 @@ def render_model_performance(model_version, slate_date):
         days=days,
         confidence=confidence_filter,
         exact_date=exact_date,
+        tracking_segment="Official",
+    )
+    watch_summary_rows = safe_load_performance_summary(
+        selected_model_version,
+        market=market_filter,
+        days=days,
+        confidence="All",
+        exact_date=exact_date,
+        tracking_segment="Watch",
+    )
+    lean_summary_rows = safe_load_performance_summary(
+        selected_model_version,
+        market=market_filter,
+        days=days,
+        confidence="All",
+        exact_date=exact_date,
+        tracking_segment="Lean",
     )
 
     export_rows = safe_load_performance_export_rows(selected_model_version)
@@ -3002,25 +3082,9 @@ def render_model_performance(model_version, slate_date):
         else:
             st.caption("No performance history rows are available to export.")
 
-    if not summary_rows:
+    if not summary_rows and not watch_summary_rows and not lean_summary_rows:
         st.info("No graded model history found for the selected filters.")
         return
-
-    result_cards = []
-    for row in summary_rows:
-        completed = (row.get("hits") or 0) + (row.get("misses") or 0) + (row.get("pushes") or 0)
-        pending = row.get("pending") or 0
-        record = f"{row.get('hits') or 0}-{row.get('misses') or 0}"
-        if row.get("pushes"):
-            record = f"{record}-{row.get('pushes')}"
-        result_cards.append(
-            '<div class="performance-card">'
-            f'<div class="performance-market">{escape(row["market"])}</div>'
-            f'<div class="performance-hit-rate">{performance_hit_rate(row)}</div>'
-            f'<div class="performance-record">{escape(record)} record</div>'
-            f'<div class="performance-meta">{completed} completed - {pending} pending</div>'
-            '</div>'
-        )
 
     filter_text = f"{model_label} - {day_label}"
     if market_filter != "All":
@@ -3028,15 +3092,42 @@ def render_model_performance(model_version, slate_date):
     if confidence_filter != "All":
         filter_text += f" - {confidence_filter} confidence"
 
-    st.html(
-        '<div class="model-favorite top-looks">'
-        '<div class="model-label">MODEL PERFORMANCE</div>'
-        f'<div class="top-look-meta">{escape(filter_text)}</div>'
-        '<div class="performance-results">'
-        f'{"".join(result_cards)}'
-        '</div>'
-        '</div>'
-    )
+    def performance_section_html(title, rows, meta):
+        if not rows:
+            return ""
+
+        result_cards = []
+        for row in rows:
+            completed = (row.get("hits") or 0) + (row.get("misses") or 0) + (row.get("pushes") or 0)
+            pending = row.get("pending") or 0
+            record = f"{row.get('hits') or 0}-{row.get('misses') or 0}"
+            if row.get("pushes"):
+                record = f"{record}-{row.get('pushes')}"
+            result_cards.append(
+                '<div class="performance-card">'
+                f'<div class="performance-market">{escape(row["market"])}</div>'
+                f'<div class="performance-hit-rate">{performance_hit_rate(row)}</div>'
+                f'<div class="performance-record">{escape(record)} record</div>'
+                f'<div class="performance-meta">{completed} completed - {pending} pending</div>'
+                '</div>'
+            )
+
+        return (
+            '<div class="model-favorite top-looks">'
+            f'<div class="model-label">{escape(title)}</div>'
+            f'<div class="top-look-meta">{escape(meta)}</div>'
+            '<div class="performance-results">'
+            f'{"".join(result_cards)}'
+            '</div>'
+            '</div>'
+        )
+
+    sections = [
+        performance_section_html("MODEL PERFORMANCE", summary_rows, filter_text),
+        performance_section_html("WATCH PERFORMANCE", watch_summary_rows, f"{model_label} - {day_label}"),
+        performance_section_html("LEAN PERFORMANCE", lean_summary_rows, f"{model_label} - {day_label}"),
+    ]
+    st.html("".join(section for section in sections if section))
 
 
 def selected_sport():
