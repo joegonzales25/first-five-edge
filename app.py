@@ -2581,6 +2581,29 @@ def format_game_status_line(row):
     return base_line
 
 
+def format_local_card_time(row):
+    raw_value = row.get("Sort Date")
+    if raw_value in [None, "", "N/A"] or pd.isna(raw_value):
+        raw_value = row.get("Game Date")
+    if raw_value in [None, "", "N/A"] or pd.isna(raw_value):
+        return str(row.get("Game Time", "TBD"))
+
+    try:
+        parsed = pd.to_datetime(raw_value)
+        if parsed.tzinfo is None:
+            parsed = parsed.tz_localize(ZoneInfo(FALLBACK_TIMEZONE))
+        local_time = parsed.tz_convert(ZoneInfo(display_timezone))
+        hour = local_time.hour % 12 or 12
+        suffix = "AM" if local_time.hour < 12 else "PM"
+        timezone_name = local_time.tzname() or display_timezone
+        return (
+            f"{local_time.strftime('%a %b')} {local_time.day}, "
+            f"{hour}:{local_time.minute:02d} {suffix} {timezone_name}"
+        )
+    except Exception:
+        return str(row.get("Game Time", "TBD"))
+
+
 def safe_load_performance_summary(
     model_version=None,
     market=None,
@@ -4010,6 +4033,7 @@ def render_wnba_card(row, historical=False):
         half_label = "Early Edge"
     side_label = "Moneyline Edge" if sport == "NHL" else "Side Edge"
     scoring_label = "Goal Environment" if sport == "NHL" else "Scoring Environment"
+    game_time_display = format_local_card_time(row)
     result_line = ""
     if historical:
         result_line = f"""
@@ -4029,7 +4053,7 @@ def render_wnba_card(row, historical=False):
         <span class="badge badge-edge">Confidence {escape(str(row["Confidence"]))}</span>
 
         <div class="game-title">{escape(str(row["Game"]))}</div>
-        <div class="muted">{escape(str(row["Game Time"]))} - {escape(str(row["Status"]))}</div>
+        <div class="muted">{escape(str(game_time_display))} - {escape(str(row["Status"]))}</div>
 
         <div class="decision-stack">
             <div class="decision-line decision-first">{escape(side_label)}: {escape(str(row["Side Edge"]))}</div>
