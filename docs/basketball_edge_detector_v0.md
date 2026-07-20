@@ -42,8 +42,9 @@ Lean
 No Edge
 ```
 
-Official picks are locked and graded. Watches and leans are discovery signals
-only until validated by tracked history.
+Official picks are locked and graded as the production record. Watches and
+leans may be stored and graded as discovery performance, but they must be
+reported separately from official pick hit rate.
 
 Historical rows should preserve a market-specific version of the shared fields:
 
@@ -173,17 +174,17 @@ selected.
 
 ## Watch And Lean Rules
 
-Watches and leans are discovery only:
+Watches and leans are graded discovery signals:
 
 ```text
-Watch = strong non-pick signal below official threshold
-Lean = weaker directional read below Watch strength
+Watch = model sees something worth monitoring, but it is not close enough to an official pick
+Lean = stronger than a Watch; direction is clear, but one official-pick requirement is still missing
 ```
 
 They should appear in the analysis layer and may be filtered in the UI, but they
-should not be counted in official performance.
+must be reported separately from official pick performance.
 
-Discovery performance can be tracked separately once enough rows exist.
+Discovery performance can be stored and graded once enough rows exist.
 
 ## Snapshot And Lock Rules
 

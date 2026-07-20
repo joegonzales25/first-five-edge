@@ -2,6 +2,11 @@
 
 Edge Detector is a market intelligence shell for repeatable model development, signal tracking, and performance review. Model outputs are informational only. They are not betting advice, staking guidance, bankroll guidance, or instructions to wager.
 
+Shared user-facing terminology is maintained in
+`docs/edge_detector_user_guide.md`. Market-specific docs may add details, but
+they should not redefine Official Pick, Lean, Watch, No Edge, Pending, Locked,
+Not Tracked, or Snapshot as of.
+
 ## Product Hierarchy
 
 ```text
@@ -226,14 +231,18 @@ Model baseline:
 
 ```text
 Prediction-logic version.
-Bump when model inputs, weights, signal rules, or grading assumptions change.
+Bump when model inputs, weights, thresholds, confidence gates, or signal rules change.
 ```
 
 Pure copy or visual cleanup does not require a market/model version bump unless it changes how users evaluate that market.
 
+Market-release changes include grading rules, snapshot rules, exported fields,
+UI contract changes, performance definitions, and Watch/Lean tracking behavior.
+
 Watch/Lean display layers do not require a model baseline bump when they are
-derived from existing model outputs and remain ungraded. They may require a
-market release note if they change the user-facing market workflow.
+derived from existing model outputs. They do require a market release note when
+they become stored, graded, filtered, exported, or otherwise change the
+user-facing performance contract.
 
 ## Database Strategy
 
@@ -415,8 +424,9 @@ Definitions:
 
 ```text
 Current Read: latest model output before event lock; can change.
-Tracked Pick: official frozen pick used for performance.
-Locked Pick: tracked pick after the event has reached lock.
+Official Pick: production signal that clears the market's pick gate.
+Tracked Discovery Signal: stored Watch or Lean used for discovery performance.
+Locked Pick: stored official pick after the event has reached lock.
 Not Tracked: event started or resolved before a valid pre-lock snapshot existed.
 Result: resolved event outcome.
 ```
@@ -427,11 +437,13 @@ Universal rules:
 1. Current reads may update until event lock.
 2. At lock, pick, confidence, score, and signal metadata freeze.
 3. After lock, only result, status, outcome, and updated timestamp may change.
-4. Performance cards grade locked tracked picks only.
-5. Event/game cards must show the same locked pick that performance grades.
-6. If no pre-lock snapshot exists, mark the row Not Tracked and exclude it from performance.
-7. Current/live recalculated reads may be shown after lock only if clearly labeled Current Read.
-8. The UI must show global snapshot freshness and per-event lock state for every current-slate market.
+4. Performance cards grade stored official picks, stored Watches, and stored Leans only.
+5. Official Pick, Lean, and Watch performance must be reported separately.
+6. Event/game cards must show the same locked official pick that official performance grades.
+7. If no pre-lock snapshot exists, mark the row Not Tracked and exclude it from all performance segments.
+8. Current/live recalculated reads may be shown after lock only if clearly labeled Current Read.
+9. The UI must show global snapshot freshness and per-event lock state for every current-slate market.
+10. Missing snapshots must not remain Pending after the event is complete.
 ```
 
 Default lock timing:
@@ -466,21 +478,23 @@ Scheduling rule:
 ```text
 Streamlit page loads are not scheduled snapshots.
 Use an external scheduler, initially GitHub Actions, to refresh pregame snapshots.
-Run every 10-15 minutes during the active market window until per-event lock logic is mature.
+Only active in-season or actively monitored markets should have scheduled
+snapshot workflows enabled. Off-season and planning markets may keep manual
+snapshot workflows for testing.
 ```
 
 ### Watch and Lean Discovery Layer
 
-Watch and Lean labels are a product discovery layer, not tracked picks. They
-help users review near-threshold model reads without changing the model baseline
-or polluting performance records.
+Watch and Lean labels are product discovery signals. They help users review
+near-threshold model reads without blending those reads into official pick
+performance.
 
 Definitions:
 
 ```text
 Pick: official tracked model signal; locked and graded.
-Watch: strong non-pick signal below the pick threshold; not graded.
-Lean: weaker directional read; not graded.
+Watch: model sees something worth monitoring, but it is not close enough to an official pick.
+Lean: stronger than a Watch; model direction is clear, but one requirement still blocks an official pick.
 No Edge: no official pick, watch, or lean.
 ```
 
@@ -488,11 +502,13 @@ Universal rules:
 
 ```text
 1. Watch and Lean labels must be derived from existing model output fields unless a model change is explicitly approved.
-2. Watch and Lean rows are excluded from performance summaries, hit rates, and Top signal promotion logic.
-3. Watch and Lean labels must not be stored as official picks in market performance tables.
-4. Event/game cards may display Watch and Lean labels only if clearly separated from Picks.
-5. Filters may expose Watch and Lean views for review, but those views are discovery views.
-6. Promotion from Watch/Lean to Pick requires tracked review and a confirmed model baseline change.
+2. Stored Watch and Lean rows may be graded for discovery performance.
+3. Watch and Lean performance must never be blended into official pick hit rate.
+4. Watch and Lean labels must not be stored as official picks in market performance tables.
+5. Event/game cards may display Watch and Lean labels only if clearly separated from Picks.
+6. Filters may expose Watch and Lean views for review, but those views are discovery views.
+7. Promotion from Watch/Lean to Pick requires tracked discovery history and a confirmed model or market release change.
+8. Old Watch/Lean history remains discovery history unless an explicit migration is approved.
 ```
 
 Initial MLB discovery thresholds:
@@ -636,6 +652,74 @@ no major data-quality failures
 ```
 
 No market should add a `Top` signal cut until tracked performance proves which signal bands deserve that label.
+
+## Data and Release Lockdown Status
+
+The approved lockdown strategy is market-specific.
+
+MLB:
+
+```text
+Status: production candidate.
+Data source of truth: stored snapshot history.
+Lock rule: 1st Inning, First 5, and Full Game lock at market/game start.
+Performance: official picks, leans, and watches report separately.
+Next gate: final reconciliation audit across cards, history, exports, and performance cards.
+```
+
+WNBA:
+
+```text
+Status: active monitored test market.
+Schedule: hourly during active monitoring.
+Data source of truth: stored WNBA snapshot history.
+Performance: official side/scoring signals report separately from stored leans/watches when implemented.
+Next gate: completed-slate audit to confirm cards, exports, and performance reconcile.
+```
+
+NBA:
+
+```text
+Status: test/planning.
+Schedule: disabled until closer to season.
+Data source of truth: separate NBA history table once active.
+Next gate: manual snapshot and completed-game grading validation before scheduled tracking.
+```
+
+NHL:
+
+```text
+Status: test/planning.
+Schedule: disabled until closer to season.
+Data source of truth: separate NHL history table once active.
+Next gate: confirm launch markets and validate live-season data before scheduled tracking.
+```
+
+CBB:
+
+```text
+Status: v0 framework.
+Schedule: manual only until data/source validation.
+Data source of truth: separate CBB history table once active.
+Next gate: validate season data, full-game settlement, and first-half data quality before official grading.
+```
+
+PGA:
+
+```text
+Status: documented and paused.
+Schedule: none.
+Data source of truth: not selected.
+Next gate: data-source verification for field list, finish position, cut result, and market settlement.
+```
+
+NFL:
+
+```text
+Status: needs classification.
+Schedule: not approved for production tracking until classification is complete.
+Next gate: decide whether NFL is production, tracked test, or lab-only.
+```
 
 ## Release Checklist
 

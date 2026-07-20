@@ -62,8 +62,9 @@ Lean
 No Edge
 ```
 
-Official picks are locked and graded. Watches and leans are discovery signals
-only until validated by tracked history.
+Official picks are locked and graded as the production record. Watches and
+leans may be stored and graded as discovery performance, but they must be
+reported separately from official pick hit rate.
 
 PGA historical rows should preserve a market-specific version of the shared
 fields:

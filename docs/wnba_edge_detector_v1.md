@@ -336,6 +336,15 @@ After lock, only result, status, outcome, and updated timestamp should change.
 Performance must match the locked WNBA game card.
 ```
 
+Watch/Lean rule:
+
+```text
+Official WNBA picks remain the production performance record.
+Stored WNBA Watches and Leans may be graded as discovery performance once implemented.
+Watch and Lean performance must be reported separately from official pick hit rate.
+WNBA Watch/Lean thresholds must be defined from WNBA history, not inherited from MLB.
+```
+
 WNBA version fields:
 
 ```text
