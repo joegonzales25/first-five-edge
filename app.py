@@ -4287,7 +4287,7 @@ def wnba_data_contract_text():
 
 
 def render_wnba_current():
-    default_date = current_date_for_timezone(FALLBACK_TIMEZONE)
+    default_date = current_date_for_timezone(display_timezone)
     selected_date = st.date_input(
         "Slate Date",
         value=default_date,
@@ -6162,6 +6162,10 @@ def load_games(selected_date, model_cache_version, display_timezone):
     return get_today_games(selected_date.isoformat(), display_timezone)
 
 
+display_timezone, timezone_detected = detect_browser_timezone()
+default_slate_date = current_date_for_timezone(display_timezone)
+max_slate_date = default_slate_date + timedelta(days=1)
+
 active_sport = selected_sport()
 render_sport_picker(active_sport)
 
@@ -6191,10 +6195,6 @@ if active_sport != "MLB":
     st.stop()
 
 st.title("⚾ MLB Edge Detector")
-
-display_timezone, timezone_detected = detect_browser_timezone()
-default_slate_date = current_date_for_timezone(display_timezone)
-max_slate_date = default_slate_date + timedelta(days=1)
 
 st.sidebar.title("Controls")
 st.sidebar.caption(f"Model version: {APP_VERSION}")
