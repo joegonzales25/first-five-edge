@@ -38,6 +38,9 @@ from cbb_agent import (
     backtest_schedule as build_cbb_historical_lab,
     historical_summary_tables as cbb_historical_summary_tables,
 )
+from mls_agent import (
+    build_current_slate as build_mls_current_slate,
+)
 from wnba_model_history import (
     load_wnba_history,
     load_wnba_performance_tables,
@@ -58,6 +61,10 @@ from cbb_model_history import (
     load_cbb_performance_tables,
     load_cbb_performance_summary,
 )
+from mls_model_history import (
+    load_mls_history,
+    load_mls_performance_summary,
+)
 from model_history import (
     load_slate_history_rows,
 )
@@ -75,6 +82,7 @@ MARKET_RELEASES = {
     "NBA": "0.1.0-test",
     "NHL": "0.1.0-test",
     "CBB": "0.1.0-test",
+    "MLS": "0.1.0-test",
 }
 MODEL_BASELINES = {
     "MLB": "2.3.29",
@@ -83,6 +91,7 @@ MODEL_BASELINES = {
     "NBA": "0.1.0-test",
     "NHL": "0.1.0-test",
     "CBB": "0.1.0-test",
+    "MLS": "0.1.0-test",
 }
 SPORT_CONFIG = {
     "MLB": {"enabled": True},
@@ -91,6 +100,7 @@ SPORT_CONFIG = {
     "NBA": {"enabled": True},
     "NHL": {"enabled": True},
     "CBB": {"enabled": True},
+    "MLS": {"enabled": True},
 }
 
 team_logo_map = {
@@ -2703,6 +2713,23 @@ def safe_load_cbb_slate_history_rows(model_version, market_version, slate_date):
     ]
 
 
+def safe_load_mls_slate_history_rows(model_version, market_version, slate_date):
+    try:
+        rows = load_mls_history(
+            model_version=model_version,
+            market_version=market_version,
+        )
+    except Exception:
+        return []
+
+    target_date = str(slate_date)
+    return [
+        row
+        for row in rows
+        if str(row.get("slate_date", "")) == target_date
+    ]
+
+
 def apply_tracked_snapshot_to_games(games, model_version, slate_date, history_rows=None):
     history_rows = (
         history_rows
@@ -3549,6 +3576,46 @@ def render_cbb_view_pills(active_view):
     st.html(f'<div class="wnba-filter-grid">{"".join(pills)}</div>')
 
 
+def selected_mls_view(default_view="all"):
+    view = str(get_query_param("view") or get_query_param("filter") or default_view).lower()
+    valid_views = {
+        "all",
+        "top",
+        "double_chance",
+        "full_match",
+        "goals",
+        "btts",
+        "first_half",
+        "perf",
+    }
+    if view not in valid_views:
+        return default_view
+    return view
+
+
+def render_mls_view_pills(active_view):
+    options = [
+        ("All", "all"),
+        ("Top", "top"),
+        ("DC", "double_chance"),
+        ("Match", "full_match"),
+        ("Goals", "goals"),
+        ("BTTS", "btts"),
+        ("1H", "first_half"),
+        ("Perf", "perf"),
+    ]
+    pills = []
+    for label, value in options:
+        classes = ["wnba-filter-card"]
+        if value == active_view:
+            classes.append("active")
+        pills.append(
+            f'<a class="{" ".join(classes)}" href="{query_link({"sport": "MLS", "mode": "current", "view": value, "filter": None})}">'
+            f'{escape(label)}</a>'
+        )
+    st.html(f'<div class="wnba-filter-grid">{"".join(pills)}</div>')
+
+
 def render_nhl_mode_pills(active_mode):
     options = [("Current Slate", "current"), ("Historical Lab", "lab")]
     pills = []
@@ -3634,7 +3701,10 @@ def render_sport_picker(active_sport):
 def nfl_signal_class(row):
     if row["Model Signal"] == "Pass":
         return "badge-pass"
-    if row["Scoring Edge"] != "Neutral Scoring Environment":
+    if row["Scoring Edge"] not in [
+        "Neutral Scoring Environment",
+        "Neutral Goals Environment",
+    ]:
         return "badge-f5"
     return "badge-nrfi"
 
@@ -3989,17 +4059,42 @@ def render_wnba_result_strip(row):
     status = str(row.get("Status", "Scheduled"))
     side_result = row.get("Side Result") or row.get("Winner Result") or "Pending"
     scoring_result = row.get("Scoring Result") or "Pending"
-    side_label = "Moneyline" if sport == "NHL" else "Side"
-    scoring_label = "Goal Env" if sport == "NHL" else "Scoring"
+    full_match_result = row.get("Winner Result") or "Pending"
+    btts_result = row.get("BTTS Result") or "Pending"
+    if sport == "NHL":
+        side_label = "Moneyline"
+        scoring_label = "Goal Env"
+    elif sport == "MLS":
+        side_label = "Double Chance"
+        scoring_label = "Goals"
+    else:
+        side_label = "Side"
+        scoring_label = "Scoring"
 
     if status != "Final":
         side_result = "Pending" if row.get("Side Edge") != "Pass" else "No Signal"
         if sport == "NHL":
             scoring_result = "No Signal"
         else:
+            neutral_scoring = (
+                "Neutral Goals Environment"
+                if sport == "MLS"
+                else "Neutral Scoring Environment"
+            )
             scoring_result = (
                 "Pending"
-                if row.get("Scoring Edge") != "Neutral Scoring Environment"
+                if row.get("Scoring Edge") != neutral_scoring
+                else "No Signal"
+            )
+        if sport == "MLS":
+            full_match_result = (
+                "Pending"
+                if row.get("Full Match Edge") != "Pass"
+                else "No Signal"
+            )
+            btts_result = (
+                "Pending"
+                if row.get("BTTS Edge") != "Pass"
                 else "No Signal"
             )
 
@@ -4011,12 +4106,20 @@ def render_wnba_result_strip(row):
             f' - {escape(str(row.get("Home")))} {escape(str(row.get("Home Score")))}</span></div>'
         )
 
+    extra_results = ""
+    if sport == "MLS":
+        extra_results = (
+            f'<div class="reason-item"><span>Full Match: {escape(str(full_match_result))}</span>{wnba_result_icon(full_match_result)}</div>'
+            f'<div class="reason-item"><span>BTTS: {escape(str(btts_result))}</span>{wnba_result_icon(btts_result)}</div>'
+        )
+
     return (
         '<div class="key-factors">'
         '<div class="market-heading">Model Results</div>'
         '<div class="reason-stack">'
         f'<div class="reason-item"><span>{escape(side_label)}: {escape(str(side_result))}</span>{wnba_result_icon(side_result)}</div>'
         f'<div class="reason-item"><span>{escape(scoring_label)}: {escape(str(scoring_result))}</span>{wnba_result_icon(scoring_result)}</div>'
+        f'{extra_results}'
         f'{score_line}'
         '</div>'
         '</div>'
@@ -4029,10 +4132,33 @@ def render_wnba_card(row, historical=False):
         half_label = "First Half"
     elif sport == "NHL":
         half_label = "First Period"
+    elif sport == "MLS":
+        half_label = "First Half"
     else:
         half_label = "Early Edge"
-    side_label = "Moneyline Edge" if sport == "NHL" else "Side Edge"
-    scoring_label = "Goal Environment" if sport == "NHL" else "Scoring Environment"
+    if sport == "NHL":
+        side_label = "Moneyline Edge"
+        scoring_label = "Goal Environment"
+    elif sport == "MLS":
+        side_label = "Double Chance Edge"
+        scoring_label = "Goals Environment"
+    else:
+        side_label = "Side Edge"
+        scoring_label = "Scoring Environment"
+    extra_decisions = ""
+    if sport == "MLS":
+        extra_decisions = (
+            f'<div class="decision-line decision-first">Full Match: {escape(str(row.get("Full Match Edge", "Pass")))}</div>'
+            f'<div class="decision-line decision-f5">BTTS: {escape(str(row.get("BTTS Edge", "Pass")))}</div>'
+        )
+    extra_model_rows = ""
+    if sport == "MLS":
+        extra_model_rows = f"""
+        | Full Match | {row.get("Full Match Edge", "N/A")} |
+        | Full Match Result | {row.get("Winner Result", "Pending")} |
+        | BTTS | {row.get("BTTS Edge", "N/A")} |
+        | BTTS Result | {row.get("BTTS Result", "Pending")} |
+        """
     game_time_display = format_local_card_time(row)
     result_line = ""
     if historical:
@@ -4059,6 +4185,7 @@ def render_wnba_card(row, historical=False):
             <div class="decision-line decision-first">{escape(side_label)}: {escape(str(row["Side Edge"]))}</div>
             <div class="decision-line decision-f5">{escape(scoring_label)}: {escape(str(row["Scoring Edge"]))}</div>
             <div class="decision-line decision-full">{escape(half_label)}: {escape(str(row["Early Edge"]))}</div>
+            {extra_decisions}
         </div>
 
         {render_wnba_result_strip(row)}
@@ -4082,6 +4209,7 @@ def render_wnba_card(row, historical=False):
         | {side_label} Result | {row.get("Side Result", row.get("Winner Result", "Pending"))} |
         | {scoring_label} | {row["Scoring Edge"]} |
         | {scoring_label} Result | {row.get("Scoring Result", "Pending")} |
+        {extra_model_rows}
         | {half_label} | {row["Early Edge"]} |
         | Edge Score | {row["Edge Score"]} |
         | Confidence | {row["Confidence"]} |
@@ -4122,6 +4250,24 @@ def filter_wnba_games(games, view):
         filtered = filtered[filtered["Side Edge"] != "Pass"]
     elif view == "scoring":
         filtered = filtered[filtered["Scoring Edge"] != "Neutral Scoring Environment"]
+    return filtered
+
+
+def filter_mls_games(games, view):
+    filtered = games.copy()
+    if view == "top":
+        filtered = filtered[
+            (filtered["Model Signal"] != "Pass")
+            & (filtered["Confidence"].isin(["A", "B"]))
+        ]
+    elif view == "double_chance":
+        filtered = filtered[filtered["Side Edge"] != "Pass"]
+    elif view == "full_match":
+        filtered = filtered[filtered["Full Match Edge"] != "Pass"]
+    elif view == "goals":
+        filtered = filtered[filtered["Scoring Edge"] != "Neutral Goals Environment"]
+    elif view == "btts":
+        filtered = filtered[filtered["BTTS Edge"] != "Pass"]
     return filtered
 
 
@@ -5628,6 +5774,174 @@ def render_cbb_page():
         render_cbb_historical()
 
 
+def render_mls_current():
+    default_date = current_date_for_timezone(FALLBACK_TIMEZONE)
+    selected_date = st.date_input(
+        "Slate Date",
+        value=default_date,
+        format="MM/DD/YYYY",
+        key="mls_slate_date",
+    )
+    selected_view = selected_mls_view("all")
+    slate = pd.DataFrame()
+    slate_error = None
+    try:
+        slate, _ = load_mls_current(selected_date)
+    except Exception as exc:
+        slate_error = exc
+
+    mls_history_rows = safe_load_mls_slate_history_rows(
+        MODEL_BASELINES["MLS"],
+        MARKET_RELEASES["MLS"],
+        selected_date,
+    )
+
+    render_mls_view_pills(selected_view)
+
+    if selected_view == "perf":
+        st.caption("Performance history")
+        st.caption(format_snapshot_caption(mls_history_rows))
+        st.divider()
+        render_mls_performance_section()
+        return
+
+    if slate_error is not None:
+        st.error(f"Could not load MLS current slate: {slate_error}")
+        return
+
+    if slate.empty:
+        st.info("No MLS regular-season games found for the selected slate date.")
+        return
+
+    if selected_view == "first_half":
+        filtered_count = 0
+    else:
+        filtered_count = len(filter_mls_games(slate, selected_view))
+    st.caption(f"{filtered_count} of {len(slate)}")
+    st.caption(format_snapshot_caption(mls_history_rows))
+    st.divider()
+
+    if selected_view == "first_half":
+        st.info("MLS First Half is visible as Model Pending until a reliable halftime-result feed and grading rule are added.")
+        return
+
+    filtered = filter_mls_games(slate, selected_view)
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Games", len(slate))
+    c2.metric("Model Signals", len(slate[slate["Model Signal"] != "Pass"]))
+    c3.metric("Double Chance", len(slate[slate["Side Edge"] != "Pass"]))
+    c4.metric(
+        "Goal Signals",
+        len(slate[slate["Scoring Edge"] != "Neutral Goals Environment"]),
+    )
+
+    if filtered.empty:
+        st.info("No MLS games match the selected view.")
+        return
+
+    for _, row in filtered.iterrows():
+        render_wnba_card(row)
+
+
+def render_mls_performance_section():
+    st.markdown("### MLS Performance")
+    model_version = MODEL_BASELINES["MLS"]
+    market_version = MARKET_RELEASES["MLS"]
+    summary = load_mls_performance_summary(
+        model_version=model_version,
+        market_version=market_version,
+    )
+    storage_backend = summary.get("storage_backend", "Unavailable")
+    storage_path = summary.get("db_path", "N/A")
+
+    if summary["snapshots"] == 0:
+        st.info("No MLS performance snapshots recorded yet. Run the MLS snapshot script after approving a snapshot cadence.")
+        return
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Snapshots", summary["snapshots"])
+    c2.metric("Completed", summary["completed"])
+    c3.metric(
+        "Double Chance",
+        f"{summary['double_chance_signal_accuracy']:.1%}",
+        help=f"{summary['double_chance_signal_games']} signals",
+    )
+    c4.metric(
+        "Full Match",
+        f"{summary['full_match_signal_accuracy']:.1%}",
+        help=f"{summary['full_match_signal_games']} signals",
+    )
+
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric(
+        "Goals",
+        f"{summary['goals_signal_accuracy']:.1%}",
+        help=f"{summary['goals_signal_games']} signals",
+    )
+    c6.metric(
+        "BTTS",
+        f"{summary['btts_signal_accuracy']:.1%}",
+        help=f"{summary['btts_signal_games']} discovery signals",
+    )
+    c7.metric("Margin MAE", summary["margin_mae"])
+    c8.metric("Total MAE", summary["total_mae"])
+
+    st.caption(f"Storage Backend: {storage_backend}")
+    st.caption(f"Storage: {storage_path}")
+
+
+def render_mls_model_info_sidebar():
+    st.sidebar.title("MLS Controls")
+    st.sidebar.caption(f"Market release: {MARKET_RELEASES['MLS']}")
+    st.sidebar.caption(f"Model baseline: {MODEL_BASELINES['MLS']}")
+    tracking_summary = load_mls_performance_summary(
+        model_version=MODEL_BASELINES["MLS"],
+        market_version=MARKET_RELEASES["MLS"],
+    )
+    storage_backend = tracking_summary.get("storage_backend", "Unavailable")
+    storage_path = tracking_summary.get("db_path", "N/A")
+
+    with st.sidebar.expander("MLS Model Info"):
+        st.markdown(f"""
+**Model Scope**: MLS regular season only
+
+**Primary Market**: Double Chance
+
+**Secondary Markets**: Full Match Result and Goals Environment
+
+**Discovery**: BTTS
+
+**First Half**: placeholder until a reliable halftime-result feed is added
+
+**MLS Tracking**: separate MLS-only history table
+
+**Snapshots**: {tracking_summary["snapshots"]}
+
+**Completed**: {tracking_summary["completed"]}
+
+**Tracking Writes**: manual snapshot workflow until a cadence is approved
+
+**Storage Backend**: {escape(storage_backend)}
+
+**Storage**: `{escape(storage_path)}`
+
+**Current Status**: Current slate views are All, Top, DC, Match, Goals, BTTS, 1H, and Perf.
+""")
+
+
+def render_mls_page():
+    st.title("MLS Edge Detector")
+    mode = selected_nfl_mode()
+
+    render_mls_model_info_sidebar()
+
+    if mode == "current":
+        render_mls_current()
+    else:
+        st.info("MLS Historical Lab is pending for v0. Current slate snapshots and performance tracking are active.")
+
+
 def render_nhl_current():
     default_date = current_date_for_timezone(FALLBACK_TIMEZONE)
     selected_date = st.date_input(
@@ -6138,6 +6452,15 @@ def load_cbb_current(selected_date):
 
 
 @st.cache_data(ttl=900)
+def load_mls_current(selected_date):
+    return build_mls_current_slate(
+        today=selected_date,
+        days_ahead=0,
+        slate_date=selected_date,
+    )
+
+
+@st.cache_data(ttl=900)
 def load_wnba_current_lab():
     return build_wnba_current_season_lab()
 
@@ -6187,6 +6510,10 @@ if active_sport == "NHL":
 
 if active_sport == "CBB":
     render_cbb_page()
+    st.stop()
+
+if active_sport == "MLS":
+    render_mls_page()
     st.stop()
 
 if active_sport != "MLB":
