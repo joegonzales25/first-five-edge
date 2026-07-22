@@ -291,6 +291,10 @@ Primary source: ESPN soccer / MLS scoreboard and history endpoints
 Fallback source: TBD only if ESPN proves insufficient
 ```
 
+ESPN soccer can expose MLS regular-season rows with soccer-specific season type
+values. The v0 loader allows ESPN season types `1` and `2`, plus missing season
+type, while still excluding other competitions when ESPN marks them separately.
+
 ## Approved V0 Decisions
 
 The following decisions are approved for v0:

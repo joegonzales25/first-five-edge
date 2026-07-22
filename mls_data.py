@@ -7,6 +7,7 @@ import requests
 ESPN_MLS_SCOREBOARD_URL = (
     "https://site.api.espn.com/apis/site/v2/sports/soccer/usa.1/scoreboard"
 )
+ESPN_MLS_REGULAR_SEASON_TYPES = {None, 1, 2}
 
 
 def date_range_param(start_date: date, end_date: date) -> str:
@@ -59,7 +60,7 @@ def normalize_mls_events(events: list[dict]) -> pd.DataFrame:
         season = event.get("season") or {}
         season_type = season.get("type")
 
-        if season_type not in [None, 2]:
+        if season_type not in ESPN_MLS_REGULAR_SEASON_TYPES:
             continue
 
         rows.append(
