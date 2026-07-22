@@ -1,6 +1,8 @@
 name: MLS Slate Snapshot
 
 on:
+  schedule:
+    - cron: "0 * * * *"
   workflow_dispatch:
     inputs:
       slate_date:

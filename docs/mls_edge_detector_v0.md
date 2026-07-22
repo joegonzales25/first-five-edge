@@ -312,8 +312,8 @@ MLS v0 uses:
 
 ```text
 Source: ESPN MLS scoreboard
-Storage: mls_model_history, separate from every other market
+Storage: Turso-backed mls_model_history, separate from every other market
 Snapshot command: snapshot_mls_slate.py
 UI: MLS sport pill with current slate, snapshot freshness, game cards, and performance summary
-Schedule: not enabled until cadence is approved
+Schedule: hourly GitHub Actions cron, with manual dispatch still available
 ```
