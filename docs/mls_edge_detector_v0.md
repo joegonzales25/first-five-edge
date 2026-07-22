@@ -292,8 +292,9 @@ Fallback source: TBD only if ESPN proves insufficient
 ```
 
 ESPN soccer can expose MLS regular-season rows with soccer-specific season type
-values. The v0 loader allows ESPN season types `1` and `2`, plus missing season
-type, while still excluding other competitions when ESPN marks them separately.
+values. The v0 loader trusts ESPN's `regular-season` slug first, and keeps
+known numeric regular-season types as a fallback. As of the July 22, 2026 slate,
+ESPN exposes MLS regular-season events with season type `13846`.
 
 ## Approved V0 Decisions
 

@@ -7,7 +7,16 @@ import requests
 ESPN_MLS_SCOREBOARD_URL = (
     "https://site.api.espn.com/apis/site/v2/sports/soccer/usa.1/scoreboard"
 )
-ESPN_MLS_REGULAR_SEASON_TYPES = {None, 1, 2}
+ESPN_MLS_REGULAR_SEASON_TYPES = {None, 1, 2, 13846}
+
+
+def is_regular_season_event(season: dict) -> bool:
+    season_slug = str(season.get("slug") or "").strip().lower()
+    if season_slug == "regular-season":
+        return True
+    if season_slug:
+        return False
+    return season.get("type") in ESPN_MLS_REGULAR_SEASON_TYPES
 
 
 def date_range_param(start_date: date, end_date: date) -> str:
@@ -60,7 +69,7 @@ def normalize_mls_events(events: list[dict]) -> pd.DataFrame:
         season = event.get("season") or {}
         season_type = season.get("type")
 
-        if season_type not in ESPN_MLS_REGULAR_SEASON_TYPES:
+        if not is_regular_season_event(season):
             continue
 
         rows.append(
