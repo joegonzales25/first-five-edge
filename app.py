@@ -2623,7 +2623,6 @@ def safe_load_performance_summary(
     tracking_segment="Official",
 ):
     rows = safe_load_performance_export_rows(model_version)
-    effective_confidence = confidence if tracking_segment == "Official" else "All"
     filtered_rows = [
         row
         for row in rows
@@ -2631,7 +2630,7 @@ def safe_load_performance_summary(
             row,
             market=market,
             days=days,
-            confidence=effective_confidence,
+            confidence=confidence,
             exact_date=exact_date,
         )
     ]
@@ -3027,7 +3026,7 @@ def render_model_performance(model_version, slate_date):
     )
     model_filter_options = [f"Current {model_version}", *version_options[1:], "All"]
 
-    filter_cols = st.columns([1, 1, 1, 1])
+    filter_cols = st.columns([1, 1, 1, 1, 1])
     with filter_cols[0]:
         market_filter = st.selectbox(
             "Market",
@@ -3043,10 +3042,16 @@ def render_model_performance(model_version, slate_date):
     with filter_cols[2]:
         confidence_filter = st.selectbox(
             "Confidence",
-            ["All", "A+", "A", "B", "C"],
+            ["All", "A+", "A", "B", "C", "Lean", "Watch"],
             key="performance_confidence_filter",
         )
     with filter_cols[3]:
+        segment_filter = st.selectbox(
+            "Segment",
+            ["All", "Official", "Lean", "Watch"],
+            key="performance_segment_filter",
+        )
+    with filter_cols[4]:
         selected_model_filter = st.selectbox(
             "Model",
             model_filter_options,
@@ -3082,32 +3087,47 @@ def render_model_performance(model_version, slate_date):
         exact_date = None
         day_label = f"{window_filter} days"
 
-    summary_rows = safe_load_performance_summary(
-        selected_model_version,
-        market=market_filter,
-        days=days,
-        confidence=confidence_filter,
-        exact_date=exact_date,
-        tracking_segment="Official",
-    )
-    watch_summary_rows = safe_load_performance_summary(
-        selected_model_version,
-        market=market_filter,
-        days=days,
-        confidence="All",
-        exact_date=exact_date,
-        tracking_segment="Watch",
-    )
-    lean_summary_rows = safe_load_performance_summary(
-        selected_model_version,
-        market=market_filter,
-        days=days,
-        confidence="All",
-        exact_date=exact_date,
-        tracking_segment="Lean",
-    )
-
     export_rows = safe_load_performance_export_rows(selected_model_version)
+    filtered_export_rows = [
+        row
+        for row in export_rows
+        if (
+            segment_filter == "All"
+            or (row.get("tracking_segment") or "Official") == segment_filter
+        )
+        and history_row_matches_filters(
+            row,
+            market=market_filter,
+            days=days,
+            confidence=confidence_filter,
+            exact_date=exact_date,
+        )
+    ]
+
+    segment_sections = [
+        ("Official", "Official Picks"),
+        ("Lean", "Leans"),
+        ("Watch", "Watches"),
+    ]
+    if segment_filter != "All":
+        segment_sections = [
+            section for section in segment_sections if section[0] == segment_filter
+        ]
+    section_rows = [
+        (
+            segment,
+            title,
+            safe_load_performance_summary(
+                selected_model_version,
+                market=market_filter,
+                days=days,
+                confidence=confidence_filter,
+                exact_date=exact_date,
+                tracking_segment=segment,
+            ),
+        )
+        for segment, title in segment_sections
+    ]
 
     with st.expander("Performance History Diagnostics"):
         diag_cols = st.columns(4)
@@ -3144,23 +3164,24 @@ def render_model_performance(model_version, slate_date):
             f"{', '.join(diagnostics['model_versions']) if diagnostics['model_versions'] else 'N/A'}"
         )
 
-        if export_rows:
+        if filtered_export_rows:
             export_label = (
                 "all_models"
                 if selected_model_version is None
                 else str(selected_model_version).replace(".", "_")
             )
+            segment_label = segment_filter.lower().replace(" ", "_")
             st.download_button(
-                f"Download Performance History CSV ({len(export_rows)} rows)",
-                data=rows_to_csv(export_rows),
-                file_name=f"model_history_{export_label}.csv",
+                f"Download Performance History CSV ({len(filtered_export_rows)} rows)",
+                data=rows_to_csv(filtered_export_rows),
+                file_name=f"model_history_{export_label}_{segment_label}.csv",
                 mime="text/csv",
                 key="performance_history_download",
             )
         else:
             st.caption("No performance history rows are available to export.")
 
-    if not summary_rows and not watch_summary_rows and not lean_summary_rows:
+    if not any(rows for _, _, rows in section_rows):
         st.info("No graded model history found for the selected filters.")
         return
 
@@ -3169,6 +3190,8 @@ def render_model_performance(model_version, slate_date):
         filter_text += f" - {market_filter}"
     if confidence_filter != "All":
         filter_text += f" - {confidence_filter} confidence"
+    if segment_filter != "All":
+        filter_text += f" - {segment_filter}"
 
     def performance_section_html(title, rows, meta):
         if not rows:
@@ -3201,9 +3224,8 @@ def render_model_performance(model_version, slate_date):
         )
 
     sections = [
-        performance_section_html("MODEL PERFORMANCE", summary_rows, filter_text),
-        performance_section_html("WATCH PERFORMANCE", watch_summary_rows, f"{model_label} - {day_label}"),
-        performance_section_html("LEAN PERFORMANCE", lean_summary_rows, f"{model_label} - {day_label}"),
+        performance_section_html(title, rows, filter_text)
+        for _, title, rows in section_rows
     ]
     st.html("".join(section for section in sections if section))
 

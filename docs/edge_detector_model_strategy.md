@@ -358,6 +358,12 @@ today. Users should narrow reports with the performance controls such as
 Day(s), market/signal, confidence, model version, and official/discovery
 segment filters.
 
+When a market tracks Watches or Leans, show them as release-tier model
+decisions on the same performance surface as Official Picks. Use the same card
+shape and filters for `Official Picks`, `Leans`, and `Watches`, but keep each
+segment's record and hit rate separate. Do not blend discovery-tier records
+into official performance.
+
 Current slate and game-card pages should continue to display `Slate Date`.
 Snapshot freshness should remain visible under the filter/result count in both
 current and performance views.
