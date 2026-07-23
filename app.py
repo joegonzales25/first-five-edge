@@ -6866,7 +6866,7 @@ if active_sport != "MLB":
     st.info(f"{active_sport} module is coming soon.")
     st.stop()
 
-st.title("âš¾ MLB Edge Detector")
+st.title("MLB Edge Detector")
 
 st.sidebar.title("Controls")
 st.sidebar.caption(f"Model version: {APP_VERSION}")
