@@ -260,6 +260,14 @@ nfl_model_history      # NFL future
 
 This gives one operational backend while keeping market performance separate.
 
+Production deployments must use Turso for history storage. SQLite is allowed
+only for intentional local/dev runs. Set `APP_ENV=production`,
+`HISTORY_BACKEND=turso`, `TURSO_DATABASE_URL`, and `TURSO_AUTH_TOKEN` in
+deployed app secrets and scheduled workflows. If production is configured
+without Turso credentials, the app or snapshot job should fail clearly instead
+of silently writing to local SQLite. Use `ALLOW_SQLITE_HISTORY_FALLBACK=true`
+only for an explicit local/dev exception.
+
 A unified table such as `market_model_history` can be considered later, only after multiple markets have stable and comparable tracking contracts.
 
 ## Future Market Candidates

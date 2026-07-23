@@ -5,6 +5,8 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from history_backend_config import resolve_history_backend
+
 
 DB_PATH = Path(
     os.environ.get(
@@ -18,13 +20,7 @@ TRACKING_SEGMENTS = [TRACKING_SEGMENT_OFFICIAL, "Watch", "Lean"]
 
 
 def history_backend():
-    configured_backend = os.environ.get("HISTORY_BACKEND", "").strip().lower()
-    if configured_backend:
-        return configured_backend
-    if os.environ.get("TURSO_DATABASE_URL") and os.environ.get("TURSO_AUTH_TOKEN"):
-        return "turso"
-
-    return "sqlite"
+    return resolve_history_backend()
 
 
 def using_remote_history():
