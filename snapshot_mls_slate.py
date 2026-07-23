@@ -7,7 +7,7 @@ from mls_model_history import record_mls_history
 
 
 DEFAULT_TIMEZONE = "America/New_York"
-DEFAULT_MARKET_VERSION = "0.1.1-test"
+DEFAULT_MARKET_VERSION = "0.1.2-test"
 DEFAULT_MODEL_VERSION = "0.1.0-test"
 DEFAULT_SETTLEMENT_LOOKBACK_DAYS = 1
 

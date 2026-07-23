@@ -82,7 +82,7 @@ MARKET_RELEASES = {
     "NBA": "0.1.0-test",
     "NHL": "0.1.0-test",
     "CBB": "0.1.0-test",
-    "MLS": "0.1.1-test",
+    "MLS": "0.1.2-test",
 }
 MODEL_BASELINES = {
     "MLB": "2.3.29",
@@ -4111,12 +4111,23 @@ def render_wnba_result_strip(row):
     scoring_result = row.get("Scoring Result") or "Pending"
     full_match_result = row.get("Winner Result") or "Pending"
     btts_result = row.get("BTTS Result") or "Pending"
+    btts_is_official = False
     if sport == "NHL":
         side_label = "Moneyline"
         scoring_label = "Goal Env"
     elif sport == "MLS":
         side_label = "Double Chance"
         scoring_label = "Goals"
+        btts_segment = row.get("BTTS Tracking Segment") or mls_signal_segment(
+            row,
+            "BTTS",
+        )
+        btts_is_official = (
+            btts_segment == "Official"
+            and row.get("BTTS Edge") not in [None, "", "Pass"]
+        )
+        if not btts_is_official:
+            btts_result = "No Signal"
     else:
         side_label = "Side"
         scoring_label = "Scoring"
@@ -4142,11 +4153,7 @@ def render_wnba_result_strip(row):
                 if row.get("Full Match Edge") != "Pass"
                 else "No Signal"
             )
-            btts_result = (
-                "Pending"
-                if row.get("BTTS Edge") != "Pass"
-                else "No Signal"
-            )
+            btts_result = "Pending" if btts_is_official else "No Signal"
 
     score_line = ""
     if status == "Final" and row.get("Away Score") is not None:
@@ -4221,8 +4228,11 @@ def render_wnba_card(row, historical=False):
         row,
         "BTTS",
     )
-    if sport == "MLS" and btts_segment in ["Lean", "Watch"]:
+    if sport == "MLS" and btts_segment != "Official":
         btts_primary_edge = "Pass"
+    btts_primary_result = row.get("BTTS Result", "Pending")
+    if sport == "MLS" and btts_segment != "Official":
+        btts_primary_result = "No Signal"
     if sport == "MLS":
         extra_decisions = (
             f'<div class="decision-line decision-first">Full Match: {escape(str(row.get("Full Match Edge", "Pass")))}</div>'
@@ -4234,7 +4244,7 @@ def render_wnba_card(row, historical=False):
             ("Full Match", row.get("Full Match Edge", "N/A")),
             ("Full Match Result", row.get("Winner Result", "Pending")),
             ("BTTS", btts_primary_edge),
-            ("BTTS Result", row.get("BTTS Result", "Pending")),
+            ("BTTS Result", btts_primary_result),
         ]
     game_time_display = format_local_card_time(row)
     result_line = ""
@@ -4914,6 +4924,14 @@ def mls_signal_result(row, market, segment="All"):
         return None
 
     if row_segment in ["Lean", "Watch"]:
+        discovery_pick_columns = {
+            "Double Chance": "double_chance_discovery_pick",
+            "Full Match": "full_match_discovery_pick",
+            "Goals": "scoring_discovery_pick",
+            "BTTS": "btts_discovery_pick",
+        }
+        if not row.get(discovery_pick_columns.get(market, "")):
+            return None
         discovery_result_columns = {
             "Double Chance": "double_chance_discovery_result",
             "Full Match": "full_match_discovery_result",
@@ -4921,8 +4939,7 @@ def mls_signal_result(row, market, segment="All"):
             "BTTS": "btts_discovery_result",
         }
         discovery_result = row.get(discovery_result_columns.get(market, ""))
-        if discovery_result:
-            return discovery_result
+        return discovery_result or "Pending"
 
     if market == "Double Chance":
         return row.get("double_chance_result")

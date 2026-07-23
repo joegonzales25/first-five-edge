@@ -347,7 +347,6 @@ def result_values(row, now, stored=None):
     double_chance_edge = stored.get("double_chance_edge") or row.get("Side Edge")
     full_match_edge = stored.get("full_match_edge") or row.get("Full Match Edge")
     scoring_edge = stored.get("scoring_edge") or row.get("Scoring Edge")
-    btts_edge = stored.get("btts_edge") or row.get("BTTS Edge")
     double_chance_segment = stored.get("double_chance_tracking_segment")
     full_match_segment = stored.get("full_match_tracking_segment")
     scoring_segment = stored.get("scoring_tracking_segment")
@@ -410,7 +409,7 @@ def result_values(row, now, stored=None):
             completed,
         ),
         "btts_result": grade_btts(
-            btts_edge,
+            "Pass",
             away_score,
             home_score,
             completed,
@@ -650,7 +649,12 @@ def load_mls_performance_summary(model_version=None, market_version=None, db_pat
         for row in rows
         if row.get("scoring_edge") not in [None, "", "Neutral Goals Environment"]
     ]
-    btts_signals = [row for row in rows if row.get("btts_edge") not in [None, "", "Pass"]]
+    btts_signals = [
+        row
+        for row in rows
+        if row.get("btts_tracking_segment") in ["Lean", "Watch"]
+        and row.get("btts_discovery_pick") not in [None, "", "Pass"]
+    ]
     return {
         "snapshots": len(rows),
         "completed": len(completed),
@@ -661,7 +665,10 @@ def load_mls_performance_summary(model_version=None, market_version=None, db_pat
         "goals_signal_games": len(goals_signals),
         "goals_signal_accuracy": accuracy(goals_signals, "scoring_result"),
         "btts_signal_games": len(btts_signals),
-        "btts_signal_accuracy": accuracy(btts_signals, "btts_result"),
+        "btts_signal_accuracy": accuracy(
+            btts_signals,
+            "btts_discovery_result",
+        ),
         "margin_mae": avg(row.get("margin_error") for row in completed),
         "total_mae": avg(row.get("total_error") for row in completed),
         "storage_backend": "Turso" if using_remote_history() else "SQLite",

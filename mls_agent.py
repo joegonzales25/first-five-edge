@@ -403,7 +403,12 @@ def build_current_slate(season=None, today=None, days_ahead=14, slate_date=None)
         side_result = double_chance_result(side_edge, away, home, away_score_int, home_score_int, completed)
         full_result = exact_result(full_edge, actual_winner, completed, away_score_int, home_score_int)
         scoring_result = scoring_result_for_game(scoring_edge, actual_total, league_total, completed)
-        btts_result = btts_result_for_game(btts_signal, away_score_int, home_score_int, completed)
+        btts_result = btts_result_for_game(
+            "Pass",
+            away_score_int,
+            home_score_int,
+            completed,
+        )
         side_discovery_result = double_chance_result(
             side_release["pick"] or "Pass",
             away,

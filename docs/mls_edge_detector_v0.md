@@ -18,12 +18,13 @@ first market proves stable.
 Current release contract:
 
 ```text
-Market version: 0.1.1-test
+Market version: 0.1.2-test
 Model baseline: 0.1.0-test
 ```
 
-The market-version change adds per-decision Official, Lean, and Watch tracking
-and reporting. It does not change MLS model selection or scoring.
+The market-version change keeps BTTS discovery-only grading separate from the
+primary BTTS `Pass` / `No Signal` result. It does not change MLS model selection
+or scoring.
 
 ## Initial Market Scope
 
