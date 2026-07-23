@@ -1,5 +1,5 @@
 import argparse
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from mls_agent import build_current_slate
@@ -9,6 +9,7 @@ from mls_model_history import record_mls_history
 DEFAULT_TIMEZONE = "America/New_York"
 DEFAULT_MARKET_VERSION = "0.1.0-test"
 DEFAULT_MODEL_VERSION = "0.1.0-test"
+DEFAULT_SETTLEMENT_LOOKBACK_DAYS = 1
 
 
 def parse_args():
@@ -34,6 +35,15 @@ def parse_args():
         default=DEFAULT_MODEL_VERSION,
         help=f"MLS model baseline. Defaults to {DEFAULT_MODEL_VERSION}.",
     )
+    parser.add_argument(
+        "--settlement-lookback-days",
+        type=int,
+        default=DEFAULT_SETTLEMENT_LOOKBACK_DAYS,
+        help=(
+            "When --date is omitted, also revisit this many previous slate dates "
+            "to settle late finals. Defaults to 1."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -43,14 +53,23 @@ def slate_date_for_args(date_value, timezone_name):
     return datetime.now(ZoneInfo(timezone_name)).date()
 
 
-def main():
-    args = parse_args()
+def slate_dates_for_args(args):
     slate_date = slate_date_for_args(args.date, args.timezone)
+    if args.date:
+        return [slate_date]
+    lookback_days = max(0, args.settlement_lookback_days)
+    return [
+        slate_date - timedelta(days=offset)
+        for offset in range(lookback_days, -1, -1)
+    ]
+
+
+def record_slate_date(slate_date, args):
     slate, _ = build_current_slate(slate_date=slate_date)
 
     if slate is None or slate.empty:
         print(f"No MLS games found for {slate_date}.")
-        return 0
+        return {"games": 0, "inserted": 0, "updated": 0, "skipped_without_snapshot": 0}
 
     counts = record_mls_history(
         slate,
@@ -63,6 +82,18 @@ def main():
         f"{len(slate)} games, market {args.market_version}, "
         f"model {args.model_version}, counts {counts}."
     )
+    return {"games": len(slate), **counts}
+
+
+def main():
+    args = parse_args()
+    totals = {"games": 0, "inserted": 0, "updated": 0, "skipped_without_snapshot": 0}
+    for slate_date in slate_dates_for_args(args):
+        counts = record_slate_date(slate_date, args)
+        for key in totals:
+            totals[key] += counts.get(key, 0)
+
+    print(f"MLS snapshot run totals: {totals}.")
     return 0
 
 

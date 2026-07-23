@@ -322,3 +322,7 @@ Snapshot command: snapshot_mls_slate.py
 UI: MLS sport pill with current slate, snapshot freshness, game cards, and performance summary
 Schedule: hourly GitHub Actions cron, with manual dispatch still available
 ```
+
+When the scheduled MLS snapshot runs without an explicit date, it records the
+current ET slate and revisits the previous ET slate to settle late finals. A
+manual `slate_date` dispatch records only that requested slate date.
