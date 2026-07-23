@@ -409,6 +409,11 @@ Official Performance includes locked official WNBA side and scoring signals
 only. Discovery Performance is reserved for future WNBA watches and leans and
 must not affect the official WNBA model record until validated.
 
+The performance filters remain available whenever WNBA history exists.
+`Current model` includes the active model baseline across WNBA market releases.
+If the newest market release has not produced a snapshot yet, display that as a
+diagnostic without hiding prior current-model history.
+
 ## Card Contract
 
 Collapsed card:

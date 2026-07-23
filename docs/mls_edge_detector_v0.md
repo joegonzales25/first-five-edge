@@ -286,6 +286,11 @@ Streamlit page-load time.
 If no pregame snapshot exists before kickoff, the match should be marked
 `Not Tracked` rather than graded from stale or post-kickoff data.
 
+MLS performance filters remain available whenever MLS history exists.
+`Current model` includes the active model baseline across MLS market releases.
+If the newest market release has not produced a snapshot yet, display that as a
+diagnostic without hiding prior current-model history.
+
 ## Data Source Position
 
 MLS v0 should start with ESPN as the free/public data source. ESPN is approved

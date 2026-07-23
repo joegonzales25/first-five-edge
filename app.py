@@ -5098,15 +5098,17 @@ def render_wnba_performance_section():
     )
     storage_backend = current_summary.get("storage_backend", "Unavailable")
     storage_path = current_summary.get("db_path", "N/A")
-    current_rows = load_wnba_history(
-        model_version=model_version,
-        market_version=market_version,
-    )
+    current_rows = load_wnba_history(model_version=model_version)
     all_rows = load_wnba_history()
 
-    if current_summary["snapshots"] == 0:
+    if not all_rows:
         st.info("No WNBA performance snapshots recorded yet. The scheduled WNBA snapshot workflow will create pregame snapshots when it runs.")
         return
+    if current_summary["snapshots"] == 0:
+        st.caption(
+            f"Market release {market_version} has no snapshots yet; "
+            f"showing model {model_version} history across market releases."
+        )
 
     model_filter_options = [f"Current {model_version}", "All"]
     filter_cols = st.columns([1, 1, 1, 1, 1])
@@ -6323,15 +6325,17 @@ def render_mls_performance_section():
     )
     storage_backend = current_summary.get("storage_backend", "Unavailable")
     storage_path = current_summary.get("db_path", "N/A")
-    current_rows = load_mls_history(
-        model_version=model_version,
-        market_version=market_version,
-    )
+    current_rows = load_mls_history(model_version=model_version)
     all_rows = load_mls_history()
 
-    if current_summary["snapshots"] == 0:
+    if not all_rows:
         st.info("No MLS performance snapshots recorded yet. Run the MLS snapshot script after approving a snapshot cadence.")
         return
+    if current_summary["snapshots"] == 0:
+        st.caption(
+            f"Market release {market_version} has no snapshots yet; "
+            f"showing model {model_version} history across market releases."
+        )
 
     model_filter_options = [f"Current {model_version}", "All"]
     filter_cols = st.columns([1, 1, 1, 1, 1])

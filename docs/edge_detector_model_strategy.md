@@ -358,6 +358,13 @@ today. Users should narrow reports with the performance controls such as
 Day(s), market/signal, confidence, model version, and official/discovery
 segment filters.
 
+The `Current model` report option must include that model baseline's stored
+history across market releases. A newly incremented market release with no
+snapshots must not hide report filters or make existing current-model history
+appear empty. Show the release-specific zero-snapshot state as a diagnostic,
+and use the full-history empty state only when the market has no stored
+performance history.
+
 When a market tracks Watches or Leans, show them as release-tier model
 decisions on the same performance surface as Official Picks. Use the same card
 shape and filters for `Official Picks`, `Leans`, and `Watches`, but keep each
