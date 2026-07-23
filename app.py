@@ -178,7 +178,7 @@ def current_date_for_timezone(timezone_name):
 
 st.set_page_config(
     page_title="First Five Edge",
-    page_icon="âš¾",
+    page_icon="\u26be",
     layout="wide"
 )
 
@@ -1832,7 +1832,7 @@ def render_market_watch(row):
 
     return f"""
     <div class="market-watch">
-        <div class="market-heading">ðŸ“ˆ Market Watch</div>
+        <div class="market-heading">&#128200; Market Watch</div>
         <div class="market-pick">{escape(market_pick)}</div>
         <div class="market-why">Why?</div>
         <div class="reason-stack">{reason_items}</div>
@@ -2584,9 +2584,9 @@ def format_game_status_line(row):
     base_line = f"{game_time} - {status}"
 
     if snapshot_status == "Locked":
-        return f"ðŸ”’ {base_line}"
+        return f"\U0001f512 {base_line}"
     if snapshot_status == "Not Tracked":
-        return f"âš  Not Tracked - {base_line}"
+        return f"\u26a0 Not Tracked - {base_line}"
 
     return base_line
 
@@ -4005,7 +4005,7 @@ def render_nfl_card(row, historical=False):
     </div>
     """)
 
-    with st.expander(f"ðŸ” Analysis: {row['Game']}"):
+    with st.expander(f"\U0001f50d Analysis: {row['Game']}"):
         if historical:
             st.markdown("### Result Review")
             st.markdown(f"""
@@ -7504,9 +7504,9 @@ else:
             <input class="edge-view-control edge-view-full" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-full">
 
             <div class="decision-stack">
-                <label class="decision-line decision-first" for="{card_anchor}-first">ðŸŽ¯ 1st Inning: {first_inning_display}{first_inning_result}</label>
-                <label class="decision-line decision-f5" for="{card_anchor}-f5">âš¾ First 5: {f5_display}{f5_result}</label>
-                <label class="decision-line decision-full" for="{card_anchor}-full">ðŸ† Full Game: {full_game_display}{full_game_result}</label>
+                <label class="decision-line decision-first" for="{card_anchor}-first">&#127919; 1st Inning: {first_inning_display}{first_inning_result}</label>
+                <label class="decision-line decision-f5" for="{card_anchor}-f5">&#9918; First 5: {f5_display}{f5_result}</label>
+                <label class="decision-line decision-full" for="{card_anchor}-full">&#127942; Full Game: {full_game_display}{full_game_result}</label>
             </div>
 
             {key_factors}
@@ -7515,7 +7515,7 @@ else:
         </div>
         """)
 
-        with st.expander(f"ðŸ” Analysis: {row['Game']}"):
+        with st.expander(f"\U0001f50d Analysis: {row['Game']}"):
             if discovery_label_html:
                 st.html(discovery_label_html)
             st.markdown("### Edge Breakdown")
