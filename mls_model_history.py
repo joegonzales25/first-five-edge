@@ -167,7 +167,16 @@ def safe_float(value):
 
 
 def is_final(row):
-    return str(row.get("Status", "")).strip().lower() == "final"
+    return is_final_status(row.get("Status"))
+
+
+def is_final_status(status):
+    return str(status or "").strip().lower() in [
+        "final",
+        "game over",
+        "full time",
+        "full-time",
+    ]
 
 
 def is_snapshot_eligible(row):
@@ -388,7 +397,7 @@ def avg(values):
 
 def load_mls_performance_summary(model_version=None, market_version=None, db_path=DB_PATH):
     rows = load_mls_history(model_version, market_version, db_path)
-    completed = [row for row in rows if str(row.get("status", "")).lower() == "final"]
+    completed = [row for row in rows if is_final_status(row.get("status"))]
     dc_signals = [row for row in rows if row.get("double_chance_edge") not in [None, "", "Pass"]]
     full_signals = [row for row in rows if row.get("full_match_edge") not in [None, "", "Pass"]]
     goals_signals = [
