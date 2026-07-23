@@ -15,6 +15,16 @@ market version, model version, scheduled/manual snapshot path, and performance
 reporting. A future soccer framework can generalize MLS patterns after the
 first market proves stable.
 
+Current release contract:
+
+```text
+Market version: 0.1.1-test
+Model baseline: 0.1.0-test
+```
+
+The market-version change adds per-decision Official, Lean, and Watch tracking
+and reporting. It does not change MLS model selection or scoring.
+
 ## Initial Market Scope
 
 MLS v0 should start with:
@@ -55,7 +65,9 @@ No Edge / Pass
 
 Official picks are locked and graded as the production record. Watches and
 leans are graded discovery signals, but they must be reported separately from
-official pick hit rate.
+official pick hit rate. Each market decision stores its own segment because one
+game can contain an Official decision in one market and a Lean or Watch in
+another.
 
 Historical rows should preserve a market-specific version of the shared fields:
 
@@ -219,6 +231,30 @@ Watches and leans are graded discovery signals:
 Watch = model sees something worth monitoring, but it is not close enough to an official pick
 Lean = stronger than a Watch; direction is clear, but one official-pick requirement is still missing
 ```
+
+Initial v0 test bands preserve the existing official gates:
+
+```text
+Double Chance:
+  Home Lean 0.32-0.41 model margin; Watch 0.24-0.31.
+  Away Lean -0.49 through -0.40; Watch -0.39 through -0.30.
+
+Full Match:
+  Home Lean 0.62-0.77; Watch 0.50-0.61.
+  Away Lean -0.87 through -0.70; Watch -0.69 through -0.58.
+  Draw Lean at absolute margin <= 0.16 and projected total <= 2.55.
+  Draw Watch at absolute margin <= 0.20 and projected total <= 2.65.
+
+Goals:
+  High Lean 0.32-0.41 above baseline; Watch 0.22-0.31.
+  Low Lean 0.28-0.37 below baseline; Watch 0.18-0.27.
+
+BTTS:
+  Existing Yes/No Watch and Lean bands remain unchanged.
+```
+
+These values classify near-threshold outputs for discovery reporting only.
+They do not promote or alter an Official MLS selection.
 
 Common MLS watch scenarios:
 

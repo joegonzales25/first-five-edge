@@ -544,24 +544,29 @@ Universal rules:
 Initial MLB discovery thresholds:
 
 ```text
-1st Inning NRFI Watch: No Edge pick, NRFI-leaning signal, score 58-64.
-1st Inning NRFI Lean: No Edge pick, NRFI-leaning signal, score 55-57.
-1st Inning YRFI Watch: No Edge pick, YRFI-leaning signal, score 25-34.
-1st Inning YRFI Lean: No Edge pick, YRFI-leaning signal, score 35-39.
+1st Inning NRFI Lean: No Edge pick, NRFI-leaning signal, score 58-64.
+1st Inning NRFI Watch: No Edge pick, NRFI-leaning signal, score 55-57.
+1st Inning YRFI Lean: No Edge pick, YRFI-leaning signal, score 25-34.
+1st Inning YRFI Watch: No Edge pick, YRFI-leaning signal, score 35-39.
 
-F5 Watch: No official F5 pick, directional team read, score 7.0-11.9.
-F5 Lean: No official F5 pick, directional team read, score 4.0-6.9.
+F5 Lean: No official F5 pick, directional team read, score 7.0-11.9.
+F5 Watch: No official F5 pick, directional team read, score 4.0-6.9.
 
-Full Game Watch: No official Full Game pick, directional team read, score 6.5-8.9.
-Full Game Lean: No official Full Game pick, directional team read, score 4.0-6.4.
+Full Game Lean: No official Full Game pick, directional team read, score 6.5-8.9.
+Full Game Watch: No official Full Game pick, directional team read, score 4.0-6.4.
 ```
 
 Market-specific notes:
 
 ```text
-MLB: Watches and Leans can be added first as UI filters beneath the primary filter pills.
-WNBA/NFL: Use the same product meaning, but define thresholds separately before implementation.
-Future markets: Do not inherit MLB thresholds.
+MLB: Official, Lean, Watch, and No Edge use the corrected strength order above.
+WNBA: Side and Scoring decisions use WNBA-specific near-threshold bands and
+      store one segment per decision.
+MLS: Double Chance, Full Match, Goals, and BTTS use MLS-specific bands and
+     store one segment per decision.
+NBA, NHL, CBB, NFL, and PGA: Keep current behavior until their market-specific
+                            discovery thresholds and active schedules are approved.
+Future markets: Do not inherit MLB, WNBA, or MLS thresholds.
 ```
 
 ## Maturity Stages

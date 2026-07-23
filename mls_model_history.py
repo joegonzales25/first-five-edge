@@ -123,6 +123,22 @@ def init_db(connection):
             full_match_result TEXT,
             scoring_result TEXT,
             btts_result TEXT,
+            double_chance_tracking_segment TEXT,
+            double_chance_discovery_pick TEXT,
+            double_chance_discovery_label TEXT,
+            double_chance_discovery_result TEXT,
+            full_match_tracking_segment TEXT,
+            full_match_discovery_pick TEXT,
+            full_match_discovery_label TEXT,
+            full_match_discovery_result TEXT,
+            scoring_tracking_segment TEXT,
+            scoring_discovery_pick TEXT,
+            scoring_discovery_label TEXT,
+            scoring_discovery_result TEXT,
+            btts_tracking_segment TEXT,
+            btts_discovery_pick TEXT,
+            btts_discovery_label TEXT,
+            btts_discovery_result TEXT,
             margin_error REAL,
             total_error REAL,
             created_at TEXT NOT NULL,
@@ -134,6 +150,33 @@ def init_db(connection):
         )
         """
     )
+    columns = {
+        row["name"]
+        for row in fetch_rows(connection, "PRAGMA table_info(mls_model_history)")
+    }
+    discovery_columns = [
+        "double_chance_tracking_segment",
+        "double_chance_discovery_pick",
+        "double_chance_discovery_label",
+        "double_chance_discovery_result",
+        "full_match_tracking_segment",
+        "full_match_discovery_pick",
+        "full_match_discovery_label",
+        "full_match_discovery_result",
+        "scoring_tracking_segment",
+        "scoring_discovery_pick",
+        "scoring_discovery_label",
+        "scoring_discovery_result",
+        "btts_tracking_segment",
+        "btts_discovery_pick",
+        "btts_discovery_label",
+        "btts_discovery_result",
+    ]
+    for column in discovery_columns:
+        if column not in columns:
+            connection.execute(
+                f"ALTER TABLE mls_model_history ADD COLUMN {column} TEXT"
+            )
     connection.commit()
 
 
@@ -216,6 +259,22 @@ def prediction_values(row, slate_date, market_version, model_version, now):
         "away_prior_games": safe_int(row.get("Away Prior Games")),
         "home_prior_games": safe_int(row.get("Home Prior Games")),
         "rest_edge": safe_float(row.get("Rest Edge")),
+        "double_chance_tracking_segment": row.get("Side Tracking Segment"),
+        "double_chance_discovery_pick": row.get("Side Discovery Pick"),
+        "double_chance_discovery_label": row.get("Side Discovery Label"),
+        "double_chance_discovery_result": row.get("Side Discovery Result"),
+        "full_match_tracking_segment": row.get("Full Match Tracking Segment"),
+        "full_match_discovery_pick": row.get("Full Match Discovery Pick"),
+        "full_match_discovery_label": row.get("Full Match Discovery Label"),
+        "full_match_discovery_result": row.get("Full Match Discovery Result"),
+        "scoring_tracking_segment": row.get("Scoring Tracking Segment"),
+        "scoring_discovery_pick": row.get("Scoring Discovery Pick"),
+        "scoring_discovery_label": row.get("Scoring Discovery Label"),
+        "scoring_discovery_result": row.get("Scoring Discovery Result"),
+        "btts_tracking_segment": row.get("BTTS Tracking Segment"),
+        "btts_discovery_pick": row.get("BTTS Discovery Pick"),
+        "btts_discovery_label": row.get("BTTS Discovery Label"),
+        "btts_discovery_result": row.get("BTTS Discovery Result"),
         "status": row.get("Status"),
         "created_at": now,
         "updated_at": now,
@@ -224,7 +283,51 @@ def prediction_values(row, slate_date, market_version, model_version, now):
     }
 
 
-def result_values(row, now):
+def grade_double_chance(edge, away, home, away_score, home_score, completed):
+    if edge in [None, "", "Pass"]:
+        return "No Signal"
+    if not completed or away_score is None or home_score is None:
+        return "Pending"
+    if edge == f"{home} or Draw":
+        return "Correct" if home_score >= away_score else "Missed"
+    if edge == f"{away} or Draw":
+        return "Correct" if away_score >= home_score else "Missed"
+    if edge == "Home or Away":
+        return "Correct" if home_score != away_score else "Missed"
+    return "No Signal"
+
+
+def grade_full_match(edge, actual_winner, completed):
+    if edge in [None, "", "Pass"]:
+        return "No Signal"
+    if not completed or actual_winner is None:
+        return "Pending"
+    return "Correct" if edge == actual_winner else "Missed"
+
+
+def grade_scoring(edge, actual_total, baseline, completed):
+    if edge in [None, "", "Neutral Goals Environment"]:
+        return "No Signal"
+    if not completed or actual_total is None or baseline is None:
+        return "Pending"
+    if edge == "High Goals Environment":
+        return "Correct" if actual_total > baseline else "Missed"
+    if edge == "Low Goals Environment":
+        return "Correct" if actual_total < baseline else "Missed"
+    return "No Signal"
+
+
+def grade_btts(edge, away_score, home_score, completed):
+    if edge in [None, "", "Pass"]:
+        return "No Signal"
+    if not completed or away_score is None or home_score is None:
+        return "Pending"
+    actual_yes = away_score > 0 and home_score > 0
+    return "Correct" if ("Yes" in edge) == actual_yes else "Missed"
+
+
+def result_values(row, now, stored=None):
+    stored = stored or {}
     away_score = safe_int(row.get("Away Score"))
     home_score = safe_int(row.get("Home Score"))
     actual_total = safe_float(row.get("Actual Total"))
@@ -233,16 +336,95 @@ def result_values(row, now):
     actual_margin = home_score - away_score if away_score is not None and home_score is not None else None
     margin_error = abs(model_margin - actual_margin) if model_margin is not None and actual_margin is not None else None
     total_error = abs(projected_total - actual_total) if projected_total is not None and actual_total is not None else None
+    completed = is_final(row)
+    actual_winner = row.get("Actual Winner")
+    away_team = stored.get("away_team") or row.get("Away")
+    home_team = stored.get("home_team") or row.get("Home")
+    baseline = safe_float(
+        stored.get("league_total_baseline")
+        or row.get("League Total Baseline")
+    )
+    double_chance_edge = stored.get("double_chance_edge") or row.get("Side Edge")
+    full_match_edge = stored.get("full_match_edge") or row.get("Full Match Edge")
+    scoring_edge = stored.get("scoring_edge") or row.get("Scoring Edge")
+    btts_edge = stored.get("btts_edge") or row.get("BTTS Edge")
+    double_chance_segment = stored.get("double_chance_tracking_segment")
+    full_match_segment = stored.get("full_match_tracking_segment")
+    scoring_segment = stored.get("scoring_tracking_segment")
+    btts_segment = stored.get("btts_tracking_segment")
+
     return {
         "status": row.get("Status"),
         "away_score": away_score,
         "home_score": home_score,
-        "actual_winner": row.get("Actual Winner"),
+        "actual_winner": actual_winner,
         "actual_total": actual_total,
-        "double_chance_result": row.get("Side Result"),
-        "full_match_result": row.get("Winner Result"),
-        "scoring_result": row.get("Scoring Result"),
-        "btts_result": row.get("BTTS Result"),
+        "double_chance_result": grade_double_chance(
+            double_chance_edge,
+            away_team,
+            home_team,
+            away_score,
+            home_score,
+            completed,
+        ),
+        "double_chance_discovery_result": grade_double_chance(
+            (
+                stored.get("double_chance_discovery_pick")
+                if double_chance_segment in ["Lean", "Watch"]
+                else "Pass"
+            ),
+            away_team,
+            home_team,
+            away_score,
+            home_score,
+            completed,
+        ),
+        "full_match_result": grade_full_match(
+            full_match_edge,
+            actual_winner,
+            completed,
+        ),
+        "full_match_discovery_result": grade_full_match(
+            (
+                stored.get("full_match_discovery_pick")
+                if full_match_segment in ["Lean", "Watch"]
+                else "Pass"
+            ),
+            actual_winner,
+            completed,
+        ),
+        "scoring_result": grade_scoring(
+            scoring_edge,
+            actual_total,
+            baseline,
+            completed,
+        ),
+        "scoring_discovery_result": grade_scoring(
+            (
+                stored.get("scoring_discovery_pick")
+                if scoring_segment in ["Lean", "Watch"]
+                else "Neutral Goals Environment"
+            ),
+            actual_total,
+            baseline,
+            completed,
+        ),
+        "btts_result": grade_btts(
+            btts_edge,
+            away_score,
+            home_score,
+            completed,
+        ),
+        "btts_discovery_result": grade_btts(
+            (
+                stored.get("btts_discovery_pick")
+                if btts_segment in ["Lean", "Watch"]
+                else "Pass"
+            ),
+            away_score,
+            home_score,
+            completed,
+        ),
         "margin_error": margin_error,
         "total_error": total_error,
         "updated_at": now,
@@ -254,7 +436,17 @@ def existing_snapshot(connection, game_id, market_version, model_version):
     return fetch_one(
         connection,
         """
-        SELECT id
+        SELECT id, locked_at, snapshot_status,
+               away_team, home_team, league_total_baseline,
+               double_chance_edge, full_match_edge, scoring_edge, btts_edge,
+               double_chance_tracking_segment,
+               double_chance_discovery_pick,
+               full_match_tracking_segment,
+               full_match_discovery_pick,
+               scoring_tracking_segment,
+               scoring_discovery_pick,
+               btts_tracking_segment,
+               btts_discovery_pick
         FROM mls_model_history
         WHERE game_id = ?
           AND market_version = ?
@@ -262,6 +454,12 @@ def existing_snapshot(connection, game_id, market_version, model_version):
         """,
         (str(game_id), market_version, model_version),
     )
+
+
+def stored_snapshot_is_locked(row):
+    if row is None:
+        return False
+    return row.get("snapshot_status") == "Locked" or bool(row.get("locked_at"))
 
 
 def insert_prediction(connection, row_values):
@@ -276,6 +474,29 @@ def insert_prediction(connection, row_values):
     )
 
 
+def update_prediction(connection, row_values):
+    identity_columns = {"game_id", "market_version", "model_version", "created_at"}
+    update_columns = [
+        column for column in row_values if column not in identity_columns
+    ]
+    assignments = ", ".join(f"{column} = ?" for column in update_columns)
+    connection.execute(
+        f"""
+        UPDATE mls_model_history
+        SET {assignments}
+        WHERE game_id = ?
+          AND market_version = ?
+          AND model_version = ?
+        """,
+        [
+            *[row_values[column] for column in update_columns],
+            row_values["game_id"],
+            row_values["market_version"],
+            row_values["model_version"],
+        ],
+    )
+
+
 def update_result(connection, game_id, market_version, model_version, values):
     should_lock = not is_pregame_status(values["status"])
     connection.execute(
@@ -287,9 +508,13 @@ def update_result(connection, game_id, market_version, model_version, values):
             actual_winner = ?,
             actual_total = ?,
             double_chance_result = ?,
+            double_chance_discovery_result = ?,
             full_match_result = ?,
+            full_match_discovery_result = ?,
             scoring_result = ?,
+            scoring_discovery_result = ?,
             btts_result = ?,
+            btts_discovery_result = ?,
             margin_error = ?,
             total_error = ?,
             updated_at = ?,
@@ -313,9 +538,13 @@ def update_result(connection, game_id, market_version, model_version, values):
             values["actual_winner"],
             values["actual_total"],
             values["double_chance_result"],
+            values["double_chance_discovery_result"],
             values["full_match_result"],
+            values["full_match_discovery_result"],
             values["scoring_result"],
+            values["scoring_discovery_result"],
             values["btts_result"],
+            values["btts_discovery_result"],
             values["margin_error"],
             values["total_error"],
             values["updated_at"],
@@ -350,7 +579,26 @@ def record_mls_history(slate, slate_date, market_version, model_version, db_path
             if existing is None:
                 counts["skipped_without_snapshot"] += 1
                 continue
-            update_result(connection, game_id, market_version, model_version, result_values(row, now))
+            if is_snapshot_eligible(row) and not stored_snapshot_is_locked(existing):
+                update_prediction(
+                    connection,
+                    prediction_values(
+                        row,
+                        slate_date,
+                        market_version,
+                        model_version,
+                        now,
+                    ),
+                )
+                counts["updated"] += 1
+                continue
+            update_result(
+                connection,
+                game_id,
+                market_version,
+                model_version,
+                result_values(row, now, existing),
+            )
             counts["updated"] += 1
         connection.commit()
     return counts

@@ -7,7 +7,7 @@ from wnba_model_history import record_wnba_history
 
 
 DEFAULT_TIMEZONE = "America/New_York"
-DEFAULT_MARKET_VERSION = "1.0.1-test"
+DEFAULT_MARKET_VERSION = "1.0.2-test"
 DEFAULT_MODEL_VERSION = "1.0.0-test"
 DEFAULT_SETTLEMENT_LOOKBACK_DAYS = 1
 

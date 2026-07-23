@@ -349,10 +349,26 @@ Watch and Lean performance must be reported separately from official pick hit ra
 WNBA Watch/Lean thresholds must be defined from WNBA history, not inherited from MLB.
 ```
 
+Initial WNBA discovery bands use the existing WNBA model gates:
+
+```text
+Side Official: existing WNBA side pick at absolute model margin 3.0 or higher.
+Side Lean: directional winner at absolute model margin 2.25 through 2.99.
+Side Watch: directional winner at absolute model margin 1.50 through 2.24.
+
+Scoring Official: existing scoring signal at 4.0 points or more from the league baseline.
+Scoring Lean: directional scoring environment 3.0 through 3.99 points from baseline.
+Scoring Watch: directional scoring environment 2.0 through 2.99 points from baseline.
+```
+
+These bands classify existing model outputs only. They do not change the
+official side or scoring selection gates. Each decision stores its own release
+tier because a single game may have different Side and Scoring tiers.
+
 WNBA version fields:
 
 ```text
-market_version = 1.0.1-test
+market_version = 1.0.2-test
 model_version = 1.0.0-test
 ```
 

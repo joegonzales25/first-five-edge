@@ -120,6 +120,14 @@ def init_db(connection):
             actual_total REAL,
             side_result TEXT,
             scoring_result TEXT,
+            side_tracking_segment TEXT,
+            side_discovery_pick TEXT,
+            side_discovery_label TEXT,
+            side_discovery_result TEXT,
+            scoring_tracking_segment TEXT,
+            scoring_discovery_pick TEXT,
+            scoring_discovery_label TEXT,
+            scoring_discovery_result TEXT,
             margin_error REAL,
             total_error REAL,
             created_at TEXT NOT NULL,
@@ -141,6 +149,21 @@ def init_db(connection):
         connection.execute(
             "ALTER TABLE wnba_model_history ADD COLUMN snapshot_status TEXT"
         )
+    discovery_columns = {
+        "side_tracking_segment": "TEXT",
+        "side_discovery_pick": "TEXT",
+        "side_discovery_label": "TEXT",
+        "side_discovery_result": "TEXT",
+        "scoring_tracking_segment": "TEXT",
+        "scoring_discovery_pick": "TEXT",
+        "scoring_discovery_label": "TEXT",
+        "scoring_discovery_result": "TEXT",
+    }
+    for column, column_type in discovery_columns.items():
+        if column not in columns:
+            connection.execute(
+                f"ALTER TABLE wnba_model_history ADD COLUMN {column} {column_type}"
+            )
     connection.commit()
 
 
@@ -221,6 +244,14 @@ def prediction_values(row, slate_date, market_version, model_version, now):
         "away_prior_games": safe_int(row.get("Away Prior Games")),
         "home_prior_games": safe_int(row.get("Home Prior Games")),
         "rest_edge": safe_float(row.get("Rest Edge")),
+        "side_tracking_segment": row.get("Side Tracking Segment"),
+        "side_discovery_pick": row.get("Side Discovery Pick"),
+        "side_discovery_label": row.get("Side Discovery Label"),
+        "side_discovery_result": row.get("Side Discovery Result"),
+        "scoring_tracking_segment": row.get("Scoring Tracking Segment"),
+        "scoring_discovery_pick": row.get("Scoring Discovery Pick"),
+        "scoring_discovery_label": row.get("Scoring Discovery Label"),
+        "scoring_discovery_result": row.get("Scoring Discovery Result"),
         "status": row.get("Status"),
         "created_at": now,
         "updated_at": now,
@@ -229,7 +260,28 @@ def prediction_values(row, slate_date, market_version, model_version, now):
     }
 
 
-def result_values(row, now):
+def grade_side(edge, pick, actual_winner, completed):
+    if edge in [None, "", "Pass"] or not pick:
+        return "No Signal"
+    if not completed or actual_winner is None:
+        return "Pending"
+    return "Correct" if pick == actual_winner else "Missed"
+
+
+def grade_scoring(edge, actual_total, baseline, completed):
+    if edge in [None, "", "Neutral Scoring Environment"]:
+        return "No Signal"
+    if not completed or actual_total is None or baseline is None:
+        return "Pending"
+    if edge == "High Scoring Environment":
+        return "Correct" if actual_total > baseline else "Missed"
+    if edge == "Low Scoring Environment":
+        return "Correct" if actual_total < baseline else "Missed"
+    return "No Signal"
+
+
+def result_values(row, now, stored=None):
+    stored = stored or {}
     away_score = safe_int(row.get("Away Score"))
     home_score = safe_int(row.get("Home Score"))
     actual_total = safe_float(row.get("Actual Total"))
@@ -248,14 +300,71 @@ def result_values(row, now):
     if projected_total is not None and actual_total is not None:
         total_error = abs(projected_total - actual_total)
 
+    actual_winner = row.get("Actual Winner")
+    completed = is_final(row)
+    side_edge = stored.get("side_edge", row.get("Side Edge"))
+    predicted_winner = stored.get(
+        "predicted_winner",
+        row.get("Predicted Winner"),
+    )
+    scoring_edge = stored.get("scoring_edge", row.get("Scoring Edge"))
+    league_baseline = safe_float(
+        stored.get(
+            "league_total_baseline",
+            row.get("League Total Baseline"),
+        )
+    )
+    side_segment = stored.get(
+        "side_tracking_segment",
+        row.get("Side Tracking Segment"),
+    )
+    scoring_segment = stored.get(
+        "scoring_tracking_segment",
+        row.get("Scoring Tracking Segment"),
+    )
+    side_discovery_pick = stored.get(
+        "side_discovery_pick",
+        row.get("Side Discovery Pick"),
+    )
+    scoring_discovery_pick = stored.get(
+        "scoring_discovery_pick",
+        row.get("Scoring Discovery Pick"),
+    )
+
     return {
         "status": row.get("Status"),
         "away_score": away_score,
         "home_score": home_score,
-        "actual_winner": row.get("Actual Winner"),
+        "actual_winner": actual_winner,
         "actual_total": actual_total,
-        "side_result": row.get("Side Result"),
-        "scoring_result": row.get("Scoring Result"),
+        "side_result": grade_side(
+            side_edge,
+            predicted_winner,
+            actual_winner,
+            completed,
+        ),
+        "scoring_result": grade_scoring(
+            scoring_edge,
+            actual_total,
+            league_baseline,
+            completed,
+        ),
+        "side_discovery_result": grade_side(
+            "Discovery" if side_segment in ["Lean", "Watch"] else "Pass",
+            side_discovery_pick,
+            actual_winner,
+            completed,
+        ),
+        "scoring_discovery_result": grade_scoring(
+            (
+                scoring_discovery_pick
+                if scoring_segment in ["Lean", "Watch"]
+                else "Neutral Scoring Environment"
+            ),
+            actual_total,
+            league_baseline,
+            completed,
+        ),
         "margin_error": margin_error,
         "total_error": total_error,
         "updated_at": now,
@@ -267,7 +376,11 @@ def existing_snapshot(connection, game_id, market_version, model_version):
     return fetch_one(
         connection,
         """
-        SELECT id
+        SELECT id, locked_at, snapshot_status,
+               side_edge, predicted_winner, scoring_edge,
+               league_total_baseline,
+               side_tracking_segment, side_discovery_pick,
+               scoring_tracking_segment, scoring_discovery_pick
         FROM wnba_model_history
         WHERE game_id = ?
           AND market_version = ?
@@ -275,6 +388,12 @@ def existing_snapshot(connection, game_id, market_version, model_version):
         """,
         (str(game_id), market_version, model_version),
     )
+
+
+def stored_snapshot_is_locked(row):
+    if row is None:
+        return False
+    return row.get("snapshot_status") == "Locked" or bool(row.get("locked_at"))
 
 
 def insert_prediction(connection, row_values):
@@ -286,6 +405,29 @@ def insert_prediction(connection, row_values):
         VALUES ({placeholders})
         """,
         [row_values[column] for column in columns],
+    )
+
+
+def update_prediction(connection, row_values):
+    identity_columns = {"game_id", "market_version", "model_version", "created_at"}
+    update_columns = [
+        column for column in row_values if column not in identity_columns
+    ]
+    assignments = ", ".join(f"{column} = ?" for column in update_columns)
+    connection.execute(
+        f"""
+        UPDATE wnba_model_history
+        SET {assignments}
+        WHERE game_id = ?
+          AND market_version = ?
+          AND model_version = ?
+        """,
+        [
+            *[row_values[column] for column in update_columns],
+            row_values["game_id"],
+            row_values["market_version"],
+            row_values["model_version"],
+        ],
     )
 
 
@@ -301,6 +443,8 @@ def update_result(connection, game_id, market_version, model_version, values):
             actual_total = ?,
             side_result = ?,
             scoring_result = ?,
+            side_discovery_result = ?,
+            scoring_discovery_result = ?,
             margin_error = ?,
             total_error = ?,
             updated_at = ?,
@@ -325,6 +469,8 @@ def update_result(connection, game_id, market_version, model_version, values):
             values["actual_total"],
             values["side_result"],
             values["scoring_result"],
+            values["side_discovery_result"],
+            values["scoring_discovery_result"],
             values["margin_error"],
             values["total_error"],
             values["updated_at"],
@@ -385,12 +531,26 @@ def record_wnba_history(
                 counts["skipped_without_snapshot"] += 1
                 continue
 
+            if is_snapshot_eligible(row) and not stored_snapshot_is_locked(existing):
+                update_prediction(
+                    connection,
+                    prediction_values(
+                        row,
+                        slate_date,
+                        market_version,
+                        model_version,
+                        now,
+                    ),
+                )
+                counts["updated"] += 1
+                continue
+
             update_result(
                 connection,
                 game_id,
                 market_version,
                 model_version,
-                result_values(row, now),
+                result_values(row, now, existing),
             )
             counts["updated"] += 1
 

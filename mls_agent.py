@@ -186,6 +186,85 @@ def model_signal_display(double_chance, full_match, scoring, btts):
     return " / ".join(signals) if signals else "Pass"
 
 
+def release_segment(value, no_signal_values):
+    text = str(value or "")
+    if text.endswith(" Lean"):
+        return "Lean"
+    if text.endswith(" Watch"):
+        return "Watch"
+    if value in no_signal_values:
+        return "No Edge"
+    return "Official"
+
+
+def discovery_release(pick=None, segment="No Edge"):
+    return {
+        "segment": segment,
+        "pick": pick if segment in ["Lean", "Watch"] else None,
+        "label": (
+            f"{pick} {segment}"
+            if pick and segment in ["Lean", "Watch"]
+            else None
+        ),
+    }
+
+
+def double_chance_release(edge, model_margin, away, home):
+    if edge != "Pass":
+        return discovery_release(segment="Official")
+    if model_margin >= 0.32:
+        return discovery_release(f"{home} or Draw", "Lean")
+    if model_margin >= 0.24:
+        return discovery_release(f"{home} or Draw", "Watch")
+    if model_margin <= -0.40:
+        return discovery_release(f"{away} or Draw", "Lean")
+    if model_margin <= -0.30:
+        return discovery_release(f"{away} or Draw", "Watch")
+    return discovery_release()
+
+
+def full_match_release(edge, model_margin, projected_total, away, home):
+    if edge != "Pass":
+        return discovery_release(segment="Official")
+    if model_margin >= 0.62:
+        return discovery_release(home, "Lean")
+    if model_margin >= 0.50:
+        return discovery_release(home, "Watch")
+    if model_margin <= -0.70:
+        return discovery_release(away, "Lean")
+    if model_margin <= -0.58:
+        return discovery_release(away, "Watch")
+    if abs(model_margin) <= 0.16 and projected_total <= 2.55:
+        return discovery_release("Draw", "Lean")
+    if abs(model_margin) <= 0.20 and projected_total <= 2.65:
+        return discovery_release("Draw", "Watch")
+    return discovery_release()
+
+
+def scoring_release(edge, projected_total, league_total):
+    if edge != "Neutral Goals Environment":
+        return discovery_release(segment="Official")
+    delta = projected_total - league_total
+    if delta >= 0.32:
+        return discovery_release("High Goals Environment", "Lean")
+    if delta >= 0.22:
+        return discovery_release("High Goals Environment", "Watch")
+    if delta <= -0.28:
+        return discovery_release("Low Goals Environment", "Lean")
+    if delta <= -0.18:
+        return discovery_release("Low Goals Environment", "Watch")
+    return discovery_release()
+
+
+def btts_release(edge):
+    segment = release_segment(edge, [None, "", "Pass"])
+    if segment not in ["Lean", "Watch"]:
+        return discovery_release(segment=segment)
+    suffix = f" {segment}"
+    pick = edge[: -len(suffix)] if edge.endswith(suffix) else edge
+    return discovery_release(pick, segment)
+
+
 def double_chance_result(edge, away, home, away_score, home_score, completed):
     if edge == "Pass":
         return "No Signal"
@@ -278,6 +357,20 @@ def build_current_slate(season=None, today=None, days_ahead=14, slate_date=None)
         full_edge = full_match_edge(model_margin, away, home, away_state.games, home_state.games, projected_total)
         scoring_edge = goals_edge(projected_total, league_total)
         btts_signal = btts_edge(away_state, home_state, projected_total)
+        side_release = double_chance_release(side_edge, model_margin, away, home)
+        full_release = full_match_release(
+            full_edge,
+            model_margin,
+            projected_total,
+            away,
+            home,
+        )
+        scoring_release_value = scoring_release(
+            scoring_edge,
+            projected_total,
+            league_total,
+        )
+        btts_release_value = btts_release(btts_signal)
 
         score_strength = max(abs(model_margin) * 42, abs(projected_total - league_total) * 55)
         if side_confidence == "A":
@@ -311,6 +404,33 @@ def build_current_slate(season=None, today=None, days_ahead=14, slate_date=None)
         full_result = exact_result(full_edge, actual_winner, completed, away_score_int, home_score_int)
         scoring_result = scoring_result_for_game(scoring_edge, actual_total, league_total, completed)
         btts_result = btts_result_for_game(btts_signal, away_score_int, home_score_int, completed)
+        side_discovery_result = double_chance_result(
+            side_release["pick"] or "Pass",
+            away,
+            home,
+            away_score_int,
+            home_score_int,
+            completed,
+        )
+        full_discovery_result = exact_result(
+            full_release["pick"] or "Pass",
+            actual_winner,
+            completed,
+            away_score_int,
+            home_score_int,
+        )
+        scoring_discovery_result = scoring_result_for_game(
+            scoring_release_value["pick"] or "Neutral Goals Environment",
+            actual_total,
+            league_total,
+            completed,
+        )
+        btts_discovery_result = btts_result_for_game(
+            btts_release_value["pick"] or "Pass",
+            away_score_int,
+            home_score_int,
+            completed,
+        )
 
         notes = [
             f"Model margin {model_margin:.2f} toward {'home' if model_margin >= 0 else 'away'}",
@@ -336,13 +456,34 @@ def build_current_slate(season=None, today=None, days_ahead=14, slate_date=None)
                     "Actual Winner": actual_winner,
                     "Predicted Winner": full_edge if full_edge != "Pass" else None,
                     "Actual Total": actual_total,
-                    "Model Signal": model_signal_display(side_edge, full_edge, scoring_edge, btts_signal),
+                    "Model Signal": model_signal_display(
+                        side_edge,
+                        full_edge,
+                        scoring_edge,
+                        "Pass",
+                    ),
                     "Edge Score": edge_score,
                     "Confidence": confidence,
                     "Side Edge": side_edge,
+                    "Side Tracking Segment": side_release["segment"],
+                    "Side Discovery Pick": side_release["pick"],
+                    "Side Discovery Label": side_release["label"],
+                    "Side Discovery Result": side_discovery_result,
                     "Full Match Edge": full_edge,
+                    "Full Match Tracking Segment": full_release["segment"],
+                    "Full Match Discovery Pick": full_release["pick"],
+                    "Full Match Discovery Label": full_release["label"],
+                    "Full Match Discovery Result": full_discovery_result,
                     "Scoring Edge": scoring_edge,
+                    "Scoring Tracking Segment": scoring_release_value["segment"],
+                    "Scoring Discovery Pick": scoring_release_value["pick"],
+                    "Scoring Discovery Label": scoring_release_value["label"],
+                    "Scoring Discovery Result": scoring_discovery_result,
                     "BTTS Edge": btts_signal,
+                    "BTTS Tracking Segment": btts_release_value["segment"],
+                    "BTTS Discovery Pick": btts_release_value["pick"],
+                    "BTTS Discovery Label": btts_release_value["label"],
+                    "BTTS Discovery Result": btts_discovery_result,
                     "Early Edge": "First Half Pending",
                     "Side Result": side_result,
                     "Winner Result": full_result,

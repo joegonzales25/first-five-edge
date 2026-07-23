@@ -314,18 +314,6 @@ def first_inning_discovery(row):
         if 58 <= score <= 64:
             return {
                 "base_market": "1st Inning",
-                "discovery_type": "Watch",
-                "discovery_side": "NRFI",
-                "discovery_label": "NRFI Watch",
-                "pick": "NRFI",
-                "confidence": "Watch",
-                "score": score,
-                "signal_type": signal_type,
-                "result": row.get("First Inning Result", "Pending"),
-            }
-        if 55 <= score <= 57:
-            return {
-                "base_market": "1st Inning",
                 "discovery_type": "Lean",
                 "discovery_side": "NRFI",
                 "discovery_label": "NRFI Lean",
@@ -335,21 +323,21 @@ def first_inning_discovery(row):
                 "signal_type": signal_type,
                 "result": row.get("First Inning Result", "Pending"),
             }
-
-    if signal_type in yrfi_signals:
-        if 25 <= score <= 34:
+        if 55 <= score <= 57:
             return {
                 "base_market": "1st Inning",
                 "discovery_type": "Watch",
-                "discovery_side": "YRFI",
-                "discovery_label": "YRFI Watch",
-                "pick": "YRFI",
+                "discovery_side": "NRFI",
+                "discovery_label": "NRFI Watch",
+                "pick": "NRFI",
                 "confidence": "Watch",
                 "score": score,
                 "signal_type": signal_type,
                 "result": row.get("First Inning Result", "Pending"),
             }
-        if 35 <= score <= 39:
+
+    if signal_type in yrfi_signals:
+        if 25 <= score <= 34:
             return {
                 "base_market": "1st Inning",
                 "discovery_type": "Lean",
@@ -357,6 +345,18 @@ def first_inning_discovery(row):
                 "discovery_label": "YRFI Lean",
                 "pick": "YRFI",
                 "confidence": "Lean",
+                "score": score,
+                "signal_type": signal_type,
+                "result": row.get("First Inning Result", "Pending"),
+            }
+        if 35 <= score <= 39:
+            return {
+                "base_market": "1st Inning",
+                "discovery_type": "Watch",
+                "discovery_side": "YRFI",
+                "discovery_label": "YRFI Watch",
+                "pick": "YRFI",
+                "confidence": "Watch",
                 "score": score,
                 "signal_type": signal_type,
                 "result": row.get("First Inning Result", "Pending"),
@@ -381,7 +381,7 @@ def f5_discovery(row, away_team, home_team):
         return None
 
     score = safe_float(row.get("F5 Score"))
-    discovery_type = range_discovery_type(score, 7.0, 11.9, 4.0, 6.9)
+    discovery_type = range_discovery_type(score, 4.0, 6.9, 7.0, 11.9)
     if discovery_type is None:
         return None
 
@@ -409,7 +409,7 @@ def full_game_discovery(row, away_team, home_team):
         return None
 
     score = safe_float(row.get("Full Game Score"))
-    discovery_type = range_discovery_type(score, 6.5, 8.9, 4.0, 6.4)
+    discovery_type = range_discovery_type(score, 4.0, 6.4, 6.5, 8.9)
     if discovery_type is None:
         return None
 

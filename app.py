@@ -78,11 +78,11 @@ FALLBACK_TIMEZONE = "America/New_York"
 MARKET_RELEASES = {
     "MLB": "2.3.30",
     "NFL": "1.0.0",
-    "WNBA": "1.0.1-test",
+    "WNBA": "1.0.2-test",
     "NBA": "0.1.0-test",
     "NHL": "0.1.0-test",
     "CBB": "0.1.0-test",
-    "MLS": "0.1.0-test",
+    "MLS": "0.1.1-test",
 }
 MODEL_BASELINES = {
     "MLB": "2.3.29",
@@ -1316,14 +1316,14 @@ def first_inning_watch_label(row):
 
     if signal_type in nrfi_signals:
         if 58 <= score <= 64:
-            return "NRFI Watch"
-        if 55 <= score <= 57:
             return "NRFI Lean"
+        if 55 <= score <= 57:
+            return "NRFI Watch"
     if signal_type in yrfi_signals:
         if 25 <= score <= 34:
-            return "YRFI Watch"
-        if 35 <= score <= 39:
             return "YRFI Lean"
+        if 35 <= score <= 39:
+            return "YRFI Watch"
 
     return None
 
@@ -1351,7 +1351,7 @@ def f5_watch_label(row, away_team=None, home_team=None):
         return None
 
     score = get_numeric_value(row, "F5 Score")
-    label = range_label(score, 7.0, 11.9, 4.0, 6.9, "F5 Watch", "F5 Lean")
+    label = range_label(score, 7.0, 11.9, 4.0, 6.9, "F5 Lean", "F5 Watch")
     if label is None:
         return None
 
@@ -1370,7 +1370,7 @@ def full_game_watch_label(row, away_team=None, home_team=None):
         return None
 
     score = get_numeric_value(row, "Full Game Score")
-    label = range_label(score, 6.5, 8.9, 4.0, 6.4, "Game Watch", "Game Lean")
+    label = range_label(score, 6.5, 8.9, 4.0, 6.4, "Game Lean", "Game Watch")
     if label is None:
         return None
 
@@ -4176,6 +4176,26 @@ def render_wnba_result_strip(row):
     )
 
 
+def market_discovery_labels(row):
+    labels = []
+    for key in [
+        "Side Discovery Label",
+        "Full Match Discovery Label",
+        "Scoring Discovery Label",
+        "BTTS Discovery Label",
+    ]:
+        value = row.get(key)
+        if value:
+            labels.append(str(value))
+
+    if row.get("Sport") == "MLS" and not row.get("BTTS Discovery Label"):
+        btts_edge = str(row.get("BTTS Edge") or "")
+        if btts_edge.endswith(" Lean") or btts_edge.endswith(" Watch"):
+            labels.append(btts_edge)
+
+    return labels
+
+
 def render_wnba_card(row, historical=False):
     sport = row.get("Sport")
     if sport == "NBA":
@@ -4196,17 +4216,24 @@ def render_wnba_card(row, historical=False):
         side_label = "Side Edge"
         scoring_label = "Scoring Environment"
     extra_decisions = ""
+    btts_primary_edge = row.get("BTTS Edge", "Pass")
+    btts_segment = row.get("BTTS Tracking Segment") or mls_signal_segment(
+        row,
+        "BTTS",
+    )
+    if sport == "MLS" and btts_segment in ["Lean", "Watch"]:
+        btts_primary_edge = "Pass"
     if sport == "MLS":
         extra_decisions = (
             f'<div class="decision-line decision-first">Full Match: {escape(str(row.get("Full Match Edge", "Pass")))}</div>'
-            f'<div class="decision-line decision-f5">BTTS: {escape(str(row.get("BTTS Edge", "Pass")))}</div>'
+            f'<div class="decision-line decision-f5">BTTS: {escape(str(btts_primary_edge))}</div>'
         )
     extra_model_rows = []
     if sport == "MLS":
         extra_model_rows = [
             ("Full Match", row.get("Full Match Edge", "N/A")),
             ("Full Match Result", row.get("Winner Result", "Pending")),
-            ("BTTS", row.get("BTTS Edge", "N/A")),
+            ("BTTS", btts_primary_edge),
             ("BTTS Result", row.get("BTTS Result", "Pending")),
         ]
     game_time_display = format_local_card_time(row)
@@ -4247,6 +4274,12 @@ def render_wnba_card(row, historical=False):
     """)
 
     with st.expander(f"Analysis: {row['Game']}"):
+        discovery_labels = market_discovery_labels(row)
+        if discovery_labels:
+            st.markdown("### Discovery Signals")
+            for label in discovery_labels:
+                st.markdown(f"- {label}")
+
         st.markdown("### Key Factors")
         for factor in row["Key Factors List"]:
             st.markdown(f"- {factor}")
@@ -4633,17 +4666,77 @@ def latest_wnba_history_date(rows):
     return max(dates) if dates else None
 
 
-def wnba_signal_result(row, market):
+def wnba_signal_segment(row, market):
     if market == "Side":
-        if row.get("side_edge") in [None, "", "Pass"]:
-            return None
-        return row.get("side_result")
+        stored_segment = row.get("side_tracking_segment")
+        if stored_segment:
+            return stored_segment
+        return (
+            "Official"
+            if row.get("side_edge") not in [None, "", "Pass"]
+            else "No Edge"
+        )
     if market == "Scoring":
-        if row.get("scoring_edge") in [None, "", "Neutral Scoring Environment"]:
-            return None
-        return row.get("scoring_result")
+        stored_segment = row.get("scoring_tracking_segment")
+        if stored_segment:
+            return stored_segment
+        return (
+            "Official"
+            if row.get("scoring_edge")
+            not in [None, "", "Neutral Scoring Environment"]
+            else "No Edge"
+        )
+
+    return "No Edge"
+
+
+def wnba_signal_result(row, market, segment="All"):
+    row_segment = wnba_signal_segment(row, market)
+    if segment != "All" and row_segment != segment:
+        return None
+    if row_segment not in ["Official", "Lean", "Watch"]:
+        return None
+
+    if market == "Side":
+        return (
+            row.get("side_result")
+            if row_segment == "Official"
+            else row.get("side_discovery_result")
+        )
+    if market == "Scoring":
+        return (
+            row.get("scoring_result")
+            if row_segment == "Official"
+            else row.get("scoring_discovery_result")
+        )
 
     return None
+
+
+def wnba_signal_pick(row, market):
+    segment = wnba_signal_segment(row, market)
+    if market == "Side":
+        return (
+            row.get("predicted_winner")
+            if segment == "Official"
+            else row.get("side_discovery_pick")
+        )
+    if market == "Scoring":
+        return (
+            row.get("scoring_edge")
+            if segment == "Official"
+            else row.get("scoring_discovery_pick")
+        )
+
+    return None
+
+
+def wnba_row_has_segment(row, market, segment):
+    markets = ["Side", "Scoring"] if market == "All" else [market]
+    return any(
+        wnba_signal_result(row, signal_market, segment) is not None
+        for signal_market in markets
+    )
 
 
 def wnba_history_row_matches_filters(
@@ -4651,6 +4744,7 @@ def wnba_history_row_matches_filters(
     market="All",
     days=None,
     confidence="All",
+    segment="All",
     exact_date=None,
     anchor_date=None,
 ):
@@ -4663,59 +4757,80 @@ def wnba_history_row_matches_filters(
             return False
     if confidence != "All" and row.get("confidence") != confidence:
         return False
-    if market != "All" and wnba_signal_result(row, market) is None:
+    if not wnba_row_has_segment(row, market, segment):
         return False
 
     return True
 
 
-def summarize_wnba_performance_rows(rows, market_filter="All"):
+def summarize_wnba_performance_rows(
+    rows,
+    market_filter="All",
+    segment_filter="Official",
+):
     markets = ["Side", "Scoring"] if market_filter == "All" else [market_filter]
+    segments = (
+        ["Official", "Lean", "Watch"]
+        if segment_filter == "All"
+        else [segment_filter]
+    )
     summary_rows = []
-    for market in markets:
-        market_rows = [
-            row for row in rows if wnba_signal_result(row, market) is not None
-        ]
-        if not market_rows:
-            continue
+    for segment in segments:
+        for market in markets:
+            market_rows = [
+                row
+                for row in rows
+                if wnba_signal_result(row, market, segment) is not None
+            ]
+            if not market_rows:
+                continue
 
-        hits = sum(
-            1 for row in market_rows if wnba_signal_result(row, market) == "Correct"
-        )
-        misses = sum(
-            1 for row in market_rows if wnba_signal_result(row, market) == "Missed"
-        )
-        pending = len(market_rows) - hits - misses
-        summary_rows.append(
-            {
-                "market": market,
-                "total": len(market_rows),
-                "hits": hits,
-                "misses": misses,
-                "pushes": 0,
-                "pending": pending,
-            }
-        )
+            hits = sum(
+                1
+                for row in market_rows
+                if wnba_signal_result(row, market, segment) == "Correct"
+            )
+            misses = sum(
+                1
+                for row in market_rows
+                if wnba_signal_result(row, market, segment) == "Missed"
+            )
+            pending = len(market_rows) - hits - misses
+            summary_rows.append(
+                {
+                    "market": (
+                        f"{segment} {market}"
+                        if segment_filter == "All"
+                        else market
+                    ),
+                    "segment": segment,
+                    "total": len(market_rows),
+                    "hits": hits,
+                    "misses": misses,
+                    "pushes": 0,
+                    "pending": pending,
+                }
+            )
 
     return summary_rows
 
 
-def wnba_detail_rows(rows, market_filter="All"):
+def wnba_detail_rows(rows, market_filter="All", segment_filter="Official"):
     detail_rows = []
     markets = ["Side", "Scoring"] if market_filter == "All" else [market_filter]
     for row in rows:
         for market in markets:
-            result = wnba_signal_result(row, market)
+            segment = wnba_signal_segment(row, market)
+            if segment_filter != "All" and segment != segment_filter:
+                continue
+            result = wnba_signal_result(row, market, segment)
             if result is None:
                 continue
 
             detail = dict(row)
             detail["market"] = market
-            detail["pick"] = (
-                row.get("predicted_winner")
-                if market == "Side"
-                else row.get("scoring_edge")
-            )
+            detail["tracking_segment"] = segment
+            detail["pick"] = wnba_signal_pick(row, market)
             detail["result"] = result or "Pending"
             detail["score"] = (
                 row.get("edge_score")
@@ -4727,25 +4842,136 @@ def wnba_detail_rows(rows, market_filter="All"):
     return detail_rows
 
 
-def mls_signal_result(row, market):
+def mls_signal_segment(row, market):
+    segment_columns = {
+        "Double Chance": (
+            "double_chance_tracking_segment",
+            "Side Tracking Segment",
+        ),
+        "Full Match": (
+            "full_match_tracking_segment",
+            "Full Match Tracking Segment",
+        ),
+        "Goals": (
+            "scoring_tracking_segment",
+            "Scoring Tracking Segment",
+        ),
+        "BTTS": ("btts_tracking_segment", "BTTS Tracking Segment"),
+    }
+    stored_segment = next(
+        (
+            row.get(column)
+            for column in segment_columns.get(market, ())
+            if row.get(column)
+        ),
+        None,
+    )
+    if stored_segment:
+        return stored_segment
+
+    edge_columns = {
+        "Double Chance": (
+            ("double_chance_edge", "Side Edge"),
+            [None, "", "Pass"],
+        ),
+        "Full Match": (
+            ("full_match_edge", "Full Match Edge"),
+            [None, "", "Pass"],
+        ),
+        "Goals": (
+            ("scoring_edge", "Scoring Edge"),
+            [None, "", "Neutral Goals Environment"],
+        ),
+        "BTTS": (("btts_edge", "BTTS Edge"), [None, "", "Pass"]),
+    }
+    edge_column_options, no_signal_values = edge_columns.get(
+        market,
+        ((), [None, ""]),
+    )
+    edge = next(
+        (
+            row.get(column)
+            for column in edge_column_options
+            if row.get(column) is not None
+        ),
+        None,
+    )
+    edge_text = str(edge or "")
+    if edge_text.endswith(" Lean"):
+        return "Lean"
+    if edge_text.endswith(" Watch"):
+        return "Watch"
+    if edge in no_signal_values:
+        return "No Edge"
+    return "Official"
+
+
+def mls_signal_result(row, market, segment="All"):
+    row_segment = mls_signal_segment(row, market)
+    if segment != "All" and row_segment != segment:
+        return None
+    if row_segment not in ["Official", "Lean", "Watch"]:
+        return None
+
+    if row_segment in ["Lean", "Watch"]:
+        discovery_result_columns = {
+            "Double Chance": "double_chance_discovery_result",
+            "Full Match": "full_match_discovery_result",
+            "Goals": "scoring_discovery_result",
+            "BTTS": "btts_discovery_result",
+        }
+        discovery_result = row.get(discovery_result_columns.get(market, ""))
+        if discovery_result:
+            return discovery_result
+
     if market == "Double Chance":
-        if row.get("double_chance_edge") in [None, "", "Pass"]:
-            return None
         return row.get("double_chance_result")
     if market == "Full Match":
-        if row.get("full_match_edge") in [None, "", "Pass"]:
-            return None
         return row.get("full_match_result")
     if market == "Goals":
-        if row.get("scoring_edge") in [None, "", "Neutral Goals Environment"]:
-            return None
         return row.get("scoring_result")
     if market == "BTTS":
-        if row.get("btts_edge") in [None, "", "Pass"]:
-            return None
         return row.get("btts_result")
 
     return None
+
+
+def mls_signal_pick(row, market):
+    segment = mls_signal_segment(row, market)
+    if segment in ["Lean", "Watch"]:
+        discovery_pick_columns = {
+            "Double Chance": "double_chance_discovery_pick",
+            "Full Match": "full_match_discovery_pick",
+            "Goals": "scoring_discovery_pick",
+            "BTTS": "btts_discovery_pick",
+        }
+        discovery_pick = row.get(discovery_pick_columns.get(market, ""))
+        if discovery_pick:
+            return str(discovery_pick)
+
+    edge_columns = {
+        "Double Chance": "double_chance_edge",
+        "Full Match": "full_match_edge",
+        "Goals": "scoring_edge",
+        "BTTS": "btts_edge",
+    }
+    pick = str(row.get(edge_columns.get(market, "")) or "")
+    for suffix in [" Lean", " Watch"]:
+        if pick.endswith(suffix):
+            return pick[: -len(suffix)]
+    return pick
+
+
+def mls_row_has_segment(row, market, segment):
+    markets = (
+        ["Double Chance", "Full Match", "Goals", "BTTS"]
+        if market == "All"
+        else [market]
+    )
+    return any(
+        mls_signal_result(row, signal_market, segment) is not None
+        for signal_market in markets
+    )
 
 
 def mls_history_row_matches_filters(
@@ -4753,6 +4979,7 @@ def mls_history_row_matches_filters(
     market="All",
     days=None,
     confidence="All",
+    segment="All",
     exact_date=None,
     anchor_date=None,
 ):
@@ -4765,48 +4992,69 @@ def mls_history_row_matches_filters(
             return False
     if confidence != "All" and row.get("confidence") != confidence:
         return False
-    if market != "All" and mls_signal_result(row, market) is None:
+    if not mls_row_has_segment(row, market, segment):
         return False
 
     return True
 
 
-def summarize_mls_performance_rows(rows, market_filter="All"):
+def summarize_mls_performance_rows(
+    rows,
+    market_filter="All",
+    segment_filter="Official",
+):
     markets = (
         ["Double Chance", "Full Match", "Goals", "BTTS"]
         if market_filter == "All"
         else [market_filter]
     )
+    segments = (
+        ["Official", "Lean", "Watch"]
+        if segment_filter == "All"
+        else [segment_filter]
+    )
     summary_rows = []
-    for market in markets:
-        market_rows = [
-            row for row in rows if mls_signal_result(row, market) is not None
-        ]
-        if not market_rows:
-            continue
+    for segment in segments:
+        for market in markets:
+            market_rows = [
+                row
+                for row in rows
+                if mls_signal_result(row, market, segment) is not None
+            ]
+            if not market_rows:
+                continue
 
-        hits = sum(
-            1 for row in market_rows if mls_signal_result(row, market) == "Correct"
-        )
-        misses = sum(
-            1 for row in market_rows if mls_signal_result(row, market) == "Missed"
-        )
-        pending = len(market_rows) - hits - misses
-        summary_rows.append(
-            {
-                "market": market,
-                "total": len(market_rows),
-                "hits": hits,
-                "misses": misses,
-                "pushes": 0,
-                "pending": pending,
-            }
-        )
+            hits = sum(
+                1
+                for row in market_rows
+                if mls_signal_result(row, market, segment) == "Correct"
+            )
+            misses = sum(
+                1
+                for row in market_rows
+                if mls_signal_result(row, market, segment) == "Missed"
+            )
+            pending = len(market_rows) - hits - misses
+            summary_rows.append(
+                {
+                    "market": (
+                        f"{segment} {market}"
+                        if segment_filter == "All"
+                        else market
+                    ),
+                    "segment": segment,
+                    "total": len(market_rows),
+                    "hits": hits,
+                    "misses": misses,
+                    "pushes": 0,
+                    "pending": pending,
+                }
+            )
 
     return summary_rows
 
 
-def mls_detail_rows(rows, market_filter="All"):
+def mls_detail_rows(rows, market_filter="All", segment_filter="Official"):
     detail_rows = []
     markets = (
         ["Double Chance", "Full Match", "Goals", "BTTS"]
@@ -4815,23 +5063,24 @@ def mls_detail_rows(rows, market_filter="All"):
     )
     for row in rows:
         for market in markets:
-            result = mls_signal_result(row, market)
+            segment = mls_signal_segment(row, market)
+            if segment_filter != "All" and segment != segment_filter:
+                continue
+            result = mls_signal_result(row, market, segment)
             if result is None:
                 continue
 
             detail = dict(row)
             detail["market"] = market
+            detail["tracking_segment"] = segment
+            detail["pick"] = mls_signal_pick(row, market)
             if market == "Double Chance":
-                detail["pick"] = row.get("double_chance_edge")
                 detail["score"] = row.get("edge_score")
             elif market == "Full Match":
-                detail["pick"] = row.get("full_match_edge")
                 detail["score"] = row.get("model_margin")
             elif market == "Goals":
-                detail["pick"] = row.get("scoring_edge")
                 detail["score"] = row.get("projected_total")
             else:
-                detail["pick"] = row.get("btts_edge")
                 detail["score"] = row.get("projected_total")
             detail["result"] = result or "Pending"
             detail_rows.append(detail)
@@ -4860,7 +5109,7 @@ def render_wnba_performance_section():
         return
 
     model_filter_options = [f"Current {model_version}", "All"]
-    filter_cols = st.columns([1, 1, 1, 1])
+    filter_cols = st.columns([1, 1, 1, 1, 1])
     with filter_cols[0]:
         market_filter = st.selectbox(
             "Signal",
@@ -4880,6 +5129,12 @@ def render_wnba_performance_section():
             key="wnba_performance_confidence_filter",
         )
     with filter_cols[3]:
+        segment_filter = st.selectbox(
+            "Segment",
+            ["All", "Official", "Lean", "Watch"],
+            key="wnba_performance_segment_filter",
+        )
+    with filter_cols[4]:
         selected_model_filter = st.selectbox(
             "Model",
             model_filter_options,
@@ -4924,6 +5179,7 @@ def render_wnba_performance_section():
                 market_filter,
                 days=days,
                 confidence=confidence_filter,
+                segment=segment_filter,
                 exact_date=None,
                 anchor_date=history_today,
             )
@@ -4937,12 +5193,21 @@ def render_wnba_performance_section():
                 market_filter,
                 days=None,
                 confidence=confidence_filter,
+                segment=segment_filter,
                 exact_date=exact_date,
             )
         ]
 
-    summary_rows = summarize_wnba_performance_rows(filtered_rows, market_filter)
-    detail_rows = wnba_detail_rows(filtered_rows, market_filter)
+    summary_rows = summarize_wnba_performance_rows(
+        filtered_rows,
+        market_filter,
+        segment_filter,
+    )
+    detail_rows = wnba_detail_rows(
+        filtered_rows,
+        market_filter,
+        segment_filter,
+    )
 
     with st.expander("WNBA Performance History Diagnostics"):
         diag_cols = st.columns(4)
@@ -4971,9 +5236,12 @@ def render_wnba_performance_section():
             else str(model_version).replace(".", "_")
         )
         st.download_button(
-            f"Download WNBA Performance History CSV ({len(selected_rows)} rows)",
-            data=wnba_rows_to_csv(selected_rows),
-            file_name=f"wnba_model_history_{export_label}.csv",
+            f"Download WNBA Performance History CSV ({len(detail_rows)} rows)",
+            data=wnba_rows_to_csv(detail_rows),
+            file_name=(
+                f"wnba_model_history_{export_label}_"
+                f"{segment_filter.lower().replace(' ', '_')}.csv"
+            ),
             mime="text/csv",
             key="wnba_history_download",
         )
@@ -5001,6 +5269,8 @@ def render_wnba_performance_section():
         filter_text += f" - {market_filter}"
     if confidence_filter != "All":
         filter_text += f" - {confidence_filter} confidence"
+    if segment_filter != "All":
+        filter_text += f" - {segment_filter}"
 
     st.html(
         '<div class="model-favorite top-looks">'
@@ -5021,6 +5291,7 @@ def render_wnba_performance_section():
         columns={
             "slate_date": "Slate",
             "market": "Signal",
+            "tracking_segment": "Segment",
             "game": "Game",
             "pick": "Pick",
             "confidence": "Confidence",
@@ -5036,6 +5307,7 @@ def render_wnba_performance_section():
             [
                 "Slate",
                 "Signal",
+                "Segment",
                 "Game",
                 "Pick",
                 "Confidence",
@@ -6062,7 +6334,7 @@ def render_mls_performance_section():
         return
 
     model_filter_options = [f"Current {model_version}", "All"]
-    filter_cols = st.columns([1, 1, 1, 1])
+    filter_cols = st.columns([1, 1, 1, 1, 1])
     with filter_cols[0]:
         market_filter = st.selectbox(
             "Signal",
@@ -6082,6 +6354,12 @@ def render_mls_performance_section():
             key="mls_performance_confidence_filter",
         )
     with filter_cols[3]:
+        segment_filter = st.selectbox(
+            "Segment",
+            ["All", "Official", "Lean", "Watch"],
+            key="mls_performance_segment_filter",
+        )
+    with filter_cols[4]:
         selected_model_filter = st.selectbox(
             "Model",
             model_filter_options,
@@ -6124,6 +6402,7 @@ def render_mls_performance_section():
                 market_filter,
                 days=days,
                 confidence=confidence_filter,
+                segment=segment_filter,
                 exact_date=None,
                 anchor_date=history_today,
             )
@@ -6137,12 +6416,21 @@ def render_mls_performance_section():
                 market_filter,
                 days=None,
                 confidence=confidence_filter,
+                segment=segment_filter,
                 exact_date=exact_date,
             )
         ]
 
-    summary_rows = summarize_mls_performance_rows(filtered_rows, market_filter)
-    detail_rows = mls_detail_rows(filtered_rows, market_filter)
+    summary_rows = summarize_mls_performance_rows(
+        filtered_rows,
+        market_filter,
+        segment_filter,
+    )
+    detail_rows = mls_detail_rows(
+        filtered_rows,
+        market_filter,
+        segment_filter,
+    )
 
     with st.expander("MLS Performance History Diagnostics"):
         diag_cols = st.columns(4)
@@ -6171,9 +6459,12 @@ def render_mls_performance_section():
             else str(model_version).replace(".", "_")
         )
         st.download_button(
-            f"Download MLS Performance History CSV ({len(selected_rows)} rows)",
-            data=wnba_rows_to_csv(selected_rows),
-            file_name=f"mls_model_history_{export_label}.csv",
+            f"Download MLS Performance History CSV ({len(detail_rows)} rows)",
+            data=wnba_rows_to_csv(detail_rows),
+            file_name=(
+                f"mls_model_history_{export_label}_"
+                f"{segment_filter.lower().replace(' ', '_')}.csv"
+            ),
             mime="text/csv",
             key="mls_history_download",
         )
@@ -6201,6 +6492,8 @@ def render_mls_performance_section():
         filter_text += f" - {market_filter}"
     if confidence_filter != "All":
         filter_text += f" - {confidence_filter} confidence"
+    if segment_filter != "All":
+        filter_text += f" - {segment_filter}"
 
     st.html(
         '<div class="model-favorite top-looks">'
@@ -6221,6 +6514,7 @@ def render_mls_performance_section():
         columns={
             "slate_date": "Slate",
             "market": "Signal",
+            "tracking_segment": "Segment",
             "game": "Game",
             "pick": "Pick",
             "confidence": "Confidence",
@@ -6236,6 +6530,7 @@ def render_mls_performance_section():
             [
                 "Slate",
                 "Signal",
+                "Segment",
                 "Game",
                 "Pick",
                 "Confidence",

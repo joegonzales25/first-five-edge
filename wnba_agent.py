@@ -24,6 +24,12 @@ from nba_agent import key_factors_summary, split_notes
 from wnba_data import load_wnba_current_season
 
 
+WNBA_SIDE_LEAN_MIN = WNBA_CONFIG.side_c * 0.75
+WNBA_SIDE_WATCH_MIN = WNBA_CONFIG.side_c * 0.50
+WNBA_SCORING_LEAN_MIN = WNBA_CONFIG.total_threshold * 0.75
+WNBA_SCORING_WATCH_MIN = WNBA_CONFIG.total_threshold * 0.50
+
+
 def build_historical_lab(games_csv, season=None):
     results, summary = backtest_csv(games_csv, league="WNBA", season=season)
     return prepare_basketball_lab(results), summary
@@ -80,6 +86,73 @@ def scoring_result_for_game(scoring_edge, actual_total, league_total, completed)
     if scoring_edge == "Low Scoring Environment":
         return "Correct" if actual_total < league_total else "Missed"
     return "No Signal"
+
+
+def discovery_tier(strength, official_minimum, lean_minimum, watch_minimum):
+    strength = abs(float(strength))
+    if strength >= official_minimum:
+        return "Official"
+    if strength >= lean_minimum:
+        return "Lean"
+    if strength >= watch_minimum:
+        return "Watch"
+    return "No Edge"
+
+
+def side_release_values(side_edge, model_margin, predicted_winner):
+    if side_edge != "Pass":
+        return {
+            "segment": "Official",
+            "pick": predicted_winner,
+            "label": None,
+        }
+
+    segment = discovery_tier(
+        model_margin,
+        WNBA_CONFIG.side_c,
+        WNBA_SIDE_LEAN_MIN,
+        WNBA_SIDE_WATCH_MIN,
+    )
+    return {
+        "segment": segment,
+        "pick": predicted_winner if segment in ["Lean", "Watch"] else None,
+        "label": (
+            f"{predicted_winner} Side {segment}"
+            if segment in ["Lean", "Watch"]
+            else None
+        ),
+    }
+
+
+def scoring_release_values(scoring_edge, projected_total, league_total):
+    if scoring_edge != "Neutral Scoring Environment":
+        return {
+            "segment": "Official",
+            "pick": scoring_edge,
+            "label": None,
+        }
+
+    delta = projected_total - league_total
+    segment = discovery_tier(
+        delta,
+        WNBA_CONFIG.total_threshold,
+        WNBA_SCORING_LEAN_MIN,
+        WNBA_SCORING_WATCH_MIN,
+    )
+    direction = (
+        "High Scoring Environment"
+        if delta >= 0
+        else "Low Scoring Environment"
+    )
+    return {
+        "segment": segment,
+        "pick": direction if segment in ["Lean", "Watch"] else None,
+        "label": (
+            f"{direction} {segment}"
+            if segment in ["Lean", "Watch"]
+            else None
+        ),
+    }
 
 
 def completed_games_for_lab(games: pd.DataFrame) -> pd.DataFrame:
@@ -210,6 +283,16 @@ def build_current_slate(season=None, today=None, days_ahead=14, slate_date=None)
         )
         notes = agent_notes(side_notes, scoring_notes)
         predicted_winner = home if model_margin > 0 else away
+        side_release = side_release_values(
+            side_edge,
+            model_margin,
+            predicted_winner,
+        )
+        scoring_release = scoring_release_values(
+            scoring_edge,
+            projected_total,
+            league_total,
+        )
         actual_winner = None
         actual_total = None
         side_result = side_result_for_game(
@@ -220,6 +303,26 @@ def build_current_slate(season=None, today=None, days_ahead=14, slate_date=None)
         )
         scoring_result = scoring_result_for_game(
             scoring_edge,
+            actual_total,
+            league_total,
+            completed,
+        )
+        side_discovery_result = side_result_for_game(
+            (
+                f"{side_release['pick']} Edge"
+                if side_release["segment"] in ["Lean", "Watch"]
+                else "Pass"
+            ),
+            side_release["pick"],
+            actual_winner,
+            completed,
+        )
+        scoring_discovery_result = scoring_result_for_game(
+            (
+                scoring_release["pick"]
+                if scoring_release["segment"] in ["Lean", "Watch"]
+                else "Neutral Scoring Environment"
+            ),
             actual_total,
             league_total,
             completed,
@@ -238,6 +341,26 @@ def build_current_slate(season=None, today=None, days_ahead=14, slate_date=None)
             )
             scoring_result = scoring_result_for_game(
                 scoring_edge,
+                actual_total,
+                league_total,
+                completed,
+            )
+            side_discovery_result = side_result_for_game(
+                (
+                    f"{side_release['pick']} Edge"
+                    if side_release["segment"] in ["Lean", "Watch"]
+                    else "Pass"
+                ),
+                side_release["pick"],
+                actual_winner,
+                completed,
+            )
+            scoring_discovery_result = scoring_result_for_game(
+                (
+                    scoring_release["pick"]
+                    if scoring_release["segment"] in ["Lean", "Watch"]
+                    else "Neutral Scoring Environment"
+                ),
                 actual_total,
                 league_total,
                 completed,
@@ -268,7 +391,15 @@ def build_current_slate(season=None, today=None, days_ahead=14, slate_date=None)
                     "Edge Score": edge_score,
                     "Confidence": confidence,
                     "Side Edge": side_edge,
+                    "Side Tracking Segment": side_release["segment"],
+                    "Side Discovery Pick": side_release["pick"],
+                    "Side Discovery Label": side_release["label"],
+                    "Side Discovery Result": side_discovery_result,
                     "Scoring Edge": scoring_edge,
+                    "Scoring Tracking Segment": scoring_release["segment"],
+                    "Scoring Discovery Pick": scoring_release["pick"],
+                    "Scoring Discovery Label": scoring_release["label"],
+                    "Scoring Discovery Result": scoring_discovery_result,
                     "Early Edge": "Model Pending",
                     "Side Result": side_result,
                     "Winner Result": side_result,
