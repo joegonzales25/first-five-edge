@@ -4151,14 +4151,14 @@ def render_wnba_card(row, historical=False):
             f'<div class="decision-line decision-first">Full Match: {escape(str(row.get("Full Match Edge", "Pass")))}</div>'
             f'<div class="decision-line decision-f5">BTTS: {escape(str(row.get("BTTS Edge", "Pass")))}</div>'
         )
-    extra_model_rows = ""
+    extra_model_rows = []
     if sport == "MLS":
-        extra_model_rows = f"""
-        | Full Match | {row.get("Full Match Edge", "N/A")} |
-        | Full Match Result | {row.get("Winner Result", "Pending")} |
-        | BTTS | {row.get("BTTS Edge", "N/A")} |
-        | BTTS Result | {row.get("BTTS Result", "Pending")} |
-        """
+        extra_model_rows = [
+            ("Full Match", row.get("Full Match Edge", "N/A")),
+            ("Full Match Result", row.get("Winner Result", "Pending")),
+            ("BTTS", row.get("BTTS Edge", "N/A")),
+            ("BTTS Result", row.get("BTTS Result", "Pending")),
+        ]
     game_time_display = format_local_card_time(row)
     result_line = ""
     if historical:
@@ -4202,21 +4202,28 @@ def render_wnba_card(row, historical=False):
             st.markdown(f"- {factor}")
 
         st.markdown("### Model Detail")
-        st.markdown(f"""
-        | Metric | Value |
-        |---|---|
-        | {side_label} | {row["Side Edge"]} |
-        | {side_label} Result | {row.get("Side Result", row.get("Winner Result", "Pending"))} |
-        | {scoring_label} | {row["Scoring Edge"]} |
-        | {scoring_label} Result | {row.get("Scoring Result", "Pending")} |
-        {extra_model_rows}
-        | {half_label} | {row["Early Edge"]} |
-        | Edge Score | {row["Edge Score"]} |
-        | Confidence | {row["Confidence"]} |
-        | Model Margin | {row["Model Margin"]} |
-        | Projected Total | {row["Projected Total"]} |
-        | League Total Baseline | {row["League Total Baseline"]} |
-        """)
+        model_detail_rows = [
+            (side_label, row["Side Edge"]),
+            (
+                f"{side_label} Result",
+                row.get("Side Result", row.get("Winner Result", "Pending")),
+            ),
+            (scoring_label, row["Scoring Edge"]),
+            (f"{scoring_label} Result", row.get("Scoring Result", "Pending")),
+            *extra_model_rows,
+            (half_label, row["Early Edge"]),
+            ("Edge Score", row["Edge Score"]),
+            ("Confidence", row["Confidence"]),
+            ("Model Margin", row["Model Margin"]),
+            ("Projected Total", row["Projected Total"]),
+            ("League Total Baseline", row["League Total Baseline"]),
+        ]
+        markdown_rows = ["| Metric | Value |", "|---|---|"]
+        for metric, value in model_detail_rows:
+            safe_metric = str(metric).replace("|", "\\|")
+            safe_value = str(value).replace("|", "\\|")
+            markdown_rows.append(f"| {safe_metric} | {safe_value} |")
+        st.markdown("\n".join(markdown_rows))
 
 
 def filter_nfl_games(games, view, historical=False):
