@@ -481,6 +481,11 @@ Use an external scheduler, initially GitHub Actions, to refresh pregame snapshot
 Only active in-season or actively monitored markets should have scheduled
 snapshot workflows enabled. Off-season and planning markets may keep manual
 snapshot workflows for testing.
+Scheduled active-market snapshot jobs should process the current ET slate and
+at least the previous ET slate by default, so late finals can settle after
+midnight without leaving stored signals Pending.
+Manual workflow dispatch with an explicit slate date should process only that
+requested slate date unless a backfill operation is explicitly approved.
 ```
 
 ### Watch and Lean Discovery Layer
@@ -671,9 +676,19 @@ WNBA:
 
 ```text
 Status: active monitored test market.
-Schedule: hourly during active monitoring.
+Schedule: hourly during active monitoring; scheduled runs process current ET slate plus previous ET slate for settlement.
 Data source of truth: stored WNBA snapshot history.
 Performance: official side/scoring signals report separately from stored leans/watches when implemented.
+Next gate: completed-slate audit to confirm cards, exports, and performance reconcile.
+```
+
+MLS:
+
+```text
+Status: active monitored test market.
+Schedule: hourly during active monitoring; scheduled runs process current ET slate plus previous ET slate for settlement.
+Data source of truth: stored MLS snapshot history.
+Performance: Double Chance, Full Match, Goals, and BTTS report separately.
 Next gate: completed-slate audit to confirm cards, exports, and performance reconcile.
 ```
 

@@ -141,6 +141,8 @@ Global rules:
 3. Once the market starts, the latest stored snapshot locks.
 4. After lock, later page loads or data refreshes can update result fields only.
 5. Missing stored snapshots become Not Tracked, not stale Pending rows.
+6. Active scheduled markets should revisit the previous ET slate on each scheduled run so late finals settle after midnight.
+7. Manual snapshot runs for a specific slate date should update only that requested date unless a backfill is explicitly approved.
 ```
 
 ## Release Rules
@@ -161,10 +163,10 @@ Current lockdown status:
 ```text
 MLB: production candidate, pending final reconciliation audit
 WNBA: active monitored test market
+MLS: active monitored test market
 NBA: test/planning; scheduled snapshots disabled until season
 NHL: test/planning; scheduled snapshots disabled until season
 CBB: v0 framework; manual snapshots only until data/source validation
 PGA: documented and paused
 NFL: needs classification before production lockdown
 ```
-
