@@ -343,6 +343,17 @@ Diagnostics / Splits
 Export
 ```
 
+Performance reports are history views, not current-slate card views. They
+should not display a `Slate Date` input. Default the reporting anchor to the
+latest tracked slate date when stored history exists; otherwise default to
+today. Users should narrow reports with the performance controls such as
+Day(s), market/signal, confidence, model version, and official/discovery
+segment filters.
+
+Current slate and game-card pages should continue to display `Slate Date`.
+Snapshot freshness should remain visible under the filter/result count in both
+current and performance views.
+
 Official Performance includes locked official picks only:
 
 ```text

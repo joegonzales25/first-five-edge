@@ -178,7 +178,7 @@ def current_date_for_timezone(timezone_name):
 
 st.set_page_config(
     page_title="First Five Edge",
-    page_icon="⚾",
+    page_icon="âš¾",
     layout="wide"
 )
 
@@ -1832,7 +1832,7 @@ def render_market_watch(row):
 
     return f"""
     <div class="market-watch">
-        <div class="market-heading">📈 Market Watch</div>
+        <div class="market-heading">ðŸ“ˆ Market Watch</div>
         <div class="market-pick">{escape(market_pick)}</div>
         <div class="market-why">Why?</div>
         <div class="reason-stack">{reason_items}</div>
@@ -2584,9 +2584,9 @@ def format_game_status_line(row):
     base_line = f"{game_time} - {status}"
 
     if snapshot_status == "Locked":
-        return f"🔒 {base_line}"
+        return f"ðŸ”’ {base_line}"
     if snapshot_status == "Not Tracked":
-        return f"⚠ Not Tracked - {base_line}"
+        return f"âš  Not Tracked - {base_line}"
 
     return base_line
 
@@ -2727,6 +2727,34 @@ def safe_load_mls_slate_history_rows(model_version, market_version, slate_date):
         row
         for row in rows
         if str(row.get("slate_date", "")) == target_date
+    ]
+
+
+def latest_market_history_rows(load_history_func, model_version, market_version):
+    try:
+        rows = load_history_func(
+            model_version=model_version,
+            market_version=market_version,
+        )
+    except Exception:
+        return []
+
+    latest_date = None
+    for row in rows:
+        try:
+            row_date = datetime.fromisoformat(str(row.get("slate_date"))).date()
+        except Exception:
+            continue
+        if latest_date is None or row_date > latest_date:
+            latest_date = row_date
+
+    if latest_date is None:
+        return []
+
+    return [
+        row
+        for row in rows
+        if str(row.get("slate_date", "")) == str(latest_date)
     ]
 
 
@@ -3955,7 +3983,7 @@ def render_nfl_card(row, historical=False):
     </div>
     """)
 
-    with st.expander(f"🔍 Analysis: {row['Game']}"):
+    with st.expander(f"ðŸ” Analysis: {row['Game']}"):
         if historical:
             st.markdown("### Result Review")
             st.markdown(f"""
@@ -4440,6 +4468,21 @@ def wnba_data_contract_text():
 
 
 def render_wnba_current():
+    selected_view = selected_wnba_view("all")
+
+    if selected_view == "perf":
+        render_wnba_view_pills(selected_view)
+        wnba_history_rows = latest_market_history_rows(
+            load_wnba_history,
+            MODEL_BASELINES["WNBA"],
+            MARKET_RELEASES["WNBA"],
+        )
+        st.caption("Performance history")
+        st.caption(format_snapshot_caption(wnba_history_rows))
+        st.divider()
+        render_wnba_performance_section()
+        return
+
     default_date = current_date_for_timezone(display_timezone)
     selected_date = st.date_input(
         "Slate Date",
@@ -4447,7 +4490,6 @@ def render_wnba_current():
         format="MM/DD/YYYY",
         key="wnba_slate_date",
     )
-    selected_view = selected_wnba_view("all")
     slate = pd.DataFrame()
     meta = {}
     slate_error = None
@@ -4463,13 +4505,6 @@ def render_wnba_current():
     )
 
     render_wnba_view_pills(selected_view)
-
-    if selected_view == "perf":
-        st.caption("Performance history")
-        st.caption(format_snapshot_caption(wnba_history_rows))
-        st.divider()
-        render_wnba_performance_section()
-        return
 
     if slate_error is not None:
         st.error(f"Could not load WNBA current slate: {slate_error}")
@@ -5117,6 +5152,21 @@ def render_wnba_historical():
 
 
 def render_nba_current():
+    selected_view = selected_nba_view("all")
+
+    if selected_view == "perf":
+        render_nba_view_pills(selected_view)
+        nba_history_rows = latest_market_history_rows(
+            load_nba_history,
+            MODEL_BASELINES["NBA"],
+            MARKET_RELEASES["NBA"],
+        )
+        st.caption("Performance history")
+        st.caption(format_snapshot_caption(nba_history_rows))
+        st.divider()
+        render_nba_performance_section()
+        return
+
     default_date = current_date_for_timezone(FALLBACK_TIMEZONE)
     selected_date = st.date_input(
         "Slate Date",
@@ -5124,7 +5174,6 @@ def render_nba_current():
         format="MM/DD/YYYY",
         key="nba_slate_date",
     )
-    selected_view = selected_nba_view("all")
     slate = pd.DataFrame()
     slate_error = None
     try:
@@ -5139,13 +5188,6 @@ def render_nba_current():
     )
 
     render_nba_view_pills(selected_view)
-
-    if selected_view == "perf":
-        st.caption("Performance history")
-        st.caption(format_snapshot_caption(nba_history_rows))
-        st.divider()
-        render_nba_performance_section()
-        return
 
     if slate_error is not None:
         st.error(f"Could not load NBA current slate: {slate_error}")
@@ -5503,6 +5545,21 @@ def render_nba_page():
 
 
 def render_cbb_current():
+    selected_view = selected_cbb_view("all")
+
+    if selected_view == "perf":
+        render_cbb_view_pills(selected_view)
+        cbb_history_rows = latest_market_history_rows(
+            load_cbb_history,
+            MODEL_BASELINES["CBB"],
+            MARKET_RELEASES["CBB"],
+        )
+        st.caption("Performance history")
+        st.caption(format_snapshot_caption(cbb_history_rows))
+        st.divider()
+        render_cbb_performance_section()
+        return
+
     default_date = current_date_for_timezone(FALLBACK_TIMEZONE)
     selected_date = st.date_input(
         "Slate Date",
@@ -5510,7 +5567,6 @@ def render_cbb_current():
         format="MM/DD/YYYY",
         key="cbb_slate_date",
     )
-    selected_view = selected_cbb_view("all")
     slate = pd.DataFrame()
     slate_error = None
     try:
@@ -5525,13 +5581,6 @@ def render_cbb_current():
     )
 
     render_cbb_view_pills(selected_view)
-
-    if selected_view == "perf":
-        st.caption("Performance history")
-        st.caption(format_snapshot_caption(cbb_history_rows))
-        st.divider()
-        render_cbb_performance_section()
-        return
 
     if slate_error is not None:
         st.error(f"Could not load CBB current slate: {slate_error}")
@@ -5894,6 +5943,21 @@ def render_cbb_page():
 
 
 def render_mls_current():
+    selected_view = selected_mls_view("all")
+
+    if selected_view == "perf":
+        render_mls_view_pills(selected_view)
+        mls_history_rows = latest_market_history_rows(
+            load_mls_history,
+            MODEL_BASELINES["MLS"],
+            MARKET_RELEASES["MLS"],
+        )
+        st.caption("Performance history")
+        st.caption(format_snapshot_caption(mls_history_rows))
+        st.divider()
+        render_mls_performance_section()
+        return
+
     default_date = current_date_for_timezone(FALLBACK_TIMEZONE)
     selected_date = st.date_input(
         "Slate Date",
@@ -5901,7 +5965,6 @@ def render_mls_current():
         format="MM/DD/YYYY",
         key="mls_slate_date",
     )
-    selected_view = selected_mls_view("all")
     slate = pd.DataFrame()
     slate_error = None
     try:
@@ -5916,13 +5979,6 @@ def render_mls_current():
     )
 
     render_mls_view_pills(selected_view)
-
-    if selected_view == "perf":
-        st.caption("Performance history")
-        st.caption(format_snapshot_caption(mls_history_rows))
-        st.divider()
-        render_mls_performance_section()
-        return
 
     if slate_error is not None:
         st.error(f"Could not load MLS current slate: {slate_error}")
@@ -6225,6 +6281,21 @@ def render_mls_page():
 
 
 def render_nhl_current():
+    selected_view = selected_nhl_view("all")
+
+    if selected_view == "perf":
+        render_nhl_view_pills(selected_view)
+        nhl_history_rows = latest_market_history_rows(
+            load_nhl_history,
+            MODEL_BASELINES["NHL"],
+            MARKET_RELEASES["NHL"],
+        )
+        st.caption("Performance history")
+        st.caption(format_snapshot_caption(nhl_history_rows))
+        st.divider()
+        render_nhl_performance_section()
+        return
+
     default_date = current_date_for_timezone(FALLBACK_TIMEZONE)
     selected_date = st.date_input(
         "Slate Date",
@@ -6232,7 +6303,6 @@ def render_nhl_current():
         format="MM/DD/YYYY",
         key="nhl_slate_date",
     )
-    selected_view = selected_nhl_view("all")
     slate = pd.DataFrame()
     slate_error = None
     try:
@@ -6247,13 +6317,6 @@ def render_nhl_current():
     )
 
     render_nhl_view_pills(selected_view)
-
-    if selected_view == "perf":
-        st.caption("Performance history")
-        st.caption(format_snapshot_caption(nhl_history_rows))
-        st.divider()
-        render_nhl_performance_section()
-        return
 
     if slate_error is not None:
         st.error(f"Could not load NHL current slate: {slate_error}")
@@ -6803,23 +6866,10 @@ if active_sport != "MLB":
     st.info(f"{active_sport} module is coming soon.")
     st.stop()
 
-st.title("⚾ MLB Edge Detector")
+st.title("âš¾ MLB Edge Detector")
 
 st.sidebar.title("Controls")
 st.sidebar.caption(f"Model version: {APP_VERSION}")
-if (
-    "header_slate_date" in st.session_state
-    and st.session_state["header_slate_date"] > max_slate_date
-):
-    st.session_state["header_slate_date"] = max_slate_date
-
-selected_date = st.date_input(
-    "Slate Date",
-    value=default_slate_date,
-    max_value=max_slate_date,
-    format="MM/DD/YYYY",
-    key="header_slate_date",
-)
 timezone_label = "local" if timezone_detected else "Eastern fallback"
 st.sidebar.caption(f"Times shown in {display_timezone} ({timezone_label})")
 st.sidebar.caption("Model 2.3 promoted; 2.2.7 retained as rollback reference.")
@@ -6850,6 +6900,41 @@ if st.sidebar.button("Refresh Data"):
     st.cache_data.clear()
     st.rerun()
 
+selected_filter = selected_mlb_filter()
+if selected_filter == "Performance":
+    render_mlb_filter_pills(selected_filter)
+    performance_history_date = latest_history_slate_date() or default_slate_date
+    slate_history_rows = safe_load_slate_history_rows(
+        PERFORMANCE_TRACKING_VERSION,
+        performance_history_date,
+    )
+    performance_total = sum(
+        row.get("total") or 0
+        for row in safe_load_performance_summary(
+            PERFORMANCE_TRACKING_VERSION,
+            exact_date=performance_history_date,
+        )
+    )
+    st.caption(f"{performance_total} results")
+    st.caption(format_snapshot_caption(slate_history_rows))
+    st.divider()
+    render_model_performance(PERFORMANCE_TRACKING_VERSION, performance_history_date)
+    st.stop()
+
+if (
+    "header_slate_date" in st.session_state
+    and st.session_state["header_slate_date"] > max_slate_date
+):
+    st.session_state["header_slate_date"] = max_slate_date
+
+selected_date = st.date_input(
+    "Slate Date",
+    value=default_slate_date,
+    max_value=max_slate_date,
+    format="MM/DD/YYYY",
+    key="header_slate_date",
+)
+
 games = load_games(selected_date, MODEL_CACHE_VERSION, display_timezone)
 
 if games.empty:
@@ -6874,7 +6959,6 @@ nrfi_mask = first_inning_pick_text.str.contains("NRFI", case=False, na=False)
 yrfi_mask = first_inning_pick_text.str.contains("YRFI", case=False, na=False)
 game_mask = ~games["Full Game Pick"].apply(is_no_edge_pick)
 f5_mask = ~games["F5 Pick"].apply(is_no_edge_pick)
-selected_filter = selected_mlb_filter()
 render_mlb_filter_pills(selected_filter)
 show_watches, show_leans = render_mlb_discovery_controls()
 
@@ -6892,28 +6976,25 @@ elif selected_filter == "F5":
 elif selected_filter == "Game":
     base_mask = game_mask
 
-if selected_filter == "Performance":
-    filtered = games.copy()
-else:
-    discovery_mask = pd.Series(False, index=games.index)
-    if show_watches:
-        discovery_mask = discovery_mask | games.apply(
-            lambda row: has_discovery_label(row, selected_filter, "Watch"),
-            axis=1,
-        )
-    if show_leans:
-        discovery_mask = discovery_mask | games.apply(
-            lambda row: has_discovery_label(row, selected_filter, "Lean"),
-            axis=1,
-        )
+discovery_mask = pd.Series(False, index=games.index)
+if show_watches:
+    discovery_mask = discovery_mask | games.apply(
+        lambda row: has_discovery_label(row, selected_filter, "Watch"),
+        axis=1,
+    )
+if show_leans:
+    discovery_mask = discovery_mask | games.apply(
+        lambda row: has_discovery_label(row, selected_filter, "Lean"),
+        axis=1,
+    )
 
-    if show_watches or show_leans:
-        if selected_filter == "All Games":
-            filtered = games[discovery_mask]
-        else:
-            filtered = games[base_mask | discovery_mask]
+if show_watches or show_leans:
+    if selected_filter == "All Games":
+        filtered = games[discovery_mask]
     else:
-        filtered = games[base_mask]
+        filtered = games[base_mask | discovery_mask]
+else:
+    filtered = games[base_mask]
 
 filtered = filtered.sort_values(
     ["Status Sort", "Game Sort Time"],
@@ -6921,25 +7002,10 @@ filtered = filtered.sort_values(
     na_position="last",
 )
 
-if selected_filter == "Performance":
-    performance_history_date = latest_history_slate_date() or selected_date
-    performance_total = sum(
-        row.get("total") or 0
-        for row in safe_load_performance_summary(
-            PERFORMANCE_TRACKING_VERSION,
-            exact_date=performance_history_date,
-        )
-    )
-    st.caption(f"{performance_total} results")
-else:
-    st.caption(f"{len(filtered)} of {len(games)}")
+st.caption(f"{len(filtered)} of {len(games)}")
 st.caption(format_snapshot_caption(slate_history_rows))
 
 st.divider()
-
-if selected_filter == "Performance":
-    render_model_performance(PERFORMANCE_TRACKING_VERSION, selected_date)
-    st.stop()
 
 if selected_filter in ["All Games", "Top Looks"]:
     st.html(render_top_looks(games))
@@ -7121,9 +7187,9 @@ else:
             <input class="edge-view-control edge-view-full" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-full">
 
             <div class="decision-stack">
-                <label class="decision-line decision-first" for="{card_anchor}-first">🎯 1st Inning: {first_inning_display}{first_inning_result}</label>
-                <label class="decision-line decision-f5" for="{card_anchor}-f5">⚾ First 5: {f5_display}{f5_result}</label>
-                <label class="decision-line decision-full" for="{card_anchor}-full">🏆 Full Game: {full_game_display}{full_game_result}</label>
+                <label class="decision-line decision-first" for="{card_anchor}-first">ðŸŽ¯ 1st Inning: {first_inning_display}{first_inning_result}</label>
+                <label class="decision-line decision-f5" for="{card_anchor}-f5">âš¾ First 5: {f5_display}{f5_result}</label>
+                <label class="decision-line decision-full" for="{card_anchor}-full">ðŸ† Full Game: {full_game_display}{full_game_result}</label>
             </div>
 
             {key_factors}
@@ -7132,7 +7198,7 @@ else:
         </div>
         """)
 
-        with st.expander(f"🔍 Analysis: {row['Game']}"):
+        with st.expander(f"ðŸ” Analysis: {row['Game']}"):
             if discovery_label_html:
                 st.html(discovery_label_html)
             st.markdown("### Edge Breakdown")

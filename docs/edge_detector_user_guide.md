@@ -131,6 +131,11 @@ Watches = discovery record
 
 These segments must not be blended into one hit rate.
 
+Performance pages do not use the current-slate `Slate Date` input. They open on
+today's/latest tracked slate and are filtered through the report controls such
+as Day(s), market, confidence, model version, and performance segment. Current
+slate game-card pages still use `Slate Date`.
+
 ## Snapshot Rules
 
 Global rules:
