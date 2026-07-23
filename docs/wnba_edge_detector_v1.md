@@ -307,6 +307,10 @@ snapshot_wnba_slate.py
 .github/workflows/wnba-snapshot.yml
 ```
 
+When the scheduled WNBA snapshot runs without an explicit date, it records the
+current ET slate and revisits the previous ET slate to settle late finals. A
+manual `slate_date` dispatch records only that requested slate date.
+
 WNBA should migrate away from Streamlit page-load history writes. The scheduled
 snapshot job should own WNBA history writes, matching the MLB pattern.
 

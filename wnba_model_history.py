@@ -175,7 +175,16 @@ def safe_float(value):
 
 
 def is_final(row):
-    return str(row.get("Status", "")).strip().lower() == "final"
+    return is_final_status(row.get("Status"))
+
+
+def is_final_status(status):
+    return str(status or "").strip().lower() in [
+        "final",
+        "game over",
+        "full time",
+        "full-time",
+    ]
 
 
 def is_snapshot_eligible(row):
@@ -448,7 +457,7 @@ def performance_row(label, rows):
         if row.get("scoring_edge")
         not in [None, "", "Neutral Scoring Environment"]
     ]
-    completed = [row for row in rows if str(row.get("status", "")).lower() == "final"]
+    completed = [row for row in rows if is_final_status(row.get("status"))]
 
     return {
         "Segment": label,
@@ -480,7 +489,7 @@ def load_wnba_performance_summary(
         if row.get("scoring_edge")
         not in [None, "", "Neutral Scoring Environment"]
     ]
-    completed = [row for row in rows if str(row.get("status", "")).lower() == "final"]
+    completed = [row for row in rows if is_final_status(row.get("status"))]
 
     margin_errors = [
         safe_float(row.get("margin_error"))
