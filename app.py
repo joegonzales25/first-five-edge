@@ -61,6 +61,11 @@ from cbb_model_history import (
     load_cbb_performance_tables,
     load_cbb_performance_summary,
 )
+from cfb_model_history import (
+    load_cfb_history,
+    load_cfb_performance_summary,
+    load_cfb_performance_tables,
+)
 from mls_model_history import (
     load_mls_history,
     load_mls_performance_summary,
@@ -82,6 +87,7 @@ MARKET_RELEASES = {
     "NBA": "0.1.0-test",
     "NHL": "0.1.0-test",
     "CBB": "0.1.0-test",
+    "CFB": "0.1.0-test",
     "MLS": "0.1.2-test",
 }
 MODEL_BASELINES = {
@@ -91,6 +97,7 @@ MODEL_BASELINES = {
     "NBA": "0.1.0-test",
     "NHL": "0.1.0-test",
     "CBB": "0.1.0-test",
+    "CFB": "0.1.0-test",
     "MLS": "0.1.0-test",
 }
 SPORT_CONFIG = {
@@ -100,6 +107,7 @@ SPORT_CONFIG = {
     "NBA": {"enabled": True},
     "NHL": {"enabled": True},
     "CBB": {"enabled": True},
+    "CFB": {"enabled": True},
     "MLS": {"enabled": True},
 }
 
@@ -2712,6 +2720,23 @@ def safe_load_cbb_slate_history_rows(model_version, market_version, slate_date):
     ]
 
 
+def safe_load_cfb_slate_history_rows(model_version, market_version, slate_date):
+    try:
+        rows = load_cfb_history(
+            model_version=model_version,
+            market_version=market_version,
+        )
+    except Exception:
+        return []
+
+    target_date = str(slate_date)
+    return [
+        row
+        for row in rows
+        if str(row.get("slate_date", "")) == target_date
+    ]
+
+
 def safe_load_mls_slate_history_rows(model_version, market_version, slate_date):
     try:
         rows = load_mls_history(
@@ -3626,6 +3651,43 @@ def render_cbb_view_pills(active_view):
     st.html(f'<div class="wnba-filter-grid">{"".join(pills)}</div>')
 
 
+def selected_cfb_view(default_view="all"):
+    view = str(
+        get_query_param("view") or get_query_param("filter") or default_view
+    ).lower()
+    valid_views = {
+        "all",
+        "top",
+        "full_game",
+        "scoring",
+        "first_half",
+        "perf",
+    }
+    return view if view in valid_views else default_view
+
+
+def render_cfb_view_pills(active_view):
+    options = [
+        ("All", "all"),
+        ("Top", "top"),
+        ("Game", "full_game"),
+        ("Scoring", "scoring"),
+        ("1H", "first_half"),
+        ("Perf", "perf"),
+    ]
+    pills = []
+    for label, value in options:
+        classes = ["wnba-filter-card"]
+        if value == active_view:
+            classes.append("active")
+        pills.append(
+            f'<a class="{" ".join(classes)}" href="'
+            f'{query_link({"sport": "CFB", "mode": "current", "view": value, "filter": None})}">'
+            f"{escape(label)}</a>"
+        )
+    st.html(f'<div class="wnba-filter-grid">{"".join(pills)}</div>')
+
+
 def selected_mls_view(default_view="all"):
     view = str(get_query_param("view") or get_query_param("filter") or default_view).lower()
     valid_views = {
@@ -4111,6 +4173,7 @@ def render_wnba_result_strip(row):
     scoring_result = row.get("Scoring Result") or "Pending"
     full_match_result = row.get("Winner Result") or "Pending"
     btts_result = row.get("BTTS Result") or "Pending"
+    first_half_result = row.get("First Half Result") or "Pending"
     btts_is_official = False
     if sport == "NHL":
         side_label = "Moneyline"
@@ -4169,6 +4232,17 @@ def render_wnba_result_strip(row):
             f'<div class="reason-item"><span>Full Match: {escape(str(full_match_result))}</span>{wnba_result_icon(full_match_result)}</div>'
             f'<div class="reason-item"><span>BTTS: {escape(str(btts_result))}</span>{wnba_result_icon(btts_result)}</div>'
         )
+    elif sport == "CFB":
+        if status != "Final":
+            first_half_result = (
+                "Pending"
+                if row.get("First Half Pick") not in [None, "", "Pass"]
+                else "No Signal"
+            )
+        extra_results = (
+            f'<div class="reason-item"><span>First Half: {escape(str(first_half_result))}</span>'
+            f"{wnba_result_icon(first_half_result)}</div>"
+        )
 
     return (
         '<div class="key-factors">'
@@ -4190,6 +4264,7 @@ def market_discovery_labels(row):
         "Full Match Discovery Label",
         "Scoring Discovery Label",
         "BTTS Discovery Label",
+        "First Half Discovery Label",
     ]:
         value = row.get(key)
         if value:
@@ -4205,7 +4280,7 @@ def market_discovery_labels(row):
 
 def render_wnba_card(row, historical=False):
     sport = row.get("Sport")
-    if sport == "NBA":
+    if sport in ["NBA", "CFB"]:
         half_label = "First Half"
     elif sport == "NHL":
         half_label = "First Period"
@@ -4213,7 +4288,10 @@ def render_wnba_card(row, historical=False):
         half_label = "First Half"
     else:
         half_label = "Early Edge"
-    if sport == "NHL":
+    if sport == "CFB":
+        side_label = "Full Game Edge"
+        scoring_label = "Scoring Environment"
+    elif sport == "NHL":
         side_label = "Moneyline Edge"
         scoring_label = "Goal Environment"
     elif sport == "MLS":
@@ -4247,6 +4325,11 @@ def render_wnba_card(row, historical=False):
             ("BTTS Result", btts_primary_result),
         ]
     game_time_display = format_local_card_time(row)
+    lock_marker = (
+        "&#128274; "
+        if sport == "CFB" and row.get("Snapshot Status") == "Locked"
+        else ""
+    )
     result_line = ""
     if historical:
         result_line = f"""
@@ -4266,7 +4349,7 @@ def render_wnba_card(row, historical=False):
         <span class="badge badge-edge">Confidence {escape(str(row["Confidence"]))}</span>
 
         <div class="game-title">{escape(str(row["Game"]))}</div>
-        <div class="muted">{escape(str(game_time_display))} - {escape(str(row["Status"]))}</div>
+        <div class="muted">{lock_marker}{escape(str(game_time_display))} - {escape(str(row["Status"]))}</div>
 
         <div class="decision-stack">
             <div class="decision-line decision-first">{escape(side_label)}: {escape(str(row["Side Edge"]))}</div>
@@ -6255,6 +6338,503 @@ def render_cbb_page():
         render_cbb_historical()
 
 
+def cfb_decision_display(pick, segment):
+    if pick in [None, "", "Pass"]:
+        return "Pass"
+    if segment in ["Lean", "Watch"]:
+        return f"{pick} {segment}"
+    return str(pick)
+
+
+def cfb_safe_float(value, default=0.0):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def cfb_slate_from_history(rows):
+    if not rows:
+        return pd.DataFrame()
+
+    grouped = {}
+    for row in rows:
+        grouped.setdefault(str(row.get("game_id")), {})[row.get("market")] = row
+
+    slate_rows = []
+    for market_rows in grouped.values():
+        base = (
+            market_rows.get("Full Game")
+            or market_rows.get("Scoring Environment")
+            or market_rows.get("First Half")
+        )
+        if not base:
+            continue
+        full_game = market_rows.get("Full Game") or {}
+        scoring = market_rows.get("Scoring Environment") or {}
+        first_half = market_rows.get("First Half") or {}
+        full_segment = full_game.get("decision_tier") or "Pass"
+        scoring_segment = scoring.get("decision_tier") or "Pass"
+        half_segment = first_half.get("decision_tier") or "Pass"
+        full_pick = full_game.get("pick") or "Pass"
+        scoring_pick = scoring.get("pick") or "Neutral Scoring Environment"
+        half_pick = first_half.get("pick") or "Pass"
+        segment_order = {"Pass": 0, "Watch": 1, "Lean": 2, "Official": 3}
+        active_markets = [
+            (full_segment, full_game, full_pick),
+            (scoring_segment, scoring, scoring_pick),
+            (half_segment, first_half, half_pick),
+        ]
+        primary_segment, primary_market, primary_pick = max(
+            active_markets,
+            key=lambda item: segment_order.get(item[0], 0),
+        )
+        if primary_segment == "Pass":
+            primary_pick = "Pass"
+        model_margin = cfb_safe_float(base.get("model_margin"))
+        margin_direction = (
+            base.get("home_team")
+            if model_margin >= 0
+            else base.get("away_team")
+        )
+        downgrade_text = base.get("downgrade_reasons") or ""
+        factors = [
+            (
+                f"Model margin {model_margin:+.1f} "
+                f"toward {margin_direction}"
+            ),
+            (
+                f"Projected total {cfb_safe_float(base.get('projected_total')):.1f} "
+                f"vs baseline {cfb_safe_float(base.get('league_total_baseline')):.1f}"
+            ),
+        ]
+        factors.extend(
+            item.strip() for item in str(downgrade_text).split(";") if item.strip()
+        )
+        status = base.get("status") or "Scheduled"
+        slate_rows.append(
+            {
+                "Sport": "CFB",
+                "Game ID": base.get("game_id"),
+                "Season": base.get("season"),
+                "Week": base.get("week"),
+                "Scheduled Kickoff": base.get("scheduled_kickoff"),
+                "Sort Date": pd.to_datetime(
+                    base.get("scheduled_kickoff"), errors="coerce", utc=True
+                ),
+                "Game Time": base.get("scheduled_kickoff"),
+                "Game": base.get("game"),
+                "Away": base.get("away_team"),
+                "Home": base.get("home_team"),
+                "Away Score": base.get("away_score"),
+                "Home Score": base.get("home_score"),
+                "Model Signal": (
+                    primary_pick
+                ),
+                "Edge Score": primary_market.get("score") or 0,
+                "Confidence": primary_market.get("confidence") or "Pass",
+                "Predicted Winner": full_pick,
+                "Side Pick": full_pick,
+                "Side Edge": cfb_decision_display(full_pick, full_segment),
+                "Side Tracking Segment": full_segment,
+                "Side Discovery Label": (
+                    f"Full Game {full_segment}: {full_pick}"
+                    if full_segment in ["Lean", "Watch"]
+                    else None
+                ),
+                "Side Result": full_game.get("result") or "Pending",
+                "Winner Result": full_game.get("result") or "Pending",
+                "Scoring Pick": scoring_pick,
+                "Scoring Edge": cfb_decision_display(
+                    scoring_pick, scoring_segment
+                )
+                if scoring_segment != "Pass"
+                else "Neutral Scoring Environment",
+                "Scoring Tracking Segment": scoring_segment,
+                "Scoring Discovery Label": (
+                    f"Scoring {scoring_segment}: {scoring_pick}"
+                    if scoring_segment in ["Lean", "Watch"]
+                    else None
+                ),
+                "Scoring Result": scoring.get("result") or "Pending",
+                "First Half Pick": half_pick,
+                "Early Edge": cfb_decision_display(half_pick, half_segment),
+                "First Half Tracking Segment": half_segment,
+                "First Half Discovery Label": (
+                    f"First Half {half_segment}: {half_pick}"
+                    if half_segment in ["Lean", "Watch"]
+                    else None
+                ),
+                "First Half Result": first_half.get("result") or "Pending",
+                "Model Margin": base.get("model_margin"),
+                "Projected Total": base.get("projected_total"),
+                "League Total Baseline": base.get("league_total_baseline"),
+                "Data Quality": base.get("data_quality"),
+                "Key Factors List": factors,
+                "Key Factors Summary": "; ".join(factors[:3]),
+                "Agent Notes": "; ".join(factors),
+                "Status": status,
+                "Snapshot Status": base.get("snapshot_status"),
+                "Locked At": base.get("locked_at"),
+            }
+        )
+    slate = pd.DataFrame(slate_rows)
+    if not slate.empty:
+        slate = slate.sort_values(["Sort Date", "Game"]).reset_index(drop=True)
+    return slate
+
+
+def filter_cfb_games(games, view):
+    if games.empty:
+        return games
+    if view == "top":
+        return games[
+            (games["Side Tracking Segment"] == "Official")
+            | (games["Scoring Tracking Segment"] == "Official")
+            | (games["First Half Tracking Segment"] == "Official")
+        ]
+    if view == "full_game":
+        return games[games["Side Tracking Segment"].isin(["Official", "Lean", "Watch"])]
+    if view == "scoring":
+        return games[
+            games["Scoring Tracking Segment"].isin(["Official", "Lean", "Watch"])
+        ]
+    if view == "first_half":
+        return games[
+            games["First Half Tracking Segment"].isin(["Official", "Lean", "Watch"])
+        ]
+    return games
+
+
+def cfb_filtered_history(
+    rows,
+    market_filter,
+    window_filter,
+    tier_filter,
+    confidence_filter,
+    outcome_filter,
+):
+    today = datetime.now(ZoneInfo("America/New_York")).date()
+    day_rule = {
+        "Today": (today, today),
+        "Yesterday": (today - timedelta(days=1), today - timedelta(days=1)),
+        "Last 7": (today - timedelta(days=6), today),
+        "Last 30": (today - timedelta(days=29), today),
+        "All": (None, None),
+    }[window_filter]
+    filtered = []
+    for row in rows:
+        if row.get("snapshot_status") != "Locked":
+            continue
+        if row.get("decision_tier") not in ["Official", "Lean", "Watch"]:
+            continue
+        if market_filter != "All" and row.get("market") != market_filter:
+            continue
+        if tier_filter != "All" and row.get("decision_tier") != tier_filter:
+            continue
+        if confidence_filter != "All" and row.get("confidence") != confidence_filter:
+            continue
+        if outcome_filter != "All" and row.get("stored_outcome") != outcome_filter:
+            continue
+        try:
+            row_date = datetime.fromisoformat(str(row.get("slate_date"))).date()
+        except Exception:
+            continue
+        start_date, end_date = day_rule
+        if start_date and not (start_date <= row_date <= end_date):
+            continue
+        filtered.append(row)
+    return filtered
+
+
+def cfb_performance_groups(rows):
+    groups = {}
+    for row in rows:
+        label = f"{row.get('decision_tier')} {row.get('market')}"
+        groups.setdefault(label, []).append(row)
+    summaries = []
+    for label, group in groups.items():
+        hits = sum(1 for row in group if row.get("result") == "Correct")
+        misses = sum(1 for row in group if row.get("result") == "Missed")
+        pushes = sum(1 for row in group if row.get("result") == "Push")
+        pending = sum(1 for row in group if row.get("result") == "Pending")
+        summaries.append(
+            {
+                "market": label,
+                "hits": hits,
+                "misses": misses,
+                "pushes": pushes,
+                "pending": pending,
+            }
+        )
+    return summaries
+
+
+def render_cfb_performance_section():
+    st.markdown("### CFB Performance")
+    model_version = MODEL_BASELINES["CFB"]
+    market_version = MARKET_RELEASES["CFB"]
+    try:
+        current_summary = load_cfb_performance_summary(
+            model_version=model_version,
+            market_version=market_version,
+        )
+        current_rows = load_cfb_history(
+            model_version=model_version,
+            market_version=market_version,
+        )
+        all_rows = load_cfb_history()
+    except Exception as exc:
+        st.error(f"Could not load CFB performance history: {exc}")
+        return
+
+    if current_summary["snapshots"] == 0:
+        st.info(
+            "No CFB snapshots recorded yet. Run the manual CFB workflow after "
+            "configuring the CFBD API key."
+        )
+        return
+
+    columns = st.columns(3)
+    with columns[0]:
+        market_filter = st.selectbox(
+            "Signal",
+            ["All", "Full Game", "Scoring Environment", "First Half"],
+            key="cfb_performance_market_filter",
+        )
+    with columns[1]:
+        window_filter = st.selectbox(
+            "Day(s)",
+            ["Today", "Yesterday", "Last 7", "Last 30", "All"],
+            key="cfb_performance_window_filter",
+        )
+    with columns[2]:
+        tier_filter = st.selectbox(
+            "Decision",
+            ["All", "Official", "Lean", "Watch"],
+            key="cfb_performance_tier_filter",
+        )
+    columns = st.columns(3)
+    with columns[0]:
+        confidence_filter = st.selectbox(
+            "Confidence",
+            ["All", "A", "B", "C"],
+            key="cfb_performance_confidence_filter",
+        )
+    with columns[1]:
+        outcome_filter = st.selectbox(
+            "Outcome",
+            ["All", "Hit", "Miss", "Push", "Pending"],
+            key="cfb_performance_outcome_filter",
+        )
+    with columns[2]:
+        model_filter = st.selectbox(
+            "Model",
+            [f"Current {model_version}", "All"],
+            key="cfb_performance_model_filter",
+        )
+
+    source_rows = all_rows if model_filter == "All" else current_rows
+    filtered_rows = cfb_filtered_history(
+        source_rows,
+        market_filter,
+        window_filter,
+        tier_filter,
+        confidence_filter,
+        outcome_filter,
+    )
+    summaries = cfb_performance_groups(filtered_rows)
+    if summaries:
+        cards = []
+        for row in summaries:
+            completed = row["hits"] + row["misses"] + row["pushes"]
+            record = f"{row['hits']}-{row['misses']}"
+            if row["pushes"]:
+                record += f"-{row['pushes']}"
+            cards.append(
+                '<div class="performance-card">'
+                f'<div class="performance-market">{escape(row["market"])}</div>'
+                f'<div class="performance-hit-rate">{performance_hit_rate(row)}</div>'
+                f'<div class="performance-record">{escape(record)} record</div>'
+                f'<div class="performance-meta">{completed} completed - {row["pending"]} pending</div>'
+                "</div>"
+            )
+        st.html(
+            '<div class="model-favorite top-looks">'
+            '<div class="model-label">CFB MODEL PERFORMANCE</div>'
+            f'<div class="top-look-meta">{escape(model_filter)} - {escape(window_filter)}</div>'
+            f'<div class="performance-results">{"".join(cards)}</div>'
+            "</div>"
+        )
+    else:
+        st.info("No locked CFB decisions match the selected report filters.")
+
+    export_df = pd.DataFrame(filtered_rows)
+    st.download_button(
+        f"Download CFB Performance CSV ({len(filtered_rows)} rows)",
+        data=export_df.to_csv(index=False) if not export_df.empty else "",
+        file_name="cfb_performance_filtered.csv",
+        mime="text/csv",
+        key="cfb_performance_download",
+        disabled=export_df.empty,
+    )
+    if not export_df.empty:
+        display_columns = [
+            "slate_date",
+            "market",
+            "game",
+            "pick",
+            "decision_tier",
+            "confidence",
+            "result",
+            "status",
+            "locked_at",
+        ]
+        st.dataframe(
+            export_df[display_columns],
+            hide_index=True,
+            use_container_width=True,
+        )
+
+    with st.expander("CFB Performance Diagnostics"):
+        metrics = st.columns(4)
+        metrics[0].metric("Snapshots", current_summary["snapshots"])
+        metrics[1].metric("Graded", current_summary["completed"])
+        metrics[2].metric("Leans", current_summary["leans"])
+        metrics[3].metric("Watches", current_summary["watches"])
+        st.caption(
+            "Only locked Official, Lean, and Watch decisions enter this report."
+        )
+        st.caption(f"Storage: {current_summary['storage_backend']}")
+        st.code(current_summary["db_path"], language="text")
+        tables = load_cfb_performance_tables(
+            model_version=model_version,
+            market_version=market_version,
+        )
+        tier_tab, market_tab = st.tabs(["Decision Tier", "Market"])
+        with tier_tab:
+            st.dataframe(pd.DataFrame(tables["tier"]), hide_index=True)
+        with market_tab:
+            st.dataframe(pd.DataFrame(tables["market"]), hide_index=True)
+
+
+def render_cfb_current():
+    selected_view = selected_cfb_view("all")
+    if selected_view == "perf":
+        render_cfb_view_pills(selected_view)
+        latest_rows = latest_market_history_rows(
+            load_cfb_history,
+            MODEL_BASELINES["CFB"],
+            MARKET_RELEASES["CFB"],
+        )
+        st.caption("Performance history")
+        st.caption(format_snapshot_caption(latest_rows))
+        st.divider()
+        render_cfb_performance_section()
+        return
+
+    selected_date = st.date_input(
+        "Slate Date",
+        value=current_date_for_timezone(FALLBACK_TIMEZONE),
+        format="MM/DD/YYYY",
+        key="cfb_slate_date",
+    )
+    try:
+        history_rows = safe_load_cfb_slate_history_rows(
+            MODEL_BASELINES["CFB"],
+            MARKET_RELEASES["CFB"],
+            selected_date,
+        )
+        slate = cfb_slate_from_history(history_rows)
+    except Exception as exc:
+        st.error(f"Could not load CFB current slate: {exc}")
+        return
+
+    render_cfb_view_pills(selected_view)
+    filtered = filter_cfb_games(slate, selected_view)
+    st.caption(f"{len(filtered)} of {len(slate)}")
+    st.caption(format_snapshot_caption(history_rows))
+    st.divider()
+
+    if slate.empty:
+        st.info(
+            "No stored CFB snapshot exists for the selected date. The CFB page "
+            "reads Turso snapshots and does not generate predictions on page load."
+        )
+        return
+    if filtered.empty:
+        st.info("No CFB decisions match the selected view.")
+        return
+
+    metrics = st.columns(4)
+    metrics[0].metric("Games", len(slate))
+    metrics[1].metric(
+        "Official",
+        sum(slate["Side Tracking Segment"] == "Official"),
+    )
+    metrics[2].metric(
+        "Leans",
+        sum(
+            (slate["Side Tracking Segment"] == "Lean")
+            | (slate["Scoring Tracking Segment"] == "Lean")
+            | (slate["First Half Tracking Segment"] == "Lean")
+        ),
+    )
+    metrics[3].metric(
+        "Watches",
+        sum(
+            (slate["Side Tracking Segment"] == "Watch")
+            | (slate["Scoring Tracking Segment"] == "Watch")
+            | (slate["First Half Tracking Segment"] == "Watch")
+        ),
+    )
+    for _, row in filtered.iterrows():
+        render_wnba_card(row)
+
+
+def render_cfb_model_info_sidebar():
+    st.sidebar.title("CFB Controls")
+    st.sidebar.caption(f"Market release: {MARKET_RELEASES['CFB']}")
+    st.sidebar.caption(f"Model baseline: {MODEL_BASELINES['CFB']}")
+    try:
+        summary = load_cfb_performance_summary(
+            model_version=MODEL_BASELINES["CFB"],
+            market_version=MARKET_RELEASES["CFB"],
+        )
+    except Exception:
+        summary = {
+            "snapshots": 0,
+            "completed": 0,
+            "storage_backend": "Unavailable",
+        }
+    with st.sidebar.expander("CFB Model Info"):
+        st.markdown(
+            f"""
+**Official Scope**: Full Game team edge
+
+**Discovery**: Scoring Environment and First Half Lean/Watch
+
+**Availability Gate**: Initial v0 decisions are capped until a reliable feed is integrated
+
+**Snapshots**: {summary["snapshots"]}
+
+**Graded**: {summary["completed"]}
+
+**Tracking Writes**: Manual GitHub workflow; production schedule disabled
+
+**Storage Backend**: {escape(summary["storage_backend"])}
+
+**Current Status**: Experimental v0
+"""
+        )
+
+
+def render_cfb_page():
+    st.title("CFB Edge Detector")
+    render_cfb_model_info_sidebar()
+    render_cfb_current()
+
+
 def render_mls_current():
     selected_view = selected_mls_view("all")
 
@@ -7193,6 +7773,10 @@ if active_sport == "NHL":
 
 if active_sport == "CBB":
     render_cbb_page()
+    st.stop()
+
+if active_sport == "CFB":
+    render_cfb_page()
     st.stop()
 
 if active_sport == "MLS":
