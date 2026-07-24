@@ -298,3 +298,70 @@ Still open after v0 implementation:
 4. Decide whether free expected-goals data is reliable enough for v0.
 5. Decide when First Period, puck line, totals, or regulation markets should launch.
 ```
+
+## Approved Validation Contract
+
+NHL remains `test/planning` until both validation phases pass and the owner
+approves promotion. Validation does not change the model baseline, confidence
+thresholds, or moneyline selection rules.
+
+### Phase A: Historical Holdout
+
+Use at least two completed regular seasons. Run each season independently so
+team state does not carry across season boundaries. The latest season is the
+default chronological holdout.
+
+Required review:
+
+```text
+No missing required rows or duplicate games
+At least 50 holdout moneyline signals
+Moneyline accuracy compared with a home-team baseline on the same signal rows
+Confidence ordering reviewed with at least 20 signals in comparable tiers
+Margin and total MAE
+Home/away, rest, and limited-history splits
+Official settlement includes overtime and shootouts
+```
+
+Historical confirmed-goalie information must be treated as unavailable unless
+it is reconstructable as of puck drop. The base model must be reviewed
+separately from any future goalie component. Goal environment remains discovery
+context and is not included in Official performance.
+
+Run:
+
+```powershell
+python season_model_validation.py historical --market nhl --input <normalized-games.csv> --holdout-season <season>
+```
+
+The normalized input requires:
+
+```text
+season
+game_date
+away_team
+home_team
+away_score
+home_score
+```
+
+### Phase B: Live Shadow
+
+Start with manual snapshots. After one week of clean manual operation, enable
+hourly shadow scheduling. Do not designate the model as a Candidate until it
+has at least four complete tracked weeks and 50 locked, graded Official
+moneyline decisions.
+
+Run the stored-history audit with:
+
+```powershell
+python season_model_validation.py shadow --market nhl --market-version 0.1.0-test --model-version 0.1.0-test
+```
+
+The audit requires completed Official rows to have scores and grades, completed
+rows to be locked, and every locked row to have `locked_at`. Game cards,
+history, exports, and performance must still be reconciled manually before
+owner approval.
+
+Passing either CLI report does not enable the NHL schedule or authorize a
+release. Reports always require owner review.

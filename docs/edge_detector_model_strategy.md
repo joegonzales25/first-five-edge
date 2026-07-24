@@ -741,7 +741,9 @@ NBA:
 Status: test/planning.
 Schedule: disabled until closer to season.
 Data source of truth: separate NBA history table once active.
-Next gate: manual snapshot and completed-game grading validation before scheduled tracking.
+Next gate: complete the approved historical holdout report, then manual
+snapshot and completed-game grading validation before scheduled shadow tracking.
+Validation tool: `season_model_validation.py`.
 ```
 
 NHL:
@@ -750,7 +752,9 @@ NHL:
 Status: test/planning.
 Schedule: disabled until closer to season.
 Data source of truth: separate NHL history table once active.
-Next gate: confirm launch markets and validate live-season data before scheduled tracking.
+Next gate: complete the approved historical holdout report, then confirm launch
+markets and validate live-season data before scheduled shadow tracking.
+Validation tool: `season_model_validation.py`.
 ```
 
 CBB:
