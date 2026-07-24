@@ -196,16 +196,18 @@ Use top filter pills only. Do not use sidebar filters for NFL v1.1.
 
 ## Current Slate Filter And Count Layout
 
-The NFL Current Slate controls should follow the MLB game-card control rhythm while staying implemented with NFL-scoped classes.
+The NFL Current Slate controls should use the same hierarchy and shared filter-card styling as MLB.
 
 Layout:
 
 ```text
 Slate Date
 MM/DD/YYYY display box
-Compact full-width All filter pill
-Compact secondary filter pills in a 3-column mobile grid
+Full-width All filter card
+Signals | Side | Scoring | A | Lab | Perf
+Show Watches checkbox | Show Leans checkbox
 Filtered count caption
+Snapshot as of caption
 ```
 
 Initial Current Slate filters:
@@ -216,8 +218,19 @@ Signals
 Side
 Scoring
 A
-Pass
+Lab
+Perf
 ```
+
+Do not add a Top filter until tracked NFL performance supports a documented Top
+signal definition. `Lab` opens the fixed Historical Lab, and `Perf` opens stored
+monitored-test performance.
+
+Watch and Lean are discovery controls below the filter cards, not primary filter
+cards. With neither checkbox selected, the selected primary filter controls the
+slate. Selecting Watch or Lean adds those discovery decisions to a specific
+primary signal filter. When `All` is selected, the checkboxes narrow the slate
+to the selected discovery segments, matching MLB behavior.
 
 The count should use compact text:
 

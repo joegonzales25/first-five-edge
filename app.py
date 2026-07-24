@@ -3407,7 +3407,48 @@ def render_nfl_pills(options, active_value, extra_params=None):
     st.html(f'<div class="nfl-control-row">{"".join(pills)}</div>')
 
 
-def render_nfl_current_controls(slate, meta, selected_filter, filtered_count):
+def render_nfl_filter_pills(active_mode="current", active_filter="all"):
+    options = [
+        ("All", "current", "all"),
+        ("Signals", "current", "signals"),
+        ("Side", "current", "side"),
+        ("Scoring", "current", "scoring"),
+        ("A", "current", "a"),
+        ("Lab", "lab", "all"),
+        ("Perf", "perf", "all"),
+    ]
+    pills = []
+    for label, mode, filter_value in options:
+        classes = ["mlb-filter-card"]
+        is_active = (
+            active_mode == mode
+            and (mode != "current" or active_filter == filter_value)
+        )
+        if is_active:
+            classes.append("active")
+        pills.append(
+            f'<a class="{" ".join(classes)}" href="{query_link({"sport": "NFL", "mode": mode, "filter": filter_value, "week": "all"})}">'
+            f"{escape(label)}</a>"
+        )
+    st.html(f'<div class="mlb-filter-grid">{"".join(pills)}</div>')
+
+
+def render_nfl_discovery_controls():
+    columns = st.columns(2)
+    with columns[0]:
+        show_watches = st.checkbox(
+            "Show Watches",
+            key="nfl_show_watches",
+        )
+    with columns[1]:
+        show_leans = st.checkbox(
+            "Show Leans",
+            key="nfl_show_leans",
+        )
+    return show_watches, show_leans
+
+
+def render_nfl_current_controls(slate, meta, selected_filter):
     slate_date = "TBD"
     if "Sort Date" in slate.columns and slate["Sort Date"].notna().any():
         try:
@@ -3419,50 +3460,12 @@ def render_nfl_current_controls(slate, meta, selected_filter, filtered_count):
     else:
         slate_date = f"Season {meta['season']} - Week {meta['week']}"
 
-    options = [
-        ("All", "all"),
-        ("Signals", "signals"),
-        ("Side", "side"),
-        ("Scoring", "scoring"),
-        ("Lean", "lean"),
-        ("Watch", "watch"),
-        ("A", "a"),
-        ("Pass", "pass"),
-    ]
-    pills = []
-    for label, value in options:
-        classes = ["nfl-control-pill"]
-        if value == selected_filter:
-            classes.append("active")
-        pills.append(
-            f'<a class="{" ".join(classes)}" href="{query_link({"sport": "NFL", "mode": "current", "week": "all", "filter": value})}">'
-            f'{escape(label)}</a>'
-        )
-
     st.html(
         '<div class="nfl-slate-label">Slate Date</div>'
         f'<div class="nfl-slate-box">{escape(str(slate_date))}</div>'
-        f'<div class="nfl-filter-strip">{"".join(pills)}</div>'
-        f'<div class="nfl-count-caption">{filtered_count} of {len(slate)}</div>'
     )
-
-
-def render_nfl_mode_pills(active_mode):
-    options = [
-        ("Current", "current"),
-        ("Performance", "perf"),
-        ("Historical Lab", "lab"),
-    ]
-    pills = []
-    for label, mode in options:
-        classes = ["nfl-control-pill"]
-        if mode == active_mode:
-            classes.append("active")
-        pills.append(
-            f'<a class="{" ".join(classes)}" href="{query_link({"sport": "NFL", "mode": mode, "filter": "all", "week": "all"})}">'
-            f'{escape(label)}</a>'
-        )
-    st.html(f'<div class="nfl-control-row">{"".join(pills)}</div>')
+    render_nfl_filter_pills("current", selected_filter)
+    return render_nfl_discovery_controls()
 
 
 def render_wnba_mode_pills(active_mode):
@@ -4459,6 +4462,16 @@ def filter_nfl_games(games, view, historical=False):
     return filtered
 
 
+def nfl_discovery_mask(games, view, segment):
+    side_mask = games["Side Tracking Segment"].eq(segment)
+    scoring_mask = games["Scoring Tracking Segment"].eq(segment)
+    if view == "side":
+        return side_mask
+    if view == "scoring":
+        return scoring_mask
+    return side_mask | scoring_mask
+
+
 def filter_wnba_games(games, view):
     filtered = games.copy()
     if view == "side":
@@ -4910,9 +4923,43 @@ def render_nfl_current():
     slate["Game Time"] = slate.apply(format_local_card_time, axis=1)
 
     selected_filter = selected_nfl_filter("all")
-    filtered = filter_nfl_games(slate, selected_filter)
-    render_nfl_current_controls(slate, meta, selected_filter, len(filtered))
+    show_watches, show_leans = render_nfl_current_controls(
+        slate,
+        meta,
+        selected_filter,
+    )
+    base_filtered = filter_nfl_games(slate, selected_filter)
+    discovery_mask = pd.Series(False, index=slate.index)
+    if show_watches:
+        discovery_mask = discovery_mask | nfl_discovery_mask(
+            slate,
+            selected_filter,
+            "Watch",
+        )
+    if show_leans:
+        discovery_mask = discovery_mask | nfl_discovery_mask(
+            slate,
+            selected_filter,
+            "Lean",
+        )
+
+    if show_watches or show_leans:
+        if selected_filter == "all":
+            filtered = slate[discovery_mask]
+        else:
+            base_mask = pd.Series(
+                slate.index.isin(base_filtered.index),
+                index=slate.index,
+            )
+            filtered = slate[
+                base_mask | discovery_mask
+            ]
+    else:
+        filtered = base_filtered
+
+    st.caption(f"{len(filtered)} of {len(slate)}")
     st.caption(format_snapshot_caption(history_rows))
+    st.divider()
 
     if filtered.empty:
         st.info("No NFL games match the selected filter.")
@@ -4995,13 +5042,14 @@ def render_nfl_page():
     st.caption("Monitored test: outcome and scoring-environment model signals")
 
     mode = selected_nfl_mode()
-    render_nfl_mode_pills(mode)
 
     if mode == "current":
         render_nfl_current()
     elif mode == "perf":
+        render_nfl_filter_pills("perf")
         render_nfl_performance()
     else:
+        render_nfl_filter_pills("lab")
         render_nfl_historical()
 
     with st.expander("NFL Data Sources / Model Info"):
