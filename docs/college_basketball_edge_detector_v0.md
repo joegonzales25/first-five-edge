@@ -405,6 +405,12 @@ snapshot_cbb_slate.py = manual snapshot entrypoint
 .github/workflows/cbb-snapshot.yml = manual-only workflow until season tracking is ready
 ```
 
+ESPN CBB scoreboard requests must use either one `YYYYMMDD` value for a
+single-date slate or one `YYYY` value for calendar-year history. The endpoint
+returns `404` for hyphenated date ranges. Current-slate loads should check the
+selected date first and only load calendar-year history when games exist,
+filtering those events to the active season before calculating ratings or rest.
+
 Expected future storage:
 
 ```text

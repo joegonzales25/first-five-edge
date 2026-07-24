@@ -14,14 +14,50 @@ def date_range_param(start_date: date, end_date: date) -> str:
     return f"{start_date:%Y%m%d}-{end_date:%Y%m%d}"
 
 
-def fetch_cbb_scoreboard(start_date: date, end_date: date, limit: int = 1000) -> dict:
+def fetch_cbb_dates_param(dates_param: str, limit: int) -> dict:
     response = requests.get(
         ESPN_CBB_SCOREBOARD_URL,
-        params={"dates": date_range_param(start_date, end_date), "limit": limit},
+        params={"dates": dates_param, "limit": limit},
         timeout=20,
     )
     response.raise_for_status()
     return response.json()
+
+
+def fetch_cbb_scoreboard(start_date: date, end_date: date, limit: int = 1000) -> dict:
+    if end_date < start_date:
+        raise ValueError("CBB scoreboard end date must not precede start date")
+
+    if start_date == end_date:
+        return fetch_cbb_dates_param(f"{start_date:%Y%m%d}", limit)
+
+    # ESPN's CBB endpoint rejects hyphenated date ranges. Calendar-year
+    # requests provide season history without issuing one request per day.
+    events_by_id = {}
+    for year in range(start_date.year, end_date.year + 1):
+        payload = fetch_cbb_dates_param(str(year), limit)
+        for event in payload.get("events", []):
+            event_id = event.get("id")
+            if event_id:
+                events_by_id[event_id] = event
+
+    return {"events": list(events_by_id.values())}
+
+
+def filter_cbb_events_by_date(
+    events: list[dict],
+    start_date: date,
+    end_date: date,
+) -> list[dict]:
+    filtered = []
+    for event in events:
+        event_time = pd.to_datetime(event.get("date"), errors="coerce", utc=True)
+        if pd.isna(event_time):
+            continue
+        eastern_date = event_time.tz_convert("America/New_York").date()
+        if start_date <= eastern_date <= end_date:
+            filtered.append(event)
+    return filtered
 
 
 def competitor_by_side(competition: dict, side: str) -> dict:
@@ -136,5 +172,16 @@ def load_cbb_current_season(
     today = today or date.today()
     start_date = date(int(season) - 1, 11, 1) if season else cbb_season_start(today)
     end_date = today + timedelta(days=days_ahead)
+
+    if days_ahead == 0:
+        target_data = fetch_cbb_scoreboard(today, today)
+        if not target_data.get("events"):
+            return pd.DataFrame()
+
     data = fetch_cbb_scoreboard(start_date, end_date)
-    return normalize_cbb_events(data.get("events", []))
+    events = filter_cbb_events_by_date(
+        data.get("events", []),
+        start_date,
+        end_date,
+    )
+    return normalize_cbb_events(events)
