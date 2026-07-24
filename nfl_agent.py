@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -15,6 +16,12 @@ from nfl_backtest import (
     total_edge_label,
     update_team,
 )
+
+NFL_SIDE_LEAN_MIN = 3.5
+NFL_SIDE_WATCH_MIN = 2.0
+NFL_SCORING_LEAN_MIN = 1.5
+NFL_SCORING_WATCH_MIN = 0.75
+NFL_SOURCE_TIMEZONE = ZoneInfo("America/New_York")
 
 
 def load_nfl_schedule() -> pd.DataFrame:
@@ -60,6 +67,22 @@ def status_for_game(row):
     return "Scheduled"
 
 
+def parse_schedule_kickoff(game):
+    gameday = game.get("gameday")
+    gametime = game.get("gametime")
+    if pd.isna(gameday):
+        return None
+
+    raw_value = f"{gameday}T{gametime}" if pd.notna(gametime) else str(gameday)
+    try:
+        kickoff = pd.Timestamp(raw_value)
+        if kickoff.tzinfo is None:
+            kickoff = kickoff.tz_localize(NFL_SOURCE_TIMEZONE)
+        return kickoff.tz_convert("UTC")
+    except Exception:
+        return None
+
+
 def format_game_time(raw_value):
     if pd.isna(raw_value) or not raw_value:
         return "TBD"
@@ -75,12 +98,99 @@ def format_game_time(raw_value):
 
 
 def format_schedule_time(game):
-    gameday = game.get("gameday")
-    gametime = game.get("gametime")
+    kickoff = parse_schedule_kickoff(game)
+    if kickoff is None:
+        return format_game_time(game.get("gameday"))
+    return kickoff.tz_convert(NFL_SOURCE_TIMEZONE).strftime(
+        "%a %b %d, %I:%M %p ET"
+    )
 
-    if pd.notna(gameday) and pd.notna(gametime):
-        return format_game_time(f"{gameday}T{gametime}")
-    return format_game_time(gameday)
+
+def discovery_tier(strength, official_minimum, lean_minimum, watch_minimum):
+    strength = abs(float(strength))
+    if strength >= official_minimum:
+        return "Official"
+    if strength >= lean_minimum:
+        return "Lean"
+    if strength >= watch_minimum:
+        return "Watch"
+    return "No Edge"
+
+
+def side_release_values(side_edge, model_margin, predicted_winner, config):
+    if side_edge != "Pass":
+        return {
+            "segment": "Official",
+            "pick": predicted_winner,
+            "label": None,
+        }
+    segment = discovery_tier(
+        model_margin,
+        config.side_c,
+        NFL_SIDE_LEAN_MIN,
+        NFL_SIDE_WATCH_MIN,
+    )
+    return {
+        "segment": segment,
+        "pick": predicted_winner if segment in ["Lean", "Watch"] else None,
+        "label": (
+            f"{predicted_winner} Side {segment}"
+            if segment in ["Lean", "Watch"]
+            else None
+        ),
+    }
+
+
+def scoring_release_values(scoring_edge, projected_total, league_total, config):
+    if scoring_edge != "Neutral Scoring Environment":
+        return {
+            "segment": "Official",
+            "pick": scoring_edge,
+            "label": None,
+        }
+    delta = projected_total - league_total
+    segment = discovery_tier(
+        delta,
+        config.scoring_threshold,
+        NFL_SCORING_LEAN_MIN,
+        NFL_SCORING_WATCH_MIN,
+    )
+    direction = (
+        "High Scoring Environment"
+        if delta >= 0
+        else "Low Scoring Environment"
+    )
+    return {
+        "segment": segment,
+        "pick": direction if segment in ["Lean", "Watch"] else None,
+        "label": (
+            f"{direction} {segment}"
+            if segment in ["Lean", "Watch"]
+            else None
+        ),
+    }
+
+
+def grade_side(segment, pick, actual_winner, completed):
+    if segment not in ["Official", "Lean", "Watch"] or not pick:
+        return "No Signal"
+    if not completed or actual_winner is None:
+        return "Pending"
+    if actual_winner == "Tie":
+        return "Push"
+    return "Correct" if pick == actual_winner else "Missed"
+
+
+def grade_scoring(segment, pick, actual_total, baseline, completed):
+    if segment not in ["Official", "Lean", "Watch"] or not pick:
+        return "No Signal"
+    if not completed or actual_total is None:
+        return "Pending"
+    if pick == "High Scoring Environment":
+        return "Correct" if actual_total > baseline else "Missed"
+    if pick == "Low Scoring Environment":
+        return "Correct" if actual_total < baseline else "Missed"
+    return "No Signal"
 
 
 def build_historical_lab(season=2025):
@@ -130,9 +240,9 @@ def latest_upcoming_week(games, today=None):
     return int(first["season"]), int(first["week"])
 
 
-def build_current_slate(season=None, week=None, today=None):
+def build_current_slate(season=None, week=None, today=None, games=None):
     config = ModelConfig()
-    games = load_nfl_schedule()
+    games = games if games is not None else load_nfl_schedule()
 
     if season is None or week is None:
         upcoming = latest_upcoming_week(games, today)
@@ -216,31 +326,92 @@ def build_current_slate(season=None, week=None, today=None):
             home_state.points_against_avg(league_points),
         )
         notes = agent_notes(side_notes, scoring_notes)
+        predicted_winner = home if model_margin > 0 else away
+        side_edge = (
+            f"{predicted_winner} Edge"
+            if confidence != "Pass"
+            else "Pass"
+        )
+        side_release = side_release_values(
+            side_edge,
+            model_margin,
+            predicted_winner,
+            config,
+        )
+        scoring_release = scoring_release_values(
+            scoring_edge,
+            projected_total,
+            league_total,
+            config,
+        )
+
+        away_score = int(game["away_score"]) if completed else None
+        home_score = int(game["home_score"]) if completed else None
+        actual_winner = None
+        actual_total = None
+        if completed:
+            if home_score == away_score:
+                actual_winner = "Tie"
+            else:
+                actual_winner = home if home_score > away_score else away
+            actual_total = away_score + home_score
+        side_result = grade_side(
+            side_release["segment"],
+            side_release["pick"],
+            actual_winner,
+            completed,
+        )
+        scoring_result = grade_scoring(
+            scoring_release["segment"],
+            scoring_release["pick"],
+            actual_total,
+            league_total,
+            completed,
+        )
 
         if int(game["season"]) == int(season) and int(game["week"]) == int(week):
-            side_edge = "Pass"
-            if confidence != "Pass":
-                side_edge = f"{home if model_margin > 0 else away} Edge"
+            scheduled_kickoff = parse_schedule_kickoff(game)
 
             rows.append(
                 {
                     "Sport": "NFL",
+                    "Game ID": game.get("game_id"),
                     "Season": int(game["season"]),
                     "Week": int(game["week"]),
+                    "Slate Date": str(game.get("gameday")),
+                    "Scheduled Kickoff": (
+                        scheduled_kickoff.isoformat()
+                        if scheduled_kickoff is not None
+                        else None
+                    ),
                     "Game Time": format_schedule_time(game),
-                    "Sort Date": game.get("gameday_dt"),
+                    "Sort Date": scheduled_kickoff,
                     "Game": f"{away} @ {home}",
                     "Away": away,
                     "Home": home,
+                    "Away Score": away_score,
+                    "Home Score": home_score,
+                    "Actual Winner": actual_winner,
+                    "Actual Total": actual_total,
+                    "Predicted Winner": predicted_winner,
                     "Model Signal": model_signal_display(side_edge, scoring_edge),
                     "Edge Score": edge_score,
                     "Confidence": confidence,
                     "Side Edge": side_edge,
+                    "Side Tracking Segment": side_release["segment"],
+                    "Side Discovery Pick": side_release["pick"],
+                    "Side Discovery Label": side_release["label"],
+                    "Side Result": side_result,
                     "Scoring Edge": scoring_edge,
+                    "Scoring Tracking Segment": scoring_release["segment"],
+                    "Scoring Discovery Pick": scoring_release["pick"],
+                    "Scoring Discovery Label": scoring_release["label"],
+                    "Scoring Result": scoring_result,
                     "Early Edge": "Model Pending",
                     "Model Margin": round(model_margin, 2),
                     "Projected Total": round(projected_total, 2),
                     "League Total Baseline": round(league_total, 2),
+                    "Rest Edge": rest_edge,
                     "Key Factors Summary": key_factors_summary(notes),
                     "Key Factors List": split_notes(notes),
                     "Agent Notes": notes,

@@ -1,14 +1,70 @@
-# NFL Edge Detector v1.0 Plan
+# NFL Edge Detector v1.1 Monitored-Test Plan
 
 ## Product Scope
 
-NFL Edge Detector v1.0 expands the existing First Five Edge app into the broader Edge Detector product shell.
+NFL Edge Detector v1.1 expands the existing First Five Edge app into the broader Edge Detector product shell.
 
 The NFL module should provide matchup intelligence only. It should not provide betting recommendations, staking guidance, odds comparisons, market-value language, or bankroll language.
 
 ## Module Isolation Rule
 
 NFL changes must not alter MLB behavior, MLB model outputs, MLB filter controls, MLB card rendering, or shared styling unless the change is explicitly part of the shared Edge Detector shell.
+
+## Release Status
+
+```text
+Market release: 1.1.0-test
+Model baseline: 1.0.0
+Classification: active monitored test
+```
+
+This release changes the NFL data and grading lifecycle only. It does not
+change the model calculations, official side thresholds, scoring threshold,
+or historical backtest definition.
+
+NFL monitored-test history is isolated in:
+
+```text
+nfl_model_history
+```
+
+The source of truth is Turso. Streamlit page loads are read-only consumers of
+stored NFL snapshots and must not create or mutate tracked performance rows.
+
+## Snapshot, Lock, And Grading
+
+```text
+Snapshot cadence: hourly at minute 15 through GitHub Actions
+Lock: scheduled kickoff
+Pregame: decisions may update
+Locked: decision fields freeze; only status and result fields update
+No valid pregame snapshot: Not Tracked
+```
+
+Performance grades stored Official, Lean, and Watch decisions separately.
+Not Tracked games are excluded. The current-slate UI must display snapshot
+freshness beneath the filter count and a lock indicator on started games.
+
+The workflow revisits recent NFL weeks so completed games can settle after
+their official results reach the source.
+
+## Discovery Decisions
+
+Discovery thresholds sit below the existing official gates and do not change
+official model selections:
+
+```text
+Side Official: absolute model margin >= 5.0
+Side Lean: absolute model margin >= 3.5 and < 5.0
+Side Watch: absolute model margin >= 2.0 and < 3.5
+
+Scoring Official: absolute projected-total delta >= 2.5
+Scoring Lean: absolute projected-total delta >= 1.5 and < 2.5
+Scoring Watch: absolute projected-total delta >= 0.75 and < 1.5
+```
+
+The direction of a scoring Lean or Watch follows the sign of projected total
+minus the stored rolling league baseline.
 
 Implementation guardrails:
 
@@ -49,23 +105,24 @@ Initial behavior:
 
 ```text
 All = home dashboard placeholder
-NFL = real v1.0 page
+NFL = active v1.1 monitored-test page
 MLB = current working MLB page
 NBA/NHL/CBB = coming soon placeholders
 ```
 
 ## NFL Page Modes
 
-The NFL page should have two visible modes:
+The NFL page should have three visible modes:
 
 ```text
 Current Slate
+Performance
 Historical Lab
 ```
 
 Current Slate is the default page.
 
-Historical Lab is visible in v1.0 for validation, but may be removed or disabled later.
+Historical Lab is visible in v1.1 for validation, but may be removed or disabled later.
 
 ## Current Slate
 
@@ -89,7 +146,7 @@ No upcoming NFL games found.
 Use Historical Lab to review the 2025 model test.
 ```
 
-Current Slate should not include preseason games in v1.0.
+Current Slate should not include preseason games in v1.1.
 
 ## Historical Lab
 
@@ -99,7 +156,7 @@ Purpose:
 Show 2025 historical model output with final results and performance metrics.
 ```
 
-Historical Lab is fixed to the 2025 regular season in v1.0.
+Historical Lab is fixed to the 2025 regular season in v1.1.
 
 Optional filter:
 
@@ -127,7 +184,7 @@ High/Low scoring-environment split
 
 ## Card Design
 
-Use the current dark MLB card style for v1.0 to reduce implementation risk and keep visual continuity.
+Use the current dark MLB card style for v1.1 to reduce implementation risk and keep visual continuity.
 
 Use compact NFL team abbreviations:
 
@@ -135,7 +192,7 @@ Use compact NFL team abbreviations:
 DAL @ PHI
 ```
 
-Use top filter pills only. Do not use sidebar filters for NFL v1.0.
+Use top filter pills only. Do not use sidebar filters for NFL v1.1.
 
 ## Current Slate Filter And Count Layout
 
@@ -180,7 +237,7 @@ Scoring Signals
 
 Those metrics can be reconsidered later in a summary expander or dashboard, but they should not occupy the primary mobile filter area.
 
-Page-level NFL filter pills may use query-param navigation in v1.0. This means selecting a page filter can rerun the Streamlit page. That is acceptable for v1.0 to preserve simple, shareable filter URLs. Game-card signal tiles should remain local card controls and should not refresh the page.
+Page-level NFL filter pills may use query-param navigation in v1.1. This means selecting a page filter can rerun the Streamlit page. That is acceptable for v1.1 to preserve simple, shareable filter URLs. Game-card signal tiles should remain local card controls and should not refresh the page.
 
 NFL card tiles:
 
@@ -224,7 +281,7 @@ Scoring Environment selected = show scoring-environment key factors
 Early Edge selected = show early-edge key factors
 ```
 
-For v1.0, Early Edge key factors should clearly indicate that the early model is pending:
+For v1.1, Early Edge key factors should clearly indicate that the early model is pending:
 
 ```text
 Early Edge model pending
@@ -267,7 +324,7 @@ The format should match the MLB analysis pattern:
 | Detail | ... |
 ```
 
-Do not use this as a separate expander title for v1.0:
+Do not use this as a separate expander title for v1.1:
 
 ```text
 Trust But Verify: DAL @ PHI
@@ -420,7 +477,7 @@ Field surface
 Travel/time-zone context
 ```
 
-For v1.0, if reliable injury or weather data is not wired in, label this section clearly:
+For v1.1, if reliable injury or weather data is not wired in, label this section clearly:
 
 ```text
 Availability check pending
@@ -576,12 +633,12 @@ Low Scoring Environment: 20 games, 75.0%
 
 ## Implementation Notes
 
-Suggested v1.0 implementation order:
+Suggested v1.1 implementation order:
 
 ```text
 1. Add shared Edge Detector sport selector to app.py.
 2. Wrap existing MLB page in an MLB render function without changing MLB model logic.
-3. Add NFL page with Current Slate and Historical Lab tabs.
+3. Add NFL page with Current Slate, Performance, and Historical Lab modes.
 4. Build nfl_agent.py from the tested nfl_backtest.py model functions.
 5. Render Historical Lab from nfl_backtest_2025.csv or generated model output.
 6. Render Current Slate from nflverse schedule data using the same model engine.

@@ -102,7 +102,11 @@ NFL:
 ```text
 Separate market module.
 Uses NFL-specific model logic and historical lab assumptions.
-Needs its own tracking contract before persistent performance tracking is enabled.
+Uses nfl_model_history for isolated NFL performance tracking.
+Uses the shared Turso connection pattern with the NFL-only table.
+Runs an hourly scheduled snapshot, updates pregame decisions, and locks at kickoff.
+Grades Official, Lean, and Watch segments separately.
+Keeps the 1.0.0 model calculations and official thresholds unchanged.
 ```
 
 WNBA:
@@ -255,7 +259,7 @@ model_history          # MLB
 wnba_model_history     # WNBA
 nba_model_history      # NBA future
 nhl_model_history      # NHL future
-nfl_model_history      # NFL future
+nfl_model_history      # NFL monitored test
 ```
 
 This gives one operational backend while keeping market performance separate.
@@ -571,8 +575,10 @@ WNBA: Side and Scoring decisions use WNBA-specific near-threshold bands and
       store one segment per decision.
 MLS: Double Chance, Full Match, Goals, and BTTS use MLS-specific bands and
      store one segment per decision.
-NBA, NHL, CBB, NFL, and PGA: Keep current behavior until their market-specific
-                            discovery thresholds and active schedules are approved.
+NFL: Side and Scoring decisions use NFL-specific near-threshold bands and
+     store one segment per decision.
+NBA, NHL, CBB, and PGA: Keep current behavior until their market-specific
+                       discovery thresholds and active schedules are approved.
 Future markets: Do not inherit MLB, WNBA, or MLS thresholds.
 ```
 
@@ -768,9 +774,14 @@ Next gate: data-source verification for field list, finish position, cut result,
 NFL:
 
 ```text
-Status: needs classification.
-Schedule: not approved for production tracking until classification is complete.
-Next gate: decide whether NFL is production, tracked test, or lab-only.
+Status: active monitored test.
+Schedule: hourly at minute 15 during the regular season.
+Data source of truth: separate nfl_model_history table in Turso.
+Lock: scheduled kickoff.
+Performance: stored Official, Lean, and Watch decisions are graded separately;
+Not Tracked rows are excluded.
+Model baseline: 1.0.0 remains unchanged by the monitored-test lifecycle release.
+Next gate: reconcile a representative in-season sample before production review.
 ```
 
 ## Release Checklist

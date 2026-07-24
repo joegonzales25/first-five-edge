@@ -173,5 +173,5 @@ NBA: test/planning; scheduled snapshots disabled until season
 NHL: test/planning; scheduled snapshots disabled until season
 CBB: v0 framework; manual snapshots only until data/source validation
 PGA: documented and paused
-NFL: needs classification before production lockdown
+NFL: active monitored test with hourly snapshots and kickoff locking
 ```

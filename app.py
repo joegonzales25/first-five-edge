@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from html import escape
 from io import StringIO
 import csv
@@ -12,6 +12,10 @@ from nfl_agent import (
     build_current_slate,
     build_historical_lab,
     historical_summary_tables,
+)
+from nfl_model_history import (
+    load_nfl_history,
+    load_nfl_performance_summary,
 )
 from wnba_agent import (
     backtest_no_rest_schedule,
@@ -82,7 +86,7 @@ PERFORMANCE_TRACKING_VERSION = "2.3.29"
 FALLBACK_TIMEZONE = "America/New_York"
 MARKET_RELEASES = {
     "MLB": "2.3.30",
-    "NFL": "1.0.0",
+    "NFL": "1.1.0-test",
     "WNBA": "1.0.2-test",
     "NBA": "0.1.0-test",
     "NHL": "0.1.0-test",
@@ -3266,7 +3270,7 @@ def selected_sport():
 
 def selected_nfl_mode():
     mode = str(get_query_param("mode") or "current").lower()
-    if mode not in ["current", "lab"]:
+    if mode not in ["current", "lab", "perf"]:
         return "current"
     return mode
 
@@ -3282,6 +3286,8 @@ def selected_nfl_filter(default_filter="all"):
         "pass",
         "correct",
         "missed",
+        "lean",
+        "watch",
     }
     if filter_value not in valid_filters:
         return default_filter
@@ -3418,6 +3424,8 @@ def render_nfl_current_controls(slate, meta, selected_filter, filtered_count):
         ("Signals", "signals"),
         ("Side", "side"),
         ("Scoring", "scoring"),
+        ("Lean", "lean"),
+        ("Watch", "watch"),
         ("A", "a"),
         ("Pass", "pass"),
     ]
@@ -3440,7 +3448,11 @@ def render_nfl_current_controls(slate, meta, selected_filter, filtered_count):
 
 
 def render_nfl_mode_pills(active_mode):
-    options = [("Current", "current"), ("Historical Lab", "lab")]
+    options = [
+        ("Current", "current"),
+        ("Performance", "perf"),
+        ("Historical Lab", "lab"),
+    ]
     pills = []
     for label, mode in options:
         classes = ["nfl-control-pill"]
@@ -4049,7 +4061,7 @@ def render_nfl_card(row, historical=False):
         <span class="badge badge-edge">Confidence {escape(str(row["Confidence"]))}</span>
 
         <div class="game-title">{escape(str(row["Game"]))}</div>
-        <div class="muted">{escape(str(row["Game Time"]))} - {escape(str(row["Status"]))}</div>
+        <div class="muted">{escape(format_game_status_line(row))}</div>
 
         <input class="edge-view-control edge-view-first" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-side" checked>
         <input class="edge-view-control edge-view-f5" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-scoring">
@@ -4068,6 +4080,16 @@ def render_nfl_card(row, historical=False):
     """)
 
     with st.expander(f"\U0001f50d Analysis: {row['Game']}"):
+        discovery_labels = [
+            row.get("Side Discovery Label"),
+            row.get("Scoring Discovery Label"),
+        ]
+        discovery_labels = [label for label in discovery_labels if label]
+        if discovery_labels:
+            st.markdown("### Discovery")
+            for label in discovery_labels:
+                st.markdown(f"- {label}")
+
         if historical:
             st.markdown("### Result Review")
             st.markdown(f"""
@@ -4410,6 +4432,16 @@ def filter_nfl_games(games, view, historical=False):
         filtered = filtered[filtered["Side Edge"] != "Pass"]
     elif view == "scoring":
         filtered = filtered[filtered["Scoring Edge"] != "Neutral Scoring Environment"]
+    elif view == "lean":
+        filtered = filtered[
+            filtered["Side Tracking Segment"].eq("Lean")
+            | filtered["Scoring Tracking Segment"].eq("Lean")
+        ]
+    elif view == "watch":
+        filtered = filtered[
+            filtered["Side Tracking Segment"].eq("Watch")
+            | filtered["Scoring Tracking Segment"].eq("Watch")
+        ]
     elif view == "a":
         filtered = filtered[filtered["Confidence"] == "A"]
     elif view == "pass":
@@ -4479,18 +4511,408 @@ def load_nfl_historical():
     return build_historical_lab(2025)
 
 
+def safe_load_nfl_history(**kwargs):
+    try:
+        return load_nfl_history(**kwargs)
+    except Exception:
+        return []
+
+
+def nfl_slate_from_history(rows):
+    if not rows:
+        return pd.DataFrame()
+
+    slate_rows = []
+    for row in rows:
+        notes = [
+            item.strip()
+            for item in str(row.get("agent_notes") or "").split(";")
+            if item.strip()
+        ]
+        slate_rows.append(
+            {
+                "Sport": "NFL",
+                "Game ID": row.get("game_id"),
+                "Season": row.get("season"),
+                "Week": row.get("week"),
+                "Slate Date": row.get("slate_date"),
+                "Scheduled Kickoff": row.get("scheduled_kickoff"),
+                "Sort Date": pd.to_datetime(
+                    row.get("scheduled_kickoff"),
+                    errors="coerce",
+                    utc=True,
+                ),
+                "Game Time": row.get("game_time") or "TBD",
+                "Game": row.get("game"),
+                "Away": row.get("away_team"),
+                "Home": row.get("home_team"),
+                "Away Score": row.get("away_score"),
+                "Home Score": row.get("home_score"),
+                "Actual Winner": row.get("actual_winner"),
+                "Actual Total": row.get("actual_total"),
+                "Predicted Winner": row.get("predicted_winner"),
+                "Model Signal": row.get("model_signal") or "Pass",
+                "Edge Score": row.get("edge_score") or 0,
+                "Confidence": row.get("confidence") or "Pass",
+                "Side Edge": row.get("side_edge") or "Pass",
+                "Side Tracking Segment": (
+                    row.get("side_tracking_segment") or "No Edge"
+                ),
+                "Side Discovery Pick": row.get("side_discovery_pick"),
+                "Side Discovery Label": row.get("side_discovery_label"),
+                "Side Result": row.get("side_result") or "Pending",
+                "Winner Result": row.get("side_result") or "Pending",
+                "Scoring Edge": (
+                    row.get("scoring_edge")
+                    or "Neutral Scoring Environment"
+                ),
+                "Scoring Tracking Segment": (
+                    row.get("scoring_tracking_segment") or "No Edge"
+                ),
+                "Scoring Discovery Pick": row.get(
+                    "scoring_discovery_pick"
+                ),
+                "Scoring Discovery Label": row.get(
+                    "scoring_discovery_label"
+                ),
+                "Scoring Result": row.get("scoring_result") or "Pending",
+                "Early Edge": "Model Pending",
+                "Model Margin": row.get("model_margin"),
+                "Projected Total": row.get("projected_total"),
+                "League Total Baseline": row.get(
+                    "league_total_baseline"
+                ),
+                "Rest Edge": row.get("rest_edge"),
+                "Key Factors Summary": (
+                    "; ".join(notes[:2]) or "Neutral model profile"
+                ),
+                "Key Factors List": notes,
+                "Agent Notes": row.get("agent_notes") or "",
+                "Status": row.get("status") or "Scheduled",
+                "Snapshot Status": row.get("snapshot_status"),
+                "Locked At": row.get("locked_at"),
+                "Snapshot Updated At": row.get("updated_at"),
+            }
+        )
+    return pd.DataFrame(slate_rows).sort_values(
+        ["Sort Date", "Game"],
+        na_position="last",
+    )
+
+
+def current_nfl_history_week(rows):
+    if not rows:
+        return [], {}
+
+    now = datetime.now(ZoneInfo(FALLBACK_TIMEZONE))
+    grouped = {}
+    for row in rows:
+        key = (row.get("season"), row.get("week"))
+        grouped.setdefault(key, []).append(row)
+
+    active = []
+    upcoming = []
+    for key, week_rows in grouped.items():
+        kickoffs = pd.to_datetime(
+            [row.get("scheduled_kickoff") for row in week_rows],
+            errors="coerce",
+            utc=True,
+        )
+        past = [
+            kickoff.to_pydatetime()
+            for kickoff in kickoffs
+            if not pd.isna(kickoff)
+            and kickoff.to_pydatetime() < now.astimezone(timezone.utc)
+        ]
+        future = [
+            kickoff.to_pydatetime()
+            for kickoff in kickoffs
+            if not pd.isna(kickoff)
+            and kickoff.to_pydatetime() >= now.astimezone(timezone.utc)
+        ]
+        has_unfinished = any(
+            str(row.get("status") or "").strip().lower()
+            not in {"final", "game over", "full time", "full-time"}
+            for row in week_rows
+        )
+        if past and has_unfinished:
+            active.append((max(past), key, week_rows))
+        if future:
+            upcoming.append((min(future), key, week_rows))
+
+    if active:
+        _, key, selected = max(active, key=lambda item: item[0])
+    elif upcoming:
+        _, key, selected = min(upcoming, key=lambda item: item[0])
+    else:
+        key = max(
+            grouped,
+            key=lambda value: (
+                int(value[0] or 0),
+                int(value[1] or 0),
+            ),
+        )
+        selected = grouped[key]
+    return selected, {"season": key[0], "week": key[1]}
+
+
+def nfl_signal_segment(row, market):
+    if row.get("snapshot_status") == "Not Tracked":
+        return "No Edge"
+    column = (
+        "side_tracking_segment"
+        if market == "Side"
+        else "scoring_tracking_segment"
+    )
+    return row.get(column) or "No Edge"
+
+
+def nfl_signal_result(row, market, segment):
+    row_segment = nfl_signal_segment(row, market)
+    if row_segment != segment:
+        return None
+    if market == "Side":
+        field = (
+            "side_result"
+            if segment == "Official"
+            else "side_discovery_result"
+        )
+    else:
+        field = (
+            "scoring_result"
+            if segment == "Official"
+            else "scoring_discovery_result"
+        )
+    return row.get(field) or "Pending"
+
+
+def nfl_signal_pick(row, market, segment):
+    if market == "Side":
+        return (
+            row.get("predicted_winner")
+            if segment == "Official"
+            else row.get("side_discovery_pick")
+        )
+    return (
+        row.get("scoring_edge")
+        if segment == "Official"
+        else row.get("scoring_discovery_pick")
+    )
+
+
+def render_nfl_performance():
+    st.markdown("### NFL Performance")
+    model_version = MODEL_BASELINES["NFL"]
+    market_version = MARKET_RELEASES["NFL"]
+    all_rows = safe_load_nfl_history()
+    current_rows = [
+        row
+        for row in all_rows
+        if row.get("model_version") == model_version
+        and row.get("market_version") == market_version
+    ]
+    if not all_rows:
+        st.info(
+            "No NFL monitored-test snapshots recorded yet. The hourly "
+            "workflow will create the first pregame snapshot in season."
+        )
+        return
+    current_summary = load_nfl_performance_summary(
+        model_version=model_version,
+        market_version=market_version,
+    )
+
+    columns = st.columns(5)
+    with columns[0]:
+        market_filter = st.selectbox(
+            "Signal",
+            ["All", "Side", "Scoring"],
+            key="nfl_performance_signal",
+        )
+    with columns[1]:
+        window_filter = st.selectbox(
+            "Day(s)",
+            ["Today", "Yesterday", "Last 7", "Last 30", "All"],
+            key="nfl_performance_days",
+        )
+    with columns[2]:
+        confidence_filter = st.selectbox(
+            "Confidence",
+            ["All", "A", "B", "C", "Pass"],
+            key="nfl_performance_confidence",
+        )
+    with columns[3]:
+        segment_filter = st.selectbox(
+            "Segment",
+            ["All", "Official", "Lean", "Watch"],
+            key="nfl_performance_segment",
+        )
+    with columns[4]:
+        model_filter = st.selectbox(
+            "Model",
+            [f"Current {model_version}", "All"],
+            key="nfl_performance_model",
+        )
+
+    selected = all_rows if model_filter == "All" else current_rows
+    today = datetime.now(ZoneInfo(FALLBACK_TIMEZONE)).date()
+    date_rules = {
+        "Today": (today, today),
+        "Yesterday": (today - timedelta(days=1), today - timedelta(days=1)),
+        "Last 7": (today - timedelta(days=6), today),
+        "Last 30": (today - timedelta(days=29), today),
+        "All": (None, None),
+    }
+    start_date, end_date = date_rules[window_filter]
+    filtered = []
+    for row in selected:
+        try:
+            row_date = datetime.fromisoformat(
+                str(row.get("slate_date"))
+            ).date()
+        except Exception:
+            continue
+        if start_date and not (start_date <= row_date <= end_date):
+            continue
+        if (
+            confidence_filter != "All"
+            and row.get("confidence") != confidence_filter
+        ):
+            continue
+        filtered.append(row)
+
+    markets = (
+        ["Side", "Scoring"]
+        if market_filter == "All"
+        else [market_filter]
+    )
+    segments = (
+        ["Official", "Lean", "Watch"]
+        if segment_filter == "All"
+        else [segment_filter]
+    )
+    summaries = []
+    details = []
+    for segment in segments:
+        for market in markets:
+            market_rows = []
+            for row in filtered:
+                result = nfl_signal_result(row, market, segment)
+                if result is None:
+                    continue
+                market_rows.append((row, result))
+                details.append(
+                    {
+                        "Slate": row.get("slate_date"),
+                        "Week": row.get("week"),
+                        "Signal": market,
+                        "Segment": segment,
+                        "Game": row.get("game"),
+                        "Pick": nfl_signal_pick(row, market, segment),
+                        "Confidence": row.get("confidence"),
+                        "Score": row.get("edge_score"),
+                        "Result": result,
+                        "Status": row.get("status"),
+                        "Model": row.get("model_version"),
+                        "Market Version": row.get("market_version"),
+                    }
+                )
+            if not market_rows:
+                continue
+            hits = sum(result == "Correct" for _, result in market_rows)
+            misses = sum(result == "Missed" for _, result in market_rows)
+            pushes = sum(result == "Push" for _, result in market_rows)
+            summaries.append(
+                {
+                    "market": (
+                        f"{segment} {market}"
+                        if segment_filter == "All"
+                        else market
+                    ),
+                    "hits": hits,
+                    "misses": misses,
+                    "pushes": pushes,
+                    "pending": len(market_rows) - hits - misses - pushes,
+                }
+            )
+
+    with st.expander("NFL Performance History Diagnostics"):
+        metrics = st.columns(4)
+        metrics[0].metric("Snapshots", current_summary["snapshots"])
+        metrics[1].metric("Completed", current_summary["completed"])
+        metrics[2].metric(
+            "Side Decisions",
+            current_summary["side_signal_games"],
+        )
+        metrics[3].metric(
+            "Scoring Decisions",
+            current_summary["scoring_signal_games"],
+        )
+        st.caption(
+            "Only stored pregame Official, Lean, and Watch decisions are "
+            "graded. Not Tracked games are excluded."
+        )
+        st.caption(f"Storage: {current_summary['storage_backend']}")
+        st.download_button(
+            f"Download NFL Performance History CSV ({len(details)} rows)",
+            data=pd.DataFrame(details).to_csv(index=False),
+            file_name="nfl_model_history.csv",
+            mime="text/csv",
+            key="nfl_history_download",
+        )
+
+    if not summaries:
+        st.info("No NFL tracked results match the selected filters.")
+        return
+
+    cards = []
+    for row in summaries:
+        completed = row["hits"] + row["misses"] + row["pushes"]
+        record = f"{row['hits']}-{row['misses']}"
+        if row["pushes"]:
+            record += f"-{row['pushes']}"
+        cards.append(
+            '<div class="performance-card">'
+            f'<div class="performance-market">{escape(row["market"])}</div>'
+            f'<div class="performance-hit-rate">{performance_hit_rate(row)}</div>'
+            f'<div class="performance-record">{record} record</div>'
+            f'<div class="performance-meta">{completed} completed - {row["pending"]} pending</div>'
+            '</div>'
+        )
+    st.html(
+        '<div class="model-favorite top-looks">'
+        '<div class="model-label">NFL MODEL PERFORMANCE</div>'
+        f'<div class="top-look-meta">{escape(window_filter)} - monitored test</div>'
+        f'<div class="performance-results">{"".join(cards)}</div>'
+        '</div>'
+    )
+    if details:
+        st.dataframe(pd.DataFrame(details), width="stretch", hide_index=True)
+
+
 def render_nfl_current():
-    slate, meta = load_nfl_current()
+    stored_rows = safe_load_nfl_history(
+        model_version=MODEL_BASELINES["NFL"],
+        market_version=MARKET_RELEASES["NFL"],
+    )
+    history_rows, meta = current_nfl_history_week(stored_rows)
+    slate = nfl_slate_from_history(history_rows)
     if slate.empty:
-        st.info("No upcoming NFL games found.")
+        st.info(
+            "No NFL monitored-test snapshots are available. The hourly "
+            "workflow will load the next regular-season slate."
+        )
         st.markdown(
             f'[Open Historical Lab]({query_link({"sport": "NFL", "mode": "lab", "filter": "all", "week": "all"})})'
         )
         return
+    slate = slate.copy()
+    slate["Game Time"] = slate.apply(format_local_card_time, axis=1)
 
     selected_filter = selected_nfl_filter("all")
     filtered = filter_nfl_games(slate, selected_filter)
     render_nfl_current_controls(slate, meta, selected_filter, len(filtered))
+    st.caption(format_snapshot_caption(history_rows))
 
     if filtered.empty:
         st.info("No NFL games match the selected filter.")
@@ -4570,13 +4992,15 @@ def render_nfl_historical():
 
 def render_nfl_page():
     st.title("NFL Edge Detector")
-    st.caption("Outcome and scoring-environment model signals")
+    st.caption("Monitored test: outcome and scoring-environment model signals")
 
     mode = selected_nfl_mode()
     render_nfl_mode_pills(mode)
 
     if mode == "current":
         render_nfl_current()
+    elif mode == "perf":
+        render_nfl_performance()
     else:
         render_nfl_historical()
 
@@ -4586,7 +5010,13 @@ def render_nfl_page():
 
         **Current Slate**: nearest upcoming regular-season week, when available
 
+        **Performance**: stored Official, Lean, and Watch decisions only
+
         **Historical Lab**: fixed 2025 regular-season model test
+
+        **Snapshot cadence**: hourly during the regular season
+
+        **Lock**: scheduled kickoff
 
         **Model Scope**: matchup intelligence only. No odds, market comparison, staking guidance, or betting recommendations.
         """)

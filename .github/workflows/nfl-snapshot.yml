@@ -1,0 +1,42 @@
+name: NFL Slate Snapshot
+
+on:
+  schedule:
+    - cron: "15 * * * *"
+  workflow_dispatch:
+    inputs:
+      reference_date:
+        description: "Reference date in YYYY-MM-DD format. Leave blank for today ET."
+        required: false
+        type: string
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      HISTORY_BACKEND: turso
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      SNAPSHOT_REFERENCE_DATE: ${{ github.event.inputs.reference_date }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Record NFL snapshot
+        run: |
+          if [ -n "$SNAPSHOT_REFERENCE_DATE" ]; then
+            python snapshot_nfl_slate.py --date "$SNAPSHOT_REFERENCE_DATE"
+          else
+            python snapshot_nfl_slate.py
+          fi
