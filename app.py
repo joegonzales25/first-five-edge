@@ -3288,6 +3288,7 @@ def selected_nfl_filter(default_filter="all"):
         "missed",
         "lean",
         "watch",
+        "perf",
     }
     if filter_value not in valid_filters:
         return default_filter
@@ -3407,27 +3408,38 @@ def render_nfl_pills(options, active_value, extra_params=None):
     st.html(f'<div class="nfl-control-row">{"".join(pills)}</div>')
 
 
-def render_nfl_filter_pills(active_mode="current", active_filter="all"):
-    options = [
-        ("All", "current", "all"),
-        ("Signals", "current", "signals"),
-        ("Side", "current", "side"),
-        ("Scoring", "current", "scoring"),
-        ("A", "current", "a"),
-        ("Lab", "lab", "all"),
-        ("Perf", "perf", "all"),
-    ]
+def render_nfl_mode_pills(active_mode):
+    options = [("Current Slate", "current"), ("Historical Lab", "lab")]
     pills = []
-    for label, mode, filter_value in options:
-        classes = ["mlb-filter-card"]
-        is_active = (
-            active_mode == mode
-            and (mode != "current" or active_filter == filter_value)
-        )
-        if is_active:
+    for label, mode in options:
+        classes = ["nfl-control-pill"]
+        if mode == active_mode:
             classes.append("active")
         pills.append(
-            f'<a class="{" ".join(classes)}" href="{query_link({"sport": "NFL", "mode": mode, "filter": filter_value, "week": "all"})}">'
+            f'<a class="{" ".join(classes)}" href="'
+            f'{query_link({"sport": "NFL", "mode": mode, "filter": "all", "week": "all"})}">'
+            f"{escape(label)}</a>"
+        )
+    st.html(f'<div class="nfl-control-row">{"".join(pills)}</div>')
+
+
+def render_nfl_filter_pills(active_filter="all"):
+    options = [
+        ("All", "all"),
+        ("Signals", "signals"),
+        ("Side", "side"),
+        ("Scoring", "scoring"),
+        ("A", "a"),
+        ("Perf", "perf"),
+    ]
+    pills = []
+    for label, filter_value in options:
+        classes = ["mlb-filter-card"]
+        if active_filter == filter_value:
+            classes.append("active")
+        pills.append(
+            f'<a class="{" ".join(classes)}" href="'
+            f'{query_link({"sport": "NFL", "mode": "current", "filter": filter_value, "week": "all"})}">'
             f"{escape(label)}</a>"
         )
     st.html(f'<div class="mlb-filter-grid">{"".join(pills)}</div>')
@@ -3446,26 +3458,6 @@ def render_nfl_discovery_controls():
             key="nfl_show_leans",
         )
     return show_watches, show_leans
-
-
-def render_nfl_current_controls(slate, meta, selected_filter):
-    slate_date = "TBD"
-    if "Sort Date" in slate.columns and slate["Sort Date"].notna().any():
-        try:
-            slate_date = pd.to_datetime(slate["Sort Date"].dropna().min()).strftime(
-                "%m/%d/%Y"
-            )
-        except Exception:
-            slate_date = f"Season {meta['season']} - Week {meta['week']}"
-    else:
-        slate_date = f"Season {meta['season']} - Week {meta['week']}"
-
-    st.html(
-        '<div class="nfl-slate-label">Slate Date</div>'
-        f'<div class="nfl-slate-box">{escape(str(slate_date))}</div>'
-    )
-    render_nfl_filter_pills("current", selected_filter)
-    return render_nfl_discovery_controls()
 
 
 def render_wnba_mode_pills(active_mode):
@@ -4613,8 +4605,42 @@ def nfl_slate_from_history(rows):
     )
 
 
-def current_nfl_history_week(rows):
+def current_nfl_history_week(rows, target_date=None):
     if not rows:
+        return [], {}
+
+    if target_date is not None:
+        grouped = {}
+        for row in rows:
+            key = (row.get("season"), row.get("week"))
+            grouped.setdefault(key, []).append(row)
+
+        dated_groups = []
+        for key, week_rows in grouped.items():
+            slate_dates = pd.to_datetime(
+                [row.get("slate_date") for row in week_rows],
+                errors="coerce",
+            )
+            dates = [
+                value.date()
+                for value in slate_dates
+                if not pd.isna(value)
+            ]
+            if dates:
+                dated_groups.append((min(dates), max(dates), key, week_rows))
+
+        containing = [
+            item
+            for item in dated_groups
+            if item[0] <= target_date <= item[1]
+        ]
+        if containing:
+            _, _, key, selected = min(
+                containing,
+                key=lambda item: (item[1] - item[0]).days,
+            )
+            return selected, {"season": key[0], "week": key[1]}
+
         return [], {}
 
     now = datetime.now(ZoneInfo(FALLBACK_TIMEZONE))
@@ -4903,31 +4929,51 @@ def render_nfl_performance():
         st.dataframe(pd.DataFrame(details), width="stretch", hide_index=True)
 
 
-def render_nfl_current():
+def render_nfl_current(selected_filter_override=None):
+    selected_filter = selected_filter_override or selected_nfl_filter("all")
+
+    if selected_filter == "perf":
+        render_nfl_filter_pills(selected_filter)
+        history_rows = safe_load_nfl_history(
+            model_version=MODEL_BASELINES["NFL"],
+            market_version=MARKET_RELEASES["NFL"],
+        )
+        st.caption("Performance history")
+        st.caption(format_snapshot_caption(history_rows))
+        st.divider()
+        render_nfl_performance()
+        return
+
+    selected_date = st.date_input(
+        "Slate Date",
+        value=current_date_for_timezone(FALLBACK_TIMEZONE),
+        format="MM/DD/YYYY",
+        key="nfl_slate_date",
+    )
+    render_nfl_filter_pills(selected_filter)
+    show_watches, show_leans = render_nfl_discovery_controls()
+
     stored_rows = safe_load_nfl_history(
         model_version=MODEL_BASELINES["NFL"],
         market_version=MARKET_RELEASES["NFL"],
     )
-    history_rows, meta = current_nfl_history_week(stored_rows)
+    history_rows, _ = current_nfl_history_week(
+        stored_rows,
+        target_date=selected_date,
+    )
     slate = nfl_slate_from_history(history_rows)
     if slate.empty:
+        st.caption("0 of 0")
+        st.caption(format_snapshot_caption(history_rows))
+        st.divider()
         st.info(
             "No NFL monitored-test snapshots are available. The hourly "
             "workflow will load the next regular-season slate."
-        )
-        st.markdown(
-            f'[Open Historical Lab]({query_link({"sport": "NFL", "mode": "lab", "filter": "all", "week": "all"})})'
         )
         return
     slate = slate.copy()
     slate["Game Time"] = slate.apply(format_local_card_time, axis=1)
 
-    selected_filter = selected_nfl_filter("all")
-    show_watches, show_leans = render_nfl_current_controls(
-        slate,
-        meta,
-        selected_filter,
-    )
     base_filtered = filter_nfl_games(slate, selected_filter)
     discovery_mask = pd.Series(False, index=slate.index)
     if show_watches:
@@ -5037,37 +5083,64 @@ def render_nfl_historical():
         render_nfl_card(row, historical=True)
 
 
+def render_nfl_model_info_sidebar():
+    st.sidebar.title("NFL Controls")
+    st.sidebar.caption(f"Market release: {MARKET_RELEASES['NFL']}")
+    st.sidebar.caption(f"Model baseline: {MODEL_BASELINES['NFL']}")
+    try:
+        tracking_summary = load_nfl_performance_summary(
+            model_version=MODEL_BASELINES["NFL"],
+            market_version=MARKET_RELEASES["NFL"],
+        )
+    except Exception:
+        tracking_summary = {
+            "snapshots": 0,
+            "completed": 0,
+            "storage_backend": "Unavailable",
+            "db_path": "N/A",
+        }
+
+    storage_backend = tracking_summary.get("storage_backend", "Unavailable")
+    storage_path = tracking_summary.get("db_path", "N/A")
+    with st.sidebar.expander("NFL Model Info"):
+        st.markdown(f"""
+**Model Scope**: Full-game side and scoring environment
+
+**NFL Tracking**: separate NFL-only history table
+
+**Snapshots**: {tracking_summary["snapshots"]}
+
+**Completed**: {tracking_summary["completed"]}
+
+**Tracking Writes**: hourly scheduled snapshot workflow in season
+
+**Lock**: scheduled kickoff
+
+**Storage Backend**: {escape(storage_backend)}
+
+**Storage**: `{escape(storage_path)}`
+
+**Current Status**: Current slate views are All, Signals, Side, Scoring, A, and Perf.
+
+**Historical Lab**: fixed 2025 regular-season model test
+""")
+
+
 def render_nfl_page():
     st.title("NFL Edge Detector")
-    st.caption("Monitored test: outcome and scoring-environment model signals")
 
     mode = selected_nfl_mode()
+    displayed_mode = "current" if mode == "perf" else mode
+
+    render_nfl_model_info_sidebar()
+    render_nfl_mode_pills(displayed_mode)
 
     if mode == "current":
         render_nfl_current()
     elif mode == "perf":
-        render_nfl_filter_pills("perf")
-        render_nfl_performance()
+        render_nfl_current(selected_filter_override="perf")
     else:
-        render_nfl_filter_pills("lab")
         render_nfl_historical()
-
-    with st.expander("NFL Data Sources / Model Info"):
-        st.markdown("""
-        **Game Data**: nflverse regular-season game data
-
-        **Current Slate**: nearest upcoming regular-season week, when available
-
-        **Performance**: stored Official, Lean, and Watch decisions only
-
-        **Historical Lab**: fixed 2025 regular-season model test
-
-        **Snapshot cadence**: hourly during the regular season
-
-        **Lock**: scheduled kickoff
-
-        **Model Scope**: matchup intelligence only. No odds, market comparison, staking guidance, or betting recommendations.
-        """)
 
 
 def wnba_data_contract_text():

@@ -201,10 +201,11 @@ The NFL Current Slate controls should use the same hierarchy and shared filter-c
 Layout:
 
 ```text
+Current Slate | Historical Lab
 Slate Date
-MM/DD/YYYY display box
+MM/DD/YYYY date input
 Full-width All filter card
-Signals | Side | Scoring | A | Lab | Perf
+Signals | Side | Scoring | A | Perf
 Show Watches checkbox | Show Leans checkbox
 Filtered count caption
 Snapshot as of caption
@@ -218,13 +219,17 @@ Signals
 Side
 Scoring
 A
-Lab
 Perf
 ```
 
 Do not add a Top filter until tracked NFL performance supports a documented Top
-signal definition. `Lab` opens the fixed Historical Lab, and `Perf` opens stored
-monitored-test performance.
+signal definition. `Historical Lab` is a separate page mode, matching NBA and
+NHL. `Perf` opens stored monitored-test performance from the Current Slate
+filter row.
+
+Render the Current Slate mode, date input, filter cards, discovery controls,
+count, and snapshot freshness even when no current-season snapshots exist.
+Show the no-data message after those controls.
 
 Watch and Lean are discovery controls below the filter cards, not primary filter
 cards. With neither checkbox selected, the selected primary filter controls the
