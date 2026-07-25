@@ -1,3 +1,4 @@
+import math
 import os
 import sqlite3
 import tempfile
@@ -201,7 +202,8 @@ def safe_float(value):
     try:
         if pd.isna(value):
             return None
-        return float(value)
+        number = float(value)
+        return number if math.isfinite(number) else None
     except Exception:
         return None
 
