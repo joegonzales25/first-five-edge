@@ -779,7 +779,9 @@ NFL:
 
 ```text
 Status: active monitored test.
-Schedule: hourly at minute 15 during the regular season.
+Schedule: disabled during the offseason; manual workflow dispatch remains
+available. Re-enable hourly runs at minute 15 for approved regular-season
+monitoring.
 Data source of truth: separate nfl_model_history table in Turso.
 Lock: scheduled kickoff.
 Performance: stored Official, Lean, and Watch decisions are graded separately;

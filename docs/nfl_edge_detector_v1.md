@@ -18,6 +18,11 @@ Model baseline: 1.0.0
 Classification: active monitored test
 ```
 
+The scheduled snapshot trigger is disabled during the offseason. Manual
+workflow dispatch remains available for controlled testing. Re-enabling the
+hourly minute-15 schedule requires an explicit regular-season activation
+decision.
+
 This release changes the NFL data and grading lifecycle only. It does not
 change the model calculations, official side thresholds, scoring threshold,
 or historical backtest definition.

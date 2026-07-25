@@ -1,8 +1,6 @@
 name: NFL Slate Snapshot
 
 on:
-  schedule:
-    - cron: "15 * * * *"
   workflow_dispatch:
     inputs:
       reference_date:
