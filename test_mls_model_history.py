@@ -2,7 +2,20 @@ import unittest
 
 import pandas as pd
 
-from mls_model_history import prediction_values, safe_float
+from mls_model_history import (
+    db_value,
+    insert_prediction,
+    prediction_values,
+    safe_float,
+)
+
+
+class RecordingConnection:
+    def __init__(self):
+        self.params = None
+
+    def execute(self, _query, params):
+        self.params = params
 
 
 class MlsModelHistoryTests(unittest.TestCase):
@@ -14,6 +27,26 @@ class MlsModelHistoryTests(unittest.TestCase):
         for value in [float("nan"), float("inf"), float("-inf"), pd.NA]:
             with self.subTest(value=value):
                 self.assertIsNone(safe_float(value))
+
+    def test_db_value_rejects_all_missing_and_non_finite_values(self):
+        for value in [None, float("nan"), float("inf"), float("-inf"), pd.NA]:
+            with self.subTest(value=value):
+                self.assertIsNone(db_value(value))
+
+    def test_insert_normalizes_optional_nan_fields(self):
+        connection = RecordingConnection()
+
+        insert_prediction(
+            connection,
+            {
+                "game_id": "game-1",
+                "model_signal": float("nan"),
+                "edge_score": float("inf"),
+                "away_prior_games": 4,
+            },
+        )
+
+        self.assertEqual(connection.params, ["game-1", None, None, 4])
 
     def test_prediction_values_normalizes_non_finite_numeric_fields(self):
         values = prediction_values(
