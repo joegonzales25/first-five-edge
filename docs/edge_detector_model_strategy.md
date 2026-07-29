@@ -720,9 +720,9 @@ WNBA:
 
 ```text
 Status: active monitored test market.
-Schedule: hourly during active monitoring; scheduled runs process current ET slate plus previous ET slate for settlement.
+Schedule: hourly during active monitoring; scheduled runs process current ET slate plus previous ET slate, then reconcile pending snapshots over a 30-day window.
 Data source of truth: stored WNBA snapshot history.
-Performance: official side/scoring signals report separately from stored leans/watches when implemented.
+Performance: official side/scoring signals report separately from graded stored leans/watches.
 Next gate: completed-slate audit to confirm cards, exports, and performance reconcile.
 ```
 

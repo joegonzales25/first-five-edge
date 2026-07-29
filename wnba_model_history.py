@@ -3,7 +3,7 @@ import numbers
 import os
 import sqlite3
 import tempfile
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -246,6 +246,16 @@ def is_pregame_status(status):
     ]
 
 
+def is_settleable_result(row):
+    return (
+        is_final(row)
+        and safe_int(row.get("Away Score")) is not None
+        and safe_int(row.get("Home Score")) is not None
+        and bool(row.get("Actual Winner"))
+        and safe_float(row.get("Actual Total")) is not None
+    )
+
+
 def prediction_values(row, slate_date, market_version, model_version, now):
     return {
         "game_id": str(row.get("Game ID") or row.get("game_id") or ""),
@@ -310,8 +320,16 @@ def result_values(row, now, stored=None):
     away_score = safe_int(row.get("Away Score"))
     home_score = safe_int(row.get("Home Score"))
     actual_total = safe_float(row.get("Actual Total"))
-    model_margin = safe_float(row.get("Model Margin"))
-    projected_total = safe_float(row.get("Projected Total"))
+    model_margin = safe_float(
+        stored["model_margin"]
+        if "model_margin" in stored
+        else row.get("Model Margin")
+    )
+    projected_total = safe_float(
+        stored["projected_total"]
+        if "projected_total" in stored
+        else row.get("Projected Total")
+    )
 
     actual_margin = None
     if away_score is not None and home_score is not None:
@@ -403,7 +421,7 @@ def existing_snapshot(connection, game_id, market_version, model_version):
         """
         SELECT id, locked_at, snapshot_status,
                side_edge, predicted_winner, scoring_edge,
-               league_total_baseline,
+               model_margin, projected_total, league_total_baseline,
                side_tracking_segment, side_discovery_pick,
                scoring_tracking_segment, scoring_discovery_pick
         FROM wnba_model_history
@@ -586,6 +604,126 @@ def record_wnba_history(
         connection.commit()
 
     return counts
+
+
+def pending_wnba_snapshots(connection, start_date, end_date):
+    return fetch_rows(
+        connection,
+        """
+        SELECT *
+        FROM wnba_model_history
+        WHERE slate_date BETWEEN ? AND ?
+          AND (
+              LOWER(COALESCE(status, '')) NOT IN (
+                  'final', 'game over', 'full time', 'full-time'
+              )
+              OR side_result = 'Pending'
+              OR scoring_result = 'Pending'
+              OR side_discovery_result = 'Pending'
+              OR scoring_discovery_result = 'Pending'
+          )
+        ORDER BY slate_date, market_version, model_version, game_id
+        """,
+        (str(start_date), str(end_date)),
+    )
+
+
+def load_pending_wnba_snapshots(
+    through_date=None,
+    lookback_days=30,
+    db_path=DB_PATH,
+):
+    through_date = through_date or date.today()
+    start_date = through_date - timedelta(days=max(0, lookback_days))
+    with connect(db_path) as connection:
+        init_db(connection)
+        return pending_wnba_snapshots(connection, start_date, through_date)
+
+
+def reconcile_wnba_history(
+    slate,
+    snapshots,
+    apply=False,
+    db_path=DB_PATH,
+    now=None,
+):
+    counts = {
+        "candidates": len(snapshots),
+        "matched": 0,
+        "final": 0,
+        "still_pending": 0,
+        "unmatched": 0,
+        "updated": 0,
+    }
+    details = []
+    if slate is None or slate.empty:
+        counts["unmatched"] = len(snapshots)
+        return counts, details
+
+    current_rows = {}
+    for _, row in slate.iterrows():
+        game_id = row.get("Game ID") or row.get("game_id")
+        if game_id:
+            current_rows[str(game_id)] = row
+
+    reconciliation_time = now or utc_now()
+    updates = []
+    for snapshot in snapshots:
+        game_id = str(snapshot.get("game_id") or "")
+        current = current_rows.get(game_id)
+        if current is None:
+            counts["unmatched"] += 1
+            details.append(
+                {
+                    "game_id": game_id,
+                    "game": snapshot.get("game"),
+                    "status": "Unmatched",
+                }
+            )
+            continue
+
+        counts["matched"] += 1
+        if not is_settleable_result(current):
+            counts["still_pending"] += 1
+            details.append(
+                {
+                    "game_id": game_id,
+                    "game": snapshot.get("game"),
+                    "status": "Still pending",
+                }
+            )
+            continue
+
+        counts["final"] += 1
+        values = result_values(current, reconciliation_time, snapshot)
+        updates.append((snapshot, values))
+        details.append(
+            {
+                "game_id": game_id,
+                "game": snapshot.get("game"),
+                "market_version": snapshot.get("market_version"),
+                "model_version": snapshot.get("model_version"),
+                "side_result": values["side_result"],
+                "scoring_result": values["scoring_result"],
+                "status": "Would update" if not apply else "Updated",
+            }
+        )
+
+    if apply and updates:
+        with connect(db_path) as connection:
+            init_db(connection)
+            for snapshot, values in updates:
+                update_result(
+                    connection,
+                    snapshot["game_id"],
+                    snapshot["market_version"],
+                    snapshot["model_version"],
+                    values,
+                )
+                counts["updated"] += 1
+            connection.commit()
+
+    return counts, details
 
 
 def load_wnba_history(model_version=None, market_version=None, db_path=DB_PATH):

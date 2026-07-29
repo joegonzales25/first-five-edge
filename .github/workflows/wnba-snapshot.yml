@@ -39,4 +39,5 @@ jobs:
             python snapshot_wnba_slate.py --date "$SNAPSHOT_SLATE_DATE"
           else
             python snapshot_wnba_slate.py
+            python reconcile_wnba_history.py --lookback-days 30 --apply
           fi

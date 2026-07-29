@@ -308,8 +308,29 @@ snapshot_wnba_slate.py
 ```
 
 When the scheduled WNBA snapshot runs without an explicit date, it records the
-current ET slate and revisits the previous ET slate to settle late finals. A
-manual `slate_date` dispatch records only that requested slate date.
+current ET slate and revisits the previous ET slate to settle late finals. It
+then runs `reconcile_wnba_history.py --lookback-days 30 --apply` to settle any
+older pending snapshots against final ESPN results. A manual `slate_date`
+dispatch records only that requested slate date.
+
+Reconciliation is version-aware and result-only:
+
+```text
+Match ESPN results to an existing snapshot by exact game_id.
+Preserve the snapshot's market_version, model_version, picks, tiers, scores,
+model margin, projected total, and league baseline.
+Update only status, final scores, actual winner/total, grades, diagnostics,
+lock fields, and timestamps.
+Never insert a completed historical game that lacks a pregame snapshot.
+Default to dry-run; require --apply for database writes.
+```
+
+Manual audit commands:
+
+```powershell
+python reconcile_wnba_history.py --lookback-days 30
+python reconcile_wnba_history.py --lookback-days 30 --apply
+```
 
 WNBA should migrate away from Streamlit page-load history writes. The scheduled
 snapshot job should own WNBA history writes, matching the MLB pattern.
@@ -344,7 +365,7 @@ Watch/Lean rule:
 
 ```text
 Official WNBA picks remain the production performance record.
-Stored WNBA Watches and Leans may be graded as discovery performance once implemented.
+Stored WNBA Watches and Leans are graded as discovery performance.
 Watch and Lean performance must be reported separately from official pick hit rate.
 WNBA Watch/Lean thresholds must be defined from WNBA history, not inherited from MLB.
 ```
@@ -406,8 +427,8 @@ Export
 ```
 
 Official Performance includes locked official WNBA side and scoring signals
-only. Discovery Performance is reserved for future WNBA watches and leans and
-must not affect the official WNBA model record until validated.
+only. Discovery Performance includes stored WNBA watches and leans and must not
+affect the official WNBA model record until validated.
 
 The performance filters remain available whenever WNBA history exists.
 `Current model` includes the active model baseline across WNBA market releases.
