@@ -709,6 +709,7 @@ MLB:
 
 ```text
 Status: production candidate.
+Schedule: hourly during active monitoring.
 Data source of truth: stored snapshot history.
 Lock rule: 1st Inning, First 5, and Full Game lock at market/game start.
 Performance: official picks, leans, and watches report separately.
