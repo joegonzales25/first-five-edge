@@ -1,3 +1,5 @@
+import math
+import numbers
 import os
 import sqlite3
 import tempfile
@@ -188,9 +190,32 @@ def safe_float(value):
     try:
         if pd.isna(value):
             return None
-        return float(value)
+        number = float(value)
+        return number if math.isfinite(number) else None
     except Exception:
         return None
+
+
+def db_value(value):
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, numbers.Real):
+        number = float(value)
+        if not math.isfinite(number):
+            return None
+        if isinstance(value, numbers.Integral):
+            return int(value)
+        return number
+    return value
+
+
+def db_values(values):
+    return [db_value(value) for value in values]
 
 
 def is_final(row):
@@ -404,7 +429,7 @@ def insert_prediction(connection, row_values):
         INSERT INTO wnba_model_history ({", ".join(columns)})
         VALUES ({placeholders})
         """,
-        [row_values[column] for column in columns],
+        db_values(row_values[column] for column in columns),
     )
 
 
@@ -422,12 +447,14 @@ def update_prediction(connection, row_values):
           AND market_version = ?
           AND model_version = ?
         """,
-        [
-            *[row_values[column] for column in update_columns],
-            row_values["game_id"],
-            row_values["market_version"],
-            row_values["model_version"],
-        ],
+        db_values(
+            [
+                *[row_values[column] for column in update_columns],
+                row_values["game_id"],
+                row_values["market_version"],
+                row_values["model_version"],
+            ]
+        ),
     )
 
 
@@ -461,26 +488,28 @@ def update_result(connection, game_id, market_version, model_version, values):
           AND market_version = ?
           AND model_version = ?
         """,
-        (
-            values["status"],
-            values["away_score"],
-            values["home_score"],
-            values["actual_winner"],
-            values["actual_total"],
-            values["side_result"],
-            values["scoring_result"],
-            values["side_discovery_result"],
-            values["scoring_discovery_result"],
-            values["margin_error"],
-            values["total_error"],
-            values["updated_at"],
-            values["graded_at"],
-            should_lock,
-            values["updated_at"],
-            should_lock,
-            str(game_id),
-            market_version,
-            model_version,
+        db_values(
+            (
+                values["status"],
+                values["away_score"],
+                values["home_score"],
+                values["actual_winner"],
+                values["actual_total"],
+                values["side_result"],
+                values["scoring_result"],
+                values["side_discovery_result"],
+                values["scoring_discovery_result"],
+                values["margin_error"],
+                values["total_error"],
+                values["updated_at"],
+                values["graded_at"],
+                should_lock,
+                values["updated_at"],
+                should_lock,
+                str(game_id),
+                market_version,
+                model_version,
+            )
         ),
     )
 
