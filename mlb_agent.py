@@ -1937,7 +1937,7 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
 
     url = (
         "https://statsapi.mlb.com/api/v1/schedule"
-        f"?sportId=1&date={slate_date}&hydrate=probablePitcher,linescore"
+        f"?sportId=1&date={slate_date}&hydrate=probablePitcher,linescore,weather"
     )
 
     data = None
@@ -1967,6 +1967,7 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
             game_date = game.get("gameDate", "")
             game_status = game["status"]["detailedState"]
             linescore = game.get("linescore", {})
+            weather = game.get("weather") or {}
 
             away_team = away_side["team"]["name"]
             home_team = home_side["team"]["name"]
@@ -2235,6 +2236,9 @@ def get_today_games(selected_date=None, timezone_name="America/New_York"):
                 "Game Time": format_game_time(game_date, timezone_name),
                 "Game Sort Time": game_date,
                 "Status Sort": game_status_sort_value(game_status),
+                "Weather Condition": weather.get("condition"),
+                "Weather Temperature": weather.get("temp"),
+                "Weather Wind": weather.get("wind"),
                 "First Inning Result": build_first_inning_result(linescore, game_status),
                 "First Inning Result Compact": build_first_inning_result(linescore, game_status),
                 "F5 Result": build_f5_result(linescore, game_status, away_team, home_team),

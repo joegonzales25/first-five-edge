@@ -212,7 +212,7 @@ before implementation.
 Edge Detector uses layered versioning:
 
 ```text
-Product Release: Edge Detector v2.3.27
+Product Release: Edge Detector v2.3.30
 Market Release: WNBA v1.0.2-test
 Model Baseline: WNBA Model v1.0.0-test
 ```
@@ -713,6 +713,9 @@ Schedule: hourly during active monitoring.
 Data source of truth: stored snapshot history.
 Lock rule: 1st Inning, First 5, and Full Game lock at market/game start.
 Performance: official picks, leans, and watches report separately.
+Weather: MLB schedule condition, temperature, wind, and official disruption
+status are displayed as informational game context only. Weather does not alter
+model selection, confidence, locking, grading, or the 2.3.29 model baseline.
 Next gate: final reconciliation audit across cards, history, exports, and performance cards.
 ```
 

@@ -78,8 +78,8 @@ from model_history import (
     load_slate_history_rows,
 )
 
-APP_VERSION = "2.3.29"
-MODEL_CACHE_VERSION = "edge-v2329-first-inning-sample-cap-refine"
+APP_VERSION = "2.3.30"
+MODEL_CACHE_VERSION = "edge-v2330-mlb-weather-indicator"
 # Keep performance history stable across UI/cache releases. Change this only
 # when the model baseline, grading definition, or history schema intentionally changes.
 PERFORMANCE_TRACKING_VERSION = "2.3.29"
@@ -2589,11 +2589,62 @@ def format_snapshot_caption(history_rows):
     return f"Snapshot as of: {format_snapshot_time(max(timestamps))}"
 
 
+def clean_card_value(row, column_name):
+    value = row.get(column_name)
+    if value is None or value == "":
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip()
+
+
+def format_mlb_weather_indicator(row):
+    if "Weather Condition" not in row:
+        return ""
+
+    condition = clean_card_value(row, "Weather Condition")
+    temperature = clean_card_value(row, "Weather Temperature")
+    if not condition:
+        return ""
+
+    condition_lower = condition.lower()
+    temperature_label = f", {temperature} F" if temperature else ""
+    indoor_terms = ("indoor", "indoors", "dome", "roof closed")
+    watch_terms = (
+        "rain",
+        "drizzle",
+        "shower",
+        "thunder",
+        "storm",
+        "snow",
+        "sleet",
+    )
+
+    if any(term in condition_lower for term in indoor_terms):
+        return "\U0001f3df Indoor"
+    if any(term in condition_lower for term in watch_terms):
+        return f"\u2614 Weather Watch: {condition}{temperature_label}"
+    return f"Weather: {condition}{temperature_label}"
+
+
 def format_game_status_line(row):
     game_time = get_row_value(row, "Game Time", "N/A")
     status = get_row_value(row, "Status", "N/A")
     snapshot_status = str(get_row_value(row, "Snapshot Status", "")).strip()
+    status_lower = str(status).strip().lower()
     base_line = f"{game_time} - {status}"
+    weather_indicator = format_mlb_weather_indicator(row)
+
+    if "Weather Condition" in row:
+        if any(term in status_lower for term in ("postponed", "cancelled", "canceled")):
+            base_line = f"\u26d4 {base_line}"
+        elif any(term in status_lower for term in ("delayed", "suspended")):
+            base_line = f"\u26a0 {base_line}"
+        if weather_indicator:
+            base_line = f"{weather_indicator} | {base_line}"
 
     if snapshot_status == "Locked":
         return f"\U0001f512 {base_line}"
@@ -8342,7 +8393,7 @@ if active_sport != "MLB":
 st.title("MLB Edge Detector")
 
 st.sidebar.title("Controls")
-st.sidebar.caption(f"Model version: {APP_VERSION}")
+st.sidebar.caption(f"Model version: {PERFORMANCE_TRACKING_VERSION}")
 timezone_label = "local" if timezone_detected else "Eastern fallback"
 st.sidebar.caption(f"Times shown in {display_timezone} ({timezone_label})")
 st.sidebar.caption("Model 2.3 promoted; 2.2.7 retained as rollback reference.")
@@ -8674,6 +8725,22 @@ else:
         with st.expander(f"\U0001f50d Analysis: {row['Game']}"):
             if discovery_label_html:
                 st.html(discovery_label_html)
+            weather_condition = clean_card_value(row, "Weather Condition")
+            weather_temperature = clean_card_value(row, "Weather Temperature")
+            weather_wind = clean_card_value(row, "Weather Wind")
+            if weather_condition or weather_temperature or weather_wind:
+                weather_temperature_display = (
+                    f"{weather_temperature} F" if weather_temperature else "N/A"
+                )
+                st.markdown("### Game Conditions")
+                st.markdown(f"""
+                | Metric | Value |
+                |---|---|
+                | Official Game Status | {get_row_value(row, "Status", "N/A")} |
+                | Weather | {weather_condition or "N/A"} |
+                | Temperature | {weather_temperature_display} |
+                | Wind | {weather_wind or "N/A"} |
+                """)
             st.markdown("### Edge Breakdown")
 
             st.markdown("#### Starter Edge")
