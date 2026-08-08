@@ -709,10 +709,15 @@ MLB:
 
 ```text
 Status: production candidate.
-Schedule: hourly during active monitoring.
+Schedule: hourly during active monitoring; each run also settles unresolved
+history over a rolling 30-day window from final MLB schedule results.
 Data source of truth: stored snapshot history.
 Lock rule: 1st Inning, First 5, and Full Game lock at market/game start.
 Performance: official picks, leans, and watches report separately.
+Discovery integrity: First 5 and Full Game leans/watches must select one of the
+two teams. Non-directional values such as Even are not generated or graded.
+Reconciliation may update only result, outcome, status, lock metadata, and the
+updated timestamp; stored model version, pick, confidence, and score remain fixed.
 Weather: MLB schedule condition, temperature, wind, and official disruption
 status are displayed as informational game context only. Weather does not alter
 model selection, confidence, locking, grading, or the 2.3.29 model baseline.

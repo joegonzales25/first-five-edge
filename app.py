@@ -1344,7 +1344,10 @@ def directional_team_label(row, winner_column, away_team=None, home_team=None):
     winner = get_row_value(row, winner_column, "")
     if is_no_edge_pick(winner):
         return None
-    return replace_home_away(winner, away_team, home_team)
+    team = replace_home_away(winner, away_team, home_team)
+    if team not in {away_team, home_team}:
+        return None
+    return team
 
 
 def range_label(score, watch_min, watch_max, lean_min, lean_max, watch_label, lean_label):
@@ -2543,7 +2546,16 @@ def recompute_export_outcomes(rows):
 def history_row_matches_filters(row, market=None, days=None, confidence=None, exact_date=None):
     if is_no_edge_pick(row.get("pick")):
         return False
-    if market and market != "All" and (row.get("base_market") or row.get("market")) != market:
+    base_market = row.get("base_market") or row.get("market")
+    tracking_segment = row.get("tracking_segment") or "Official"
+    if tracking_segment in ["Watch", "Lean"] and base_market in [
+        "First 5",
+        "Full Game",
+    ]:
+        game_teams = str(row.get("game") or "").split(" @ ", 1)
+        if len(game_teams) != 2 or row.get("pick") not in game_teams:
+            return False
+    if market and market != "All" and base_market != market:
         return False
     if confidence and confidence != "All" and row.get("confidence") != confidence:
         return False

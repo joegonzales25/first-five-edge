@@ -2,7 +2,7 @@ import re
 import sqlite3
 import os
 import tempfile
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from history_backend_config import resolve_history_backend
@@ -292,7 +292,7 @@ def replace_home_away(value, away_team, home_team):
 
 def directional_team_label(row, winner_column, away_team, home_team):
     winner = replace_home_away(row.get(winner_column, ""), away_team, home_team)
-    if is_no_edge_pick(winner):
+    if is_no_edge_pick(winner) or winner not in {away_team, home_team}:
         return None
 
     return winner
@@ -744,6 +744,143 @@ def record_model_history(games, slate_date, model_version, db_path=DB_PATH):
         connection.commit()
 
 
+def pending_mlb_history(connection, start_date, end_date):
+    return fetch_rows(
+        connection,
+        """
+        SELECT *
+        FROM model_history
+        WHERE slate_date BETWEEN ? AND ?
+          AND pick != 'Not Tracked'
+          AND (
+              LOWER(COALESCE(status, '')) NOT IN (
+                  'final', 'game over', 'completed early'
+              )
+              OR outcome = 'Pending'
+          )
+        ORDER BY slate_date, model_version, game, market
+        """,
+        (str(start_date), str(end_date)),
+    )
+
+
+def load_pending_mlb_history(
+    through_date=None,
+    lookback_days=30,
+    db_path=DB_PATH,
+):
+    through_date = through_date or date.today()
+    start_date = through_date - timedelta(days=max(0, lookback_days))
+    with connect(db_path) as connection:
+        init_db(connection)
+        return pending_mlb_history(connection, start_date, through_date)
+
+
+def reconcile_mlb_history(
+    result_games,
+    snapshots,
+    apply=False,
+    db_path=DB_PATH,
+    now=None,
+):
+    counts = {
+        "candidates": len(snapshots),
+        "matched": 0,
+        "final": 0,
+        "ambiguous": 0,
+        "unmatched": 0,
+        "updated": 0,
+    }
+    details = []
+    result_index = {}
+    for result_game in result_games:
+        key = (str(result_game.get("slate_date")), result_game.get("game"))
+        result_index.setdefault(key, []).append(result_game)
+
+    updates = []
+    reconciliation_time = now or utc_now()
+    for snapshot in snapshots:
+        key = (str(snapshot.get("slate_date")), snapshot.get("game"))
+        matches = result_index.get(key, [])
+        if not matches:
+            counts["unmatched"] += 1
+            continue
+        if len(matches) != 1:
+            counts["ambiguous"] += 1
+            details.append(
+                {
+                    "slate_date": key[0],
+                    "game": key[1],
+                    "market": snapshot.get("market"),
+                    "status": "Ambiguous",
+                }
+            )
+            continue
+
+        counts["matched"] += 1
+        result_game = matches[0]
+        if not result_game.get("is_final"):
+            continue
+
+        counts["final"] += 1
+        market_name = snapshot.get("base_market") or base_market_name(
+            snapshot.get("market")
+        )
+        result = result_game.get(
+            {
+                "1st Inning": "first_inning_result",
+                "First 5": "f5_result",
+                "Full Game": "full_game_result",
+            }.get(market_name, "")
+        )
+        if result in [None, "", "Pending", "In Progress"]:
+            continue
+
+        outcome = grade_history_row(market_name, snapshot.get("pick"), result)
+        updates.append(
+            (snapshot, result, outcome, result_game.get("status") or "Final")
+        )
+        details.append(
+            {
+                "slate_date": key[0],
+                "game": key[1],
+                "market": snapshot.get("market"),
+                "result": result,
+                "outcome": outcome,
+                "status": "Updated" if apply else "Would update",
+            }
+        )
+
+    if apply and updates:
+        with connect(db_path) as connection:
+            init_db(connection)
+            for snapshot, result, outcome, status in updates:
+                connection.execute(
+                    """
+                    UPDATE model_history
+                    SET result = ?,
+                        outcome = ?,
+                        status = ?,
+                        updated_at = ?,
+                        locked_at = COALESCE(locked_at, ?),
+                        snapshot_status = 'Locked'
+                    WHERE id = ?
+                    """,
+                    (
+                        result,
+                        outcome,
+                        status,
+                        reconciliation_time,
+                        reconciliation_time,
+                        snapshot["id"],
+                    ),
+                )
+                counts["updated"] += 1
+            connection.commit()
+
+    return counts, details
+
+
 def build_history_filters(
     model_version=None,
     market=None,
@@ -752,7 +889,11 @@ def build_history_filters(
     exact_date=None,
     tracking_segment=TRACKING_SEGMENT_OFFICIAL,
 ):
-    where_clause = "WHERE pick NOT IN ('No Edge', 'Pass', 'F5 Pass', 'Not Tracked')"
+    where_clause = """WHERE pick NOT IN ('No Edge', 'Pass', 'F5 Pass', 'Not Tracked')
+        AND NOT (
+            COALESCE(tracking_segment, 'Official') IN ('Watch', 'Lean')
+            AND pick IN ('Even', 'No Edge', 'Pass')
+        )"""
     params = []
 
     if model_version:

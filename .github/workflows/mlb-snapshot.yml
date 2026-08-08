@@ -40,3 +40,11 @@ jobs:
           else
             python snapshot_mlb_slate.py
           fi
+
+      - name: Reconcile MLB history
+        run: |
+          if [ -n "$SNAPSHOT_SLATE_DATE" ]; then
+            python reconcile_mlb_history.py --date "$SNAPSHOT_SLATE_DATE" --apply
+          else
+            python reconcile_mlb_history.py --lookback-days 30 --apply
+          fi
