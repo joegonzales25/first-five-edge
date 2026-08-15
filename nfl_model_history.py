@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 import tempfile
@@ -150,6 +151,20 @@ def init_db(connection):
         "graded_at": "TEXT",
         "locked_at": "TEXT",
         "snapshot_status": "TEXT",
+        "challenger_model_version": "TEXT",
+        "challenger_status": "TEXT",
+        "challenger_coverage": "TEXT",
+        "challenger_model_signal": "TEXT",
+        "challenger_side_edge": "TEXT",
+        "challenger_predicted_winner": "TEXT",
+        "challenger_confidence": "TEXT",
+        "challenger_model_margin": "REAL",
+        "challenger_scoring_edge": "TEXT",
+        "challenger_projected_total": "REAL",
+        "challenger_features": "TEXT",
+        "challenger_factors": "TEXT",
+        "challenger_side_result": "TEXT",
+        "challenger_scoring_result": "TEXT",
     }
     for column, column_type in optional_columns.items():
         if column not in existing_columns:
@@ -179,6 +194,19 @@ def safe_float(value):
         return float(value)
     except Exception:
         return None
+
+
+def json_text(value, default):
+    if isinstance(value, str):
+        try:
+            json.loads(value)
+            return value
+        except (TypeError, ValueError):
+            return json.dumps(default, separators=(",", ":"))
+    try:
+        return json.dumps(value if value is not None else default, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return json.dumps(default, separators=(",", ":"))
 
 
 def parse_kickoff(value):
@@ -267,6 +295,28 @@ def prediction_values(row, market_version, model_version, now_text):
         "created_at": now_text,
         "updated_at": now_text,
         "snapshot_status": "Pregame",
+        "challenger_model_version": row.get("Challenger Model Version"),
+        "challenger_status": row.get("Challenger Status"),
+        "challenger_coverage": row.get("Challenger Coverage"),
+        "challenger_model_signal": row.get("Challenger Model Signal"),
+        "challenger_side_edge": row.get("Challenger Side Edge"),
+        "challenger_predicted_winner": row.get(
+            "Challenger Predicted Winner"
+        ),
+        "challenger_confidence": row.get("Challenger Confidence"),
+        "challenger_model_margin": safe_float(
+            row.get("Challenger Model Margin")
+        ),
+        "challenger_scoring_edge": row.get("Challenger Scoring Edge"),
+        "challenger_projected_total": safe_float(
+            row.get("Challenger Projected Total")
+        ),
+        "challenger_features": json_text(
+            row.get("Challenger Features"), {}
+        ),
+        "challenger_factors": json_text(
+            row.get("Challenger Factors"), []
+        ),
     }
 
 
@@ -283,6 +333,19 @@ def result_values(row, stored, now_text):
         if home_score is not None and away_score is not None
         else None
     )
+    challenger_tracked = stored.get("challenger_status") == "Tracked"
+    challenger_side_tracked = (
+        challenger_tracked
+        and stored.get("challenger_side_edge")
+        not in {None, "Pass", "Not Tracked"}
+    )
+    challenger_scoring_tracked = (
+        challenger_tracked
+        and stored.get("challenger_scoring_edge")
+        not in {None, "Neutral Scoring Environment", "Not Tracked"}
+    )
+    challenger_side_pick = stored.get("challenger_predicted_winner")
+    challenger_scoring_pick = stored.get("challenger_scoring_edge")
     return {
         "status": row.get("Status"),
         "away_score": away_score,
@@ -324,6 +387,19 @@ def result_values(row, stored, now_text):
             abs(projected_total - actual_total)
             if projected_total is not None and actual_total is not None
             else None
+        ),
+        "challenger_side_result": grade_side(
+            "Official" if challenger_side_tracked else "No Edge",
+            challenger_side_pick,
+            actual_winner,
+            completed,
+        ),
+        "challenger_scoring_result": grade_scoring(
+            "Official" if challenger_scoring_tracked else "No Edge",
+            challenger_scoring_pick,
+            actual_total,
+            safe_float(stored.get("league_total_baseline")),
+            completed,
         ),
         "updated_at": now_text,
         "graded_at": now_text if completed else None,
@@ -388,6 +464,8 @@ def update_result(connection, row_id, values, should_lock):
             side_discovery_result = ?,
             scoring_result = ?,
             scoring_discovery_result = ?,
+            challenger_side_result = ?,
+            challenger_scoring_result = ?,
             margin_error = ?,
             total_error = ?,
             updated_at = ?,
@@ -413,6 +491,8 @@ def update_result(connection, row_id, values, should_lock):
             values["side_discovery_result"],
             values["scoring_result"],
             values["scoring_discovery_result"],
+            values["challenger_side_result"],
+            values["challenger_scoring_result"],
             values["margin_error"],
             values["total_error"],
             values["updated_at"],

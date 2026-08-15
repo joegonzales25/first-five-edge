@@ -3,6 +3,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from nfl_challenger import challenger_row_values
 from nfl_backtest import (
     NFLVERSE_GAMES_URL,
     ModelConfig,
@@ -220,6 +221,14 @@ def build_historical_lab(season=2025):
     results["Scoring Result"] = results["Scoring Correct"].apply(
         lambda value: "Correct" if bool(value) else "Missed"
     )
+    challenger_rows = [
+        challenger_row_values(row)
+        for _, row in results.iterrows()
+    ]
+    results = pd.concat(
+        [results.reset_index(drop=True), pd.DataFrame(challenger_rows)],
+        axis=1,
+    )
 
     return results, summary
 
@@ -416,6 +425,14 @@ def build_current_slate(season=None, week=None, today=None, games=None):
                     "Key Factors List": split_notes(notes),
                     "Agent Notes": notes,
                     "Status": status_for_game(game),
+                    **challenger_row_values(
+                        {
+                            "Away": away,
+                            "Home": home,
+                            "League Total Baseline": round(league_total, 2),
+                        },
+                        game.get("challenger_features"),
+                    ),
                 }
             )
 

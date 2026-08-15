@@ -262,6 +262,11 @@ nhl_model_history      # NHL future
 nfl_model_history      # NFL monitored test
 ```
 
+NFL challenger fields live beside the locked NFL baseline snapshot. The
+baseline remains the published decision while challenger feature coverage,
+signals, and grades use a separate model track. Missing advanced features
+produce `Not Tracked`; they must never trigger a baseline fallback.
+
 This gives one operational backend while keeping market performance separate.
 
 Production deployments must use Turso for history storage. SQLite is allowed

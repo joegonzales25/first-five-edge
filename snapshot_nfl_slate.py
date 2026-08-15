@@ -1,15 +1,17 @@
 import argparse
+import os
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 
 from nfl_agent import build_current_slate, load_nfl_schedule
+from nfl_challenger import attach_features, load_feature_file
 from nfl_model_history import record_nfl_history
 
 
 DEFAULT_TIMEZONE = "America/New_York"
-DEFAULT_MARKET_VERSION = "1.1.0-test"
+DEFAULT_MARKET_VERSION = "1.2.0-test"
 DEFAULT_MODEL_VERSION = "1.0.0"
 DEFAULT_LOOKBACK_DAYS = 3
 DEFAULT_LOOKAHEAD_DAYS = 8
@@ -26,6 +28,11 @@ def parse_args():
     parser.add_argument("--timezone", default=DEFAULT_TIMEZONE)
     parser.add_argument("--market-version", default=DEFAULT_MARKET_VERSION)
     parser.add_argument("--model-version", default=DEFAULT_MODEL_VERSION)
+    parser.add_argument(
+        "--challenger-features",
+        default=os.environ.get("NFL_CHALLENGER_FEATURES_PATH"),
+        help="Normalized pregame challenger feature CSV keyed by game_id.",
+    )
     parser.add_argument(
         "--lookback-days",
         type=int,
@@ -65,6 +72,11 @@ def main():
     args = parse_args()
     target_date = reference_date(args)
     games = load_nfl_schedule()
+    if args.challenger_features:
+        games = attach_features(
+            games,
+            load_feature_file(args.challenger_features),
+        )
     weeks = target_weeks(
         games,
         target_date,

@@ -528,6 +528,56 @@ Availability not fully modeled
 
 The Signal Agreement section should be the quick-read conclusion of the expander.
 
+## Challenger Track
+
+The NFL baseline remains model `1.0.0`. Challenger work must not overwrite its
+signals, confidence, release segments, or grades.
+
+Challenger model `0.1.0-test` is stored beside the baseline prediction in the
+same locked NFL snapshot. It is eligible for tracking only when all five core
+pregame features are present:
+
+```text
+net_epa_diff
+early_down_success_diff
+qb_epa_diff
+sack_rate_diff
+explosive_play_diff
+```
+
+Optional challenger features are `dvoa_diff`, `pace_diff`, `proe_diff`,
+`drive_efficiency_sum`, `weather_total_adjustment`, `home_field`, and
+`rest_adjustment`. All differentials use home-minus-away orientation. DVOA
+uses decimal form, so `0.12` means a 12 percentage-point home advantage.
+
+DVOA must come from a licensed, timestamped pregame source. Never use an
+end-of-season value in an earlier-week snapshot.
+
+The snapshot command accepts a normalized feature file:
+
+```powershell
+python snapshot_nfl_slate.py --challenger-features nfl_features.csv
+```
+
+The file must contain `game_id` plus every core feature. It may contain any
+optional feature. `NFL_CHALLENGER_FEATURES_PATH` is the equivalent workflow
+environment setting.
+
+If coverage is incomplete, store `Awaiting features` and `Not Tracked`. Never
+copy the baseline decision into the challenger track.
+
+Keep collapsed-card decisions and badges on the baseline. A tracked challenger
+places its two strongest factors in the Side Edge Key Factors panel with a
+`Challenger:` prefix. Analysis contains detailed component metrics, a separate
+Challenger Track table, and the unchanged Baseline Model Detail table.
+
+NFL Performance provides `Baseline`, `Challenger`, and `All` model-track
+filters. Exports retain the track label. The tracks must not share a performance
+card unless `All` is selected, and cards remain labeled by track in that view.
+
+The challenger remains monitored-test only until rolling out-of-sample review,
+calibration, and feature-family ablation support promotion.
+
 ## Shared Row Contract
 
 NFL rows should use the same top-level fields needed for the future multi-sport dashboard:

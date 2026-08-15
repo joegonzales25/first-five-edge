@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from html import escape
 from io import StringIO
 import csv
+import json
 import re
 import sqlite3
 from zoneinfo import ZoneInfo
@@ -78,15 +79,15 @@ from model_history import (
     load_slate_history_rows,
 )
 
-APP_VERSION = "2.3.30"
-MODEL_CACHE_VERSION = "edge-v2330-mlb-weather-indicator"
+APP_VERSION = "2.3.31"
+MODEL_CACHE_VERSION = "edge-v2331-nfl-challenger-track"
 # Keep performance history stable across UI/cache releases. Change this only
 # when the model baseline, grading definition, or history schema intentionally changes.
 PERFORMANCE_TRACKING_VERSION = "2.3.29"
 FALLBACK_TIMEZONE = "America/New_York"
 MARKET_RELEASES = {
     "MLB": "2.3.30",
-    "NFL": "1.1.0-test",
+    "NFL": "1.2.0-test",
     "WNBA": "1.0.2-test",
     "NBA": "0.1.0-test",
     "NHL": "0.1.0-test",
@@ -3949,6 +3950,15 @@ def nfl_factor_groups(row):
         else:
             scoring_factors.append("Scoring projection stays near the rolling league baseline")
 
+    challenger_factors = row.get("Challenger Factors", [])
+    if (
+        row.get("Challenger Status") == "Tracked"
+        and isinstance(challenger_factors, list)
+    ):
+        side_factors = [
+            f"Challenger: {factor}" for factor in challenger_factors[:2]
+        ] + side_factors
+
     early_factors = [
         "Early Edge model pending",
         "First-half specific inputs are not yet modeled",
@@ -3960,6 +3970,46 @@ def nfl_factor_groups(row):
         "f5": scoring_factors[:4],
         "full": early_factors,
     }
+
+
+def nfl_challenger_features(row):
+    features = row.get("Challenger Features", {})
+    return features if isinstance(features, dict) else {}
+
+
+def nfl_challenger_metric_rows(row, keys):
+    labels = {
+        "net_epa_diff": "Net EPA/play differential",
+        "early_down_success_diff": "Early-down success differential",
+        "qb_epa_diff": "QB EPA/dropback differential",
+        "sack_rate_diff": "Sack-rate differential",
+        "explosive_play_diff": "Explosive-play differential",
+        "dvoa_diff": "Weighted DVOA differential",
+        "pace_diff": "Situation-neutral pace differential",
+        "proe_diff": "PROE differential",
+        "drive_efficiency_sum": "Combined drive efficiency",
+        "weather_total_adjustment": "Weather total adjustment",
+    }
+    percentage_keys = {
+        "early_down_success_diff",
+        "sack_rate_diff",
+        "explosive_play_diff",
+        "dvoa_diff",
+        "proe_diff",
+    }
+    metrics = []
+    features = nfl_challenger_features(row)
+    for key in keys:
+        value = features.get(key)
+        if value is None:
+            continue
+        display = (
+            f"{float(value):+.1%}"
+            if key in percentage_keys
+            else f"{float(value):+.3f}"
+        )
+        metrics.append((labels[key], display))
+    return metrics
 
 
 def render_nfl_key_factor_panel(row, view):
@@ -4051,11 +4101,24 @@ def nfl_analysis_sections(row):
             "section": "Offense Edge",
             "signal": offense_signal,
             "detail": "Uses rolling scoring production and matchup-adjusted team rating from completed games.",
+            "metrics": nfl_challenger_metric_rows(
+                row,
+                [
+                    "net_epa_diff",
+                    "early_down_success_diff",
+                    "qb_epa_diff",
+                    "explosive_play_diff",
+                    "dvoa_diff",
+                ],
+            ),
         },
         {
             "section": "Defense Edge",
             "signal": defense_signal,
             "detail": "Uses rolling points allowed and opponent scoring profile in the current v1 model.",
+            "metrics": nfl_challenger_metric_rows(
+                row, ["sack_rate_diff"]
+            ),
         },
         {
             "section": "Special Teams Edge",
@@ -4066,6 +4129,10 @@ def nfl_analysis_sections(row):
             "section": "Tempo / Game Script",
             "signal": scoring_edge,
             "detail": nfl_scoring_environment_detail(row),
+            "metrics": nfl_challenger_metric_rows(
+                row,
+                ["pace_diff", "proe_diff", "drive_efficiency_sum"],
+            ),
         },
         {
             "section": "Volatility Check",
@@ -4076,6 +4143,9 @@ def nfl_analysis_sections(row):
             "section": "Availability / Weather",
             "signal": "Pending",
             "detail": "Live injury, quarterback status, and weather inputs are not fully modeled in v1.0.",
+            "metrics": nfl_challenger_metric_rows(
+                row, ["weather_total_adjustment"]
+            ),
         },
         {
             "section": "Signal Agreement",
@@ -4089,12 +4159,15 @@ def render_nfl_analysis_sections(row):
     st.markdown("### Edge Breakdown")
     for section in nfl_analysis_sections(row):
         st.markdown(f"#### {section['section']}")
-        st.markdown(f"""
-        | Metric | Value |
-        |---|---|
-        | Signal | {section["signal"]} |
-        | Detail | {section["detail"]} |
-        """)
+        rows = [
+            ("Signal", section["signal"]),
+            ("Detail", section["detail"]),
+            *section.get("metrics", []),
+        ]
+        table_rows = "\n".join(
+            f"| {label} | {value} |" for label, value in rows
+        )
+        st.markdown("| Metric | Value |\n|---|---|\n" + table_rows)
 
 
 def render_nfl_card(row, historical=False):
@@ -4162,7 +4235,22 @@ def render_nfl_card(row, historical=False):
 
         render_nfl_analysis_sections(row)
 
-        st.markdown("### Model Detail")
+        st.markdown("### Challenger Track")
+        st.markdown(f"""
+        | Metric | Value |
+        |---|---|
+        | Status | {row.get("Challenger Status", "Awaiting features")} |
+        | Feature Coverage | {row.get("Challenger Coverage", "0/5 core features")} |
+        | Model Version | {row.get("Challenger Model Version", "0.1.0-test")} |
+        | Signal | {row.get("Challenger Model Signal", "Not Tracked")} |
+        | Side Edge | {row.get("Challenger Side Edge", "Not Tracked")} |
+        | Confidence | {row.get("Challenger Confidence", "Pass")} |
+        | Model Margin | {row.get("Challenger Model Margin", "N/A")} |
+        | Scoring Environment | {row.get("Challenger Scoring Edge", "Not Tracked")} |
+        | Projected Total | {row.get("Challenger Projected Total", "N/A")} |
+        """)
+
+        st.markdown("### Baseline Model Detail")
         st.markdown(f"""
         | Metric | Value |
         |---|---|
@@ -4597,6 +4685,18 @@ def nfl_slate_from_history(rows):
             for item in str(row.get("agent_notes") or "").split(";")
             if item.strip()
         ]
+        try:
+            challenger_features = json.loads(
+                row.get("challenger_features") or "{}"
+            )
+        except (TypeError, ValueError):
+            challenger_features = {}
+        try:
+            challenger_factors = json.loads(
+                row.get("challenger_factors") or "[]"
+            )
+        except (TypeError, ValueError):
+            challenger_factors = []
         slate_rows.append(
             {
                 "Sport": "NFL",
@@ -4660,6 +4760,44 @@ def nfl_slate_from_history(rows):
                 "Snapshot Status": row.get("snapshot_status"),
                 "Locked At": row.get("locked_at"),
                 "Snapshot Updated At": row.get("updated_at"),
+                "Challenger Model Version": row.get(
+                    "challenger_model_version"
+                ),
+                "Challenger Status": (
+                    row.get("challenger_status") or "Awaiting features"
+                ),
+                "Challenger Coverage": (
+                    row.get("challenger_coverage") or "0/5 core features"
+                ),
+                "Challenger Model Signal": (
+                    row.get("challenger_model_signal") or "Not Tracked"
+                ),
+                "Challenger Side Edge": (
+                    row.get("challenger_side_edge") or "Not Tracked"
+                ),
+                "Challenger Predicted Winner": row.get(
+                    "challenger_predicted_winner"
+                ),
+                "Challenger Confidence": (
+                    row.get("challenger_confidence") or "Pass"
+                ),
+                "Challenger Model Margin": row.get(
+                    "challenger_model_margin"
+                ),
+                "Challenger Scoring Edge": (
+                    row.get("challenger_scoring_edge") or "Not Tracked"
+                ),
+                "Challenger Projected Total": row.get(
+                    "challenger_projected_total"
+                ),
+                "Challenger Features": challenger_features,
+                "Challenger Factors": challenger_factors,
+                "Challenger Side Result": (
+                    row.get("challenger_side_result") or "No Signal"
+                ),
+                "Challenger Scoring Result": (
+                    row.get("challenger_scoring_result") or "No Signal"
+                ),
             }
         )
     return pd.DataFrame(slate_rows).sort_values(
@@ -4802,6 +4940,48 @@ def nfl_signal_pick(row, market, segment):
     )
 
 
+def nfl_track_segment(row, market, model_track):
+    if model_track == "Baseline":
+        return nfl_signal_segment(row, market)
+    if row.get("challenger_status") != "Tracked":
+        return "No Edge"
+    if market == "Side":
+        return (
+            "Official"
+            if row.get("challenger_side_edge") not in {None, "Pass", "Not Tracked"}
+            else "No Edge"
+        )
+    return (
+        "Official"
+        if row.get("challenger_scoring_edge")
+        not in {None, "Neutral Scoring Environment", "Not Tracked"}
+        else "No Edge"
+    )
+
+
+def nfl_track_result(row, market, segment, model_track):
+    if nfl_track_segment(row, market, model_track) != segment:
+        return None
+    if model_track == "Baseline":
+        return nfl_signal_result(row, market, segment)
+    field = (
+        "challenger_side_result"
+        if market == "Side"
+        else "challenger_scoring_result"
+    )
+    return row.get(field) or "Pending"
+
+
+def nfl_track_pick(row, market, segment, model_track):
+    if model_track == "Baseline":
+        return nfl_signal_pick(row, market, segment)
+    return (
+        row.get("challenger_predicted_winner")
+        if market == "Side"
+        else row.get("challenger_scoring_edge")
+    )
+
+
 def render_nfl_performance():
     st.markdown("### NFL Performance")
     model_version = MODEL_BASELINES["NFL"]
@@ -4824,7 +5004,7 @@ def render_nfl_performance():
         market_version=market_version,
     )
 
-    columns = st.columns(5)
+    columns = st.columns(3)
     with columns[0]:
         market_filter = st.selectbox(
             "Signal",
@@ -4838,18 +5018,25 @@ def render_nfl_performance():
             key="nfl_performance_days",
         )
     with columns[2]:
-        confidence_filter = st.selectbox(
-            "Confidence",
-            ["All", "A", "B", "C", "Pass"],
-            key="nfl_performance_confidence",
-        )
-    with columns[3]:
         segment_filter = st.selectbox(
             "Segment",
             ["All", "Official", "Lean", "Watch"],
             key="nfl_performance_segment",
         )
-    with columns[4]:
+    columns = st.columns(3)
+    with columns[0]:
+        confidence_filter = st.selectbox(
+            "Confidence",
+            ["All", "A", "B", "C", "Pass"],
+            key="nfl_performance_confidence",
+        )
+    with columns[1]:
+        track_filter = st.selectbox(
+            "Model Track",
+            ["Baseline", "Challenger", "All"],
+            key="nfl_performance_track",
+        )
+    with columns[2]:
         model_filter = st.selectbox(
             "Model",
             [f"Current {model_version}", "All"],
@@ -4865,6 +5052,8 @@ def render_nfl_performance():
         "Last 30": (today - timedelta(days=29), today),
         "All": (None, None),
     }
+
+
     start_date, end_date = date_rules[window_filter]
     filtered = []
     for row in selected:
@@ -4875,11 +5064,6 @@ def render_nfl_performance():
         except Exception:
             continue
         if start_date and not (start_date <= row_date <= end_date):
-            continue
-        if (
-            confidence_filter != "All"
-            and row.get("confidence") != confidence_filter
-        ):
             continue
         filtered.append(row)
 
@@ -4893,50 +5077,79 @@ def render_nfl_performance():
         if segment_filter == "All"
         else [segment_filter]
     )
+    model_tracks = (
+        ["Baseline", "Challenger"]
+        if track_filter == "All"
+        else [track_filter]
+    )
     summaries = []
     details = []
-    for segment in segments:
-        for market in markets:
-            market_rows = []
-            for row in filtered:
-                result = nfl_signal_result(row, market, segment)
-                if result is None:
+    for model_track in model_tracks:
+        for segment in segments:
+            for market in markets:
+                market_rows = []
+                for row in filtered:
+                    row_confidence = (
+                        row.get("confidence")
+                        if model_track == "Baseline"
+                        else row.get("challenger_confidence")
+                    )
+                    if (
+                        confidence_filter != "All"
+                        and row_confidence != confidence_filter
+                    ):
+                        continue
+                    result = nfl_track_result(
+                        row, market, segment, model_track
+                    )
+                    if result is None:
+                        continue
+                    market_rows.append((row, result))
+                    details.append(
+                        {
+                            "Slate": row.get("slate_date"),
+                            "Week": row.get("week"),
+                            "Signal": market,
+                            "Segment": segment,
+                            "Model Track": model_track,
+                            "Game": row.get("game"),
+                            "Pick": nfl_track_pick(
+                                row, market, segment, model_track
+                            ),
+                            "Confidence": row_confidence,
+                            "Score": (
+                                row.get("edge_score")
+                                if model_track == "Baseline"
+                                else row.get("challenger_model_margin")
+                            ),
+                            "Result": result,
+                            "Status": row.get("status"),
+                            "Model": (
+                                row.get("model_version")
+                                if model_track == "Baseline"
+                                else row.get("challenger_model_version")
+                            ),
+                            "Market Version": row.get("market_version"),
+                        }
+                    )
+                if not market_rows:
                     continue
-                market_rows.append((row, result))
-                details.append(
+                hits = sum(result == "Correct" for _, result in market_rows)
+                misses = sum(result == "Missed" for _, result in market_rows)
+                pushes = sum(result == "Push" for _, result in market_rows)
+                summaries.append(
                     {
-                        "Slate": row.get("slate_date"),
-                        "Week": row.get("week"),
-                        "Signal": market,
-                        "Segment": segment,
-                        "Game": row.get("game"),
-                        "Pick": nfl_signal_pick(row, market, segment),
-                        "Confidence": row.get("confidence"),
-                        "Score": row.get("edge_score"),
-                        "Result": result,
-                        "Status": row.get("status"),
-                        "Model": row.get("model_version"),
-                        "Market Version": row.get("market_version"),
+                        "market": (
+                            f"{model_track} {segment} {market}"
+                            if track_filter == "All" or segment_filter == "All"
+                            else market
+                        ),
+                        "hits": hits,
+                        "misses": misses,
+                        "pushes": pushes,
+                        "pending": len(market_rows) - hits - misses - pushes,
                     }
                 )
-            if not market_rows:
-                continue
-            hits = sum(result == "Correct" for _, result in market_rows)
-            misses = sum(result == "Missed" for _, result in market_rows)
-            pushes = sum(result == "Push" for _, result in market_rows)
-            summaries.append(
-                {
-                    "market": (
-                        f"{segment} {market}"
-                        if segment_filter == "All"
-                        else market
-                    ),
-                    "hits": hits,
-                    "misses": misses,
-                    "pushes": pushes,
-                    "pending": len(market_rows) - hits - misses - pushes,
-                }
-            )
 
     with st.expander("NFL Performance History Diagnostics"):
         metrics = st.columns(4)
@@ -5150,6 +5363,7 @@ def render_nfl_model_info_sidebar():
     st.sidebar.title("NFL Controls")
     st.sidebar.caption(f"Market release: {MARKET_RELEASES['NFL']}")
     st.sidebar.caption(f"Model baseline: {MODEL_BASELINES['NFL']}")
+    st.sidebar.caption("Challenger: 0.1.0-test (monitored test)")
     try:
         tracking_summary = load_nfl_performance_summary(
             model_version=MODEL_BASELINES["NFL"],
