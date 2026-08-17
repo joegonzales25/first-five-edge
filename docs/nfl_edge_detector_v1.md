@@ -1,8 +1,8 @@
-# NFL Edge Detector v1.1 Monitored-Test Plan
+# NFL Edge Detector v1.2 Monitored-Test Plan
 
 ## Product Scope
 
-NFL Edge Detector v1.1 expands the existing First Five Edge app into the broader Edge Detector product shell.
+NFL Edge Detector v1.2 expands the existing First Five Edge app into the broader Edge Detector product shell.
 
 The NFL module should provide matchup intelligence only. It should not provide betting recommendations, staking guidance, odds comparisons, market-value language, or bankroll language.
 
@@ -13,15 +13,14 @@ NFL changes must not alter MLB behavior, MLB model outputs, MLB filter controls,
 ## Release Status
 
 ```text
-Market release: 1.1.0-test
+Market release: 1.2.0-test
 Model baseline: 1.0.0
 Classification: active monitored test
 ```
 
-The scheduled snapshot trigger is disabled during the offseason. Manual
-workflow dispatch remains available for controlled testing. Re-enabling the
-hourly minute-15 schedule requires an explicit regular-season activation
-decision.
+The prediction snapshot trigger remains manual until regular-season activation.
+The separate schedule-inventory workflow runs daily because flex scheduling,
+kickoff times, venues, and game status can change without creating a model pick.
 
 This release changes the NFL data and grading lifecycle only. It does not
 change the model calculations, official side thresholds, scoring threshold,
@@ -33,13 +32,61 @@ NFL monitored-test history is isolated in:
 nfl_model_history
 ```
 
+Schedule logistics and timestamped pregame evidence are isolated in:
+
+```text
+nfl_schedule
+nfl_pregame_features
+```
+
 The source of truth is Turso. Streamlit page loads are read-only consumers of
 stored NFL snapshots and must not create or mutate tracked performance rows.
+
+## Schedule And Feature Lifecycle
+
+The complete active regular-season schedule is synchronized from nflverse once
+daily and may also be refreshed manually:
+
+```powershell
+python sync_nfl_schedule.py --season 2026
+```
+
+`nfl_schedule` contains matchup identity, week, date, kickoff, teams, venue,
+roof, surface, rest, neutral-site status, scores, and schedule freshness. It
+must not contain model decisions.
+
+`nfl_pregame_features` contains timestamped feature snapshots keyed by
+`game_id`. It records source, feature version, core coverage, readiness, and
+the normalized challenger fields. Multiple snapshots may exist for a game;
+the newest `as_of` snapshot is used for the next open prediction run.
+
+Feature evidence may be loaded without creating a prediction:
+
+```powershell
+python sync_nfl_features.py nfl_features.csv --source nflverse-pbp --as-of 2026-09-09T16:00:00+00:00
+```
+
+Partial files are accepted by this ingestion command and remain `Features
+Partial` until all five core fields are available. The stricter snapshot-file
+adapter still requires every core field before challenger evaluation.
+
+The UI supports Date and Week schedule views. A schedule matchup may display
+before a prediction exists, using these states:
+
+```text
+Awaiting Features
+Features Partial
+Model Ready
+Prediction Locked
+Final
+```
+
+Schedule-only rows are not model signals and are excluded from performance.
 
 ## Snapshot, Lock, And Grading
 
 ```text
-Snapshot cadence: hourly at minute 15 through GitHub Actions
+Approved prediction cadence: hourly at minute 15 once activated; currently manual
 Lock: scheduled kickoff
 Pregame: decisions may update
 Locked: decision fields freeze; only status and result fields update
@@ -110,7 +157,7 @@ Initial behavior:
 
 ```text
 All = home dashboard placeholder
-NFL = active v1.1 monitored-test page
+NFL = active v1.2 monitored-test page
 MLB = current working MLB page
 NBA/NHL/CBB = coming soon placeholders
 ```
@@ -127,7 +174,7 @@ Historical Lab
 
 Current Slate is the default page.
 
-Historical Lab is visible in v1.1 for validation, but may be removed or disabled later.
+Historical Lab is visible in v1.2 for validation, but may be removed or disabled later.
 
 ## Current Slate
 
@@ -140,18 +187,18 @@ Show upcoming/current regular-season NFL games as matchup cards.
 Default slate behavior:
 
 ```text
-Default to the nearest upcoming NFL regular-season week with scheduled games.
-If there are no upcoming NFL games, show an empty state.
+Default to today's regular-season date and allow switching to any loaded week.
+Schedule-only matchups remain visible before a prediction snapshot exists.
 ```
 
 Empty state:
 
 ```text
-No upcoming NFL games found.
-Use Historical Lab to review the 2025 model test.
+No NFL regular-season matchups are loaded for this selection.
+Run the NFL Schedule Sync workflow to refresh the season inventory.
 ```
 
-Current Slate should not include preseason games in v1.1.
+Current Slate should not include preseason games in v1.2.
 
 ## Historical Lab
 
@@ -161,7 +208,7 @@ Purpose:
 Show 2025 historical model output with final results and performance metrics.
 ```
 
-Historical Lab is fixed to the 2025 regular season in v1.1.
+Historical Lab is fixed to the 2025 regular season in v1.2.
 
 Optional filter:
 
@@ -189,7 +236,7 @@ High/Low scoring-environment split
 
 ## Card Design
 
-Use the current dark MLB card style for v1.1 to reduce implementation risk and keep visual continuity.
+Use the current dark MLB card style for v1.2 to reduce implementation risk and keep visual continuity.
 
 Use compact NFL team abbreviations:
 
@@ -197,7 +244,7 @@ Use compact NFL team abbreviations:
 DAL @ PHI
 ```
 
-Use top filter pills only. Do not use sidebar filters for NFL v1.1.
+Use top filter pills only. Do not use sidebar filters for NFL v1.2.
 
 ## Current Slate Filter And Count Layout
 
@@ -260,7 +307,7 @@ Scoring Signals
 
 Those metrics can be reconsidered later in a summary expander or dashboard, but they should not occupy the primary mobile filter area.
 
-Page-level NFL filter pills may use query-param navigation in v1.1. This means selecting a page filter can rerun the Streamlit page. That is acceptable for v1.1 to preserve simple, shareable filter URLs. Game-card signal tiles should remain local card controls and should not refresh the page.
+Page-level NFL filter pills may use query-param navigation in v1.2. This means selecting a page filter can rerun the Streamlit page. That is acceptable for v1.2 to preserve simple, shareable filter URLs. Game-card signal tiles should remain local card controls and should not refresh the page.
 
 NFL card tiles:
 
@@ -304,7 +351,7 @@ Scoring Environment selected = show scoring-environment key factors
 Early Edge selected = show early-edge key factors
 ```
 
-For v1.1, Early Edge key factors should clearly indicate that the early model is pending:
+For v1.2, Early Edge key factors should clearly indicate that the early model is pending:
 
 ```text
 Early Edge model pending
@@ -347,7 +394,7 @@ The format should match the MLB analysis pattern:
 | Detail | ... |
 ```
 
-Do not use this as a separate expander title for v1.1:
+Do not use this as a separate expander title for v1.2:
 
 ```text
 Trust But Verify: DAL @ PHI
@@ -500,7 +547,7 @@ Field surface
 Travel/time-zone context
 ```
 
-For v1.1, if reliable injury or weather data is not wired in, label this section clearly:
+For v1.2, if reliable injury or weather data is not wired in, label this section clearly:
 
 ```text
 Availability check pending
@@ -553,7 +600,8 @@ uses decimal form, so `0.12` means a 12 percentage-point home advantage.
 DVOA must come from a licensed, timestamped pregame source. Never use an
 end-of-season value in an earlier-week snapshot.
 
-The snapshot command accepts a normalized feature file:
+The snapshot command accepts a normalized feature file and persists it before
+evaluating the challenger:
 
 ```powershell
 python snapshot_nfl_slate.py --challenger-features nfl_features.csv
@@ -565,6 +613,10 @@ environment setting.
 
 If coverage is incomplete, store `Awaiting features` and `Not Tracked`. Never
 copy the baseline decision into the challenger track.
+
+When no feature file is passed, the snapshot job reads the latest stored
+pregame feature snapshot for each game. Feature persistence and prediction
+history therefore remain separate even when one workflow performs both steps.
 
 Keep collapsed-card decisions and badges on the baseline. A tracked challenger
 places its two strongest factors in the Side Edge Key Factors panel with a
@@ -706,7 +758,7 @@ Low Scoring Environment: 20 games, 75.0%
 
 ## Implementation Notes
 
-Suggested v1.1 implementation order:
+Suggested v1.2 implementation order:
 
 ```text
 1. Add shared Edge Detector sport selector to app.py.

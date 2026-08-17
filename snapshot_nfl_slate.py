@@ -8,6 +8,12 @@ import pandas as pd
 from nfl_agent import build_current_slate, load_nfl_schedule
 from nfl_challenger import attach_features, load_feature_file
 from nfl_model_history import record_nfl_history
+from nfl_schedule_store import (
+    feature_rows_to_frame,
+    load_latest_nfl_features,
+    record_nfl_pregame_features,
+    sync_nfl_schedule,
+)
 
 
 DEFAULT_TIMEZONE = "America/New_York"
@@ -52,6 +58,10 @@ def reference_date(args):
     return datetime.now(ZoneInfo(args.timezone)).date()
 
 
+def season_for_date(target_date):
+    return target_date.year if target_date.month >= 3 else target_date.year - 1
+
+
 def target_weeks(games, target_date, lookback_days, lookahead_days):
     start = pd.Timestamp(target_date - timedelta(days=max(0, lookback_days)))
     end = pd.Timestamp(target_date + timedelta(days=max(0, lookahead_days)))
@@ -72,11 +82,20 @@ def main():
     args = parse_args()
     target_date = reference_date(args)
     games = load_nfl_schedule()
+    sync_nfl_schedule(games, season=season_for_date(target_date))
     if args.challenger_features:
+        feature_frame = load_feature_file(args.challenger_features)
+        record_nfl_pregame_features(feature_frame)
         games = attach_features(
             games,
-            load_feature_file(args.challenger_features),
+            feature_frame,
         )
+    else:
+        feature_frame = feature_rows_to_frame(
+            load_latest_nfl_features(games["game_id"].astype(str).tolist())
+        )
+        if not feature_frame.empty:
+            games = attach_features(games, feature_frame)
     weeks = target_weeks(
         games,
         target_date,

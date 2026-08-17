@@ -18,6 +18,10 @@ from nfl_model_history import (
     load_nfl_history,
     load_nfl_performance_summary,
 )
+from nfl_schedule_store import (
+    load_latest_nfl_features,
+    load_nfl_schedule_inventory,
+)
 from wnba_agent import (
     backtest_no_rest_schedule,
     build_current_season_lab as build_wnba_current_season_lab,
@@ -79,8 +83,8 @@ from model_history import (
     load_slate_history_rows,
 )
 
-APP_VERSION = "2.3.31"
-MODEL_CACHE_VERSION = "edge-v2331-nfl-challenger-track"
+APP_VERSION = "2.3.32"
+MODEL_CACHE_VERSION = "edge-v2332-nfl-schedule-inventory"
 # Keep performance history stable across UI/cache releases. Change this only
 # when the model baseline, grading definition, or history schema intentionally changes.
 PERFORMANCE_TRACKING_VERSION = "2.3.29"
@@ -4173,6 +4177,15 @@ def render_nfl_analysis_sections(row):
 def render_nfl_card(row, historical=False):
     away_team, home_team = split_game_name(row["Game"])
     card_anchor = f"nfl-{game_anchor(row['Game'])}"
+    schedule_only = row.get("Snapshot Status") == "Schedule Only"
+    displayed_signal = "Schedule" if schedule_only else row["Model Signal"]
+    displayed_score = "N/A" if schedule_only else row["Edge Score"]
+    displayed_confidence = "N/A" if schedule_only else row["Confidence"]
+    displayed_side = "Model Pending" if schedule_only else row["Side Edge"]
+    displayed_scoring = (
+        "Model Pending" if schedule_only else row["Scoring Edge"]
+    )
+    displayed_early = "Model Pending" if schedule_only else row["Early Edge"]
     result_line = ""
     if historical:
         result_line = f"""
@@ -4184,12 +4197,19 @@ def render_nfl_card(row, historical=False):
             &nbsp; - &nbsp; Total Error: <strong>{escape(str(row["Total Error"]))}</strong>
         </div>
         """
+    decision_state = row.get("Decision State")
+    decision_badge = (
+        f'<span class="badge badge-edge">{escape(str(decision_state))}</span>'
+        if decision_state
+        else ""
+    )
 
     st.html(f"""
     <div id="{card_anchor}" class="game-card">
-        <span class="badge {nfl_signal_class(row)}">{escape(str(row["Model Signal"]))}</span>
-        <span class="badge badge-edge">Edge {escape(str(row["Edge Score"]))}</span>
-        <span class="badge badge-edge">Confidence {escape(str(row["Confidence"]))}</span>
+        <span class="badge {nfl_signal_class(row)}">{escape(str(displayed_signal))}</span>
+        <span class="badge badge-edge">Edge {escape(str(displayed_score))}</span>
+        <span class="badge badge-edge">Confidence {escape(str(displayed_confidence))}</span>
+        {decision_badge}
 
         <div class="game-title">{escape(str(row["Game"]))}</div>
         <div class="muted">{escape(format_game_status_line(row))}</div>
@@ -4199,9 +4219,9 @@ def render_nfl_card(row, historical=False):
         <input class="edge-view-control edge-view-full" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-early">
 
         <div class="decision-stack">
-            <label class="decision-line decision-first" for="{card_anchor}-side">Side Edge: {escape(str(row["Side Edge"]))}</label>
-            <label class="decision-line decision-f5" for="{card_anchor}-scoring">Scoring Environment: {escape(str(row["Scoring Edge"]))}</label>
-            <label class="decision-line decision-full" for="{card_anchor}-early">Early Edge: {escape(str(row["Early Edge"]))}</label>
+            <label class="decision-line decision-first" for="{card_anchor}-side">Side Edge: {escape(str(displayed_side))}</label>
+            <label class="decision-line decision-f5" for="{card_anchor}-scoring">Scoring Environment: {escape(str(displayed_scoring))}</label>
+            <label class="decision-line decision-full" for="{card_anchor}-early">Early Edge: {escape(str(displayed_early))}</label>
         </div>
 
         {render_nfl_key_factor_panels(row)}
@@ -4232,6 +4252,27 @@ def render_nfl_card(row, historical=False):
             | Margin Error | {row["Margin Error"]} |
             | Total Error | {row["Total Error"]} |
             """)
+
+        if row.get("Decision State"):
+            st.markdown("### Schedule & Readiness")
+            st.markdown(f"""
+            | Metric | Value |
+            |---|---|
+            | Decision State | {row.get("Decision State")} |
+            | Feature Readiness | {row.get("Feature Readiness", "Awaiting Features")} |
+            | Feature Snapshot | {format_snapshot_time(row.get("Feature Snapshot As Of"))} |
+            | Stadium | {row.get("Stadium") or "TBD"} |
+            | Roof | {row.get("Roof") or "TBD"} |
+            | Surface | {row.get("Surface") or "TBD"} |
+            | Neutral Site | {"Yes" if row.get("Neutral Site") else "No"} |
+            """)
+
+        if schedule_only:
+            st.info(
+                "This matchup is loaded, but no model prediction snapshot "
+                "has been recorded."
+            )
+            return
 
         render_nfl_analysis_sections(row)
 
@@ -4674,6 +4715,20 @@ def safe_load_nfl_history(**kwargs):
         return []
 
 
+def safe_load_nfl_schedule(**kwargs):
+    try:
+        return load_nfl_schedule_inventory(**kwargs)
+    except Exception:
+        return []
+
+
+def safe_load_nfl_features(game_ids=None):
+    try:
+        return load_latest_nfl_features(game_ids=game_ids)
+    except Exception:
+        return []
+
+
 def nfl_slate_from_history(rows):
     if not rows:
         return pd.DataFrame()
@@ -4801,6 +4856,179 @@ def nfl_slate_from_history(rows):
             }
         )
     return pd.DataFrame(slate_rows).sort_values(
+        ["Sort Date", "Game"],
+        na_position="last",
+    )
+
+
+def nfl_feature_readiness(feature_row):
+    if not feature_row:
+        return "Awaiting Features"
+    return feature_row.get("readiness") or "Awaiting Features"
+
+
+def format_nfl_schedule_caption(schedule_rows):
+    timestamps = [
+        row.get("updated_at")
+        for row in schedule_rows
+        if row.get("updated_at")
+    ]
+    if not timestamps:
+        return "Schedule as of: N/A"
+    return f"Schedule as of: {format_snapshot_time(max(timestamps))}"
+
+
+def nfl_schedule_inventory_slate(schedule_rows, history_rows, feature_rows):
+    if not schedule_rows:
+        return nfl_slate_from_history(history_rows)
+
+    history_slate = nfl_slate_from_history(history_rows)
+    history_map = {}
+    if not history_slate.empty:
+        history_map = {
+            str(row.get("Game ID")): row.to_dict()
+            for _, row in history_slate.iterrows()
+        }
+    feature_map = {
+        str(row.get("game_id")): row
+        for row in feature_rows
+        if row.get("game_id") is not None
+    }
+
+    rows = []
+    for schedule in schedule_rows:
+        game_id = str(schedule.get("game_id") or "")
+        away = schedule.get("away_team") or "Away"
+        home = schedule.get("home_team") or "Home"
+        feature = feature_map.get(game_id, {})
+        readiness = nfl_feature_readiness(feature)
+        stored = history_map.get(game_id)
+        if stored:
+            row = stored.copy()
+            snapshot_status = str(row.get("Snapshot Status") or "")
+            status = schedule.get("status") or row.get("Status") or "Scheduled"
+            if str(status).lower() == "final":
+                decision_state = "Final"
+            elif snapshot_status == "Locked":
+                decision_state = "Prediction Locked"
+            else:
+                decision_state = "Model Ready"
+        else:
+            status = schedule.get("status") or "Scheduled"
+            decision_state = (
+                "Final" if str(status).lower() == "final" else readiness
+            )
+            try:
+                challenger_features = json.loads(
+                    feature.get("feature_json") or "{}"
+                )
+            except (TypeError, ValueError):
+                challenger_features = {}
+            available = feature.get("core_available") or 0
+            required = feature.get("core_required") or 5
+            row = {
+                "Sport": "NFL",
+                "Game ID": game_id,
+                "Season": schedule.get("season"),
+                "Week": schedule.get("week"),
+                "Slate Date": schedule.get("slate_date"),
+                "Scheduled Kickoff": schedule.get("scheduled_kickoff"),
+                "Sort Date": pd.to_datetime(
+                    schedule.get("scheduled_kickoff"),
+                    errors="coerce",
+                    utc=True,
+                ),
+                "Game Time": schedule.get("game_time") or "TBD",
+                "Game": f"{away} @ {home}",
+                "Away": away,
+                "Home": home,
+                "Away Score": schedule.get("away_score"),
+                "Home Score": schedule.get("home_score"),
+                "Actual Winner": None,
+                "Actual Total": None,
+                "Predicted Winner": None,
+                "Model Signal": "Pass",
+                "Edge Score": 0,
+                "Confidence": "Pass",
+                "Side Edge": "Pass",
+                "Side Tracking Segment": "No Edge",
+                "Side Discovery Pick": None,
+                "Side Discovery Label": None,
+                "Side Result": "No Signal",
+                "Winner Result": "No Signal",
+                "Scoring Edge": "Neutral Scoring Environment",
+                "Scoring Tracking Segment": "No Edge",
+                "Scoring Discovery Pick": None,
+                "Scoring Discovery Label": None,
+                "Scoring Result": "No Signal",
+                "Early Edge": "Model Pending",
+                "Model Margin": "N/A",
+                "Projected Total": "N/A",
+                "League Total Baseline": "N/A",
+                "Rest Edge": (
+                    (schedule.get("home_rest") or 0)
+                    - (schedule.get("away_rest") or 0)
+                ),
+                "Key Factors Summary": (
+                    "Schedule loaded; prediction snapshot not recorded"
+                ),
+                "Key Factors List": [
+                    "Full-season matchup loaded from nflverse",
+                    f"Pregame feature readiness: {readiness}",
+                ],
+                "Agent Notes": "",
+                "Status": status,
+                "Snapshot Status": "Schedule Only",
+                "Locked At": None,
+                "Snapshot Updated At": None,
+                "Challenger Model Version": feature.get("feature_version"),
+                "Challenger Status": readiness,
+                "Challenger Coverage": (
+                    f"{available}/{required} core features"
+                ),
+                "Challenger Model Signal": "Awaiting Snapshot",
+                "Challenger Side Edge": "Not Tracked",
+                "Challenger Predicted Winner": None,
+                "Challenger Confidence": "Pass",
+                "Challenger Model Margin": "N/A",
+                "Challenger Scoring Edge": "Not Tracked",
+                "Challenger Projected Total": "N/A",
+                "Challenger Features": challenger_features,
+                "Challenger Factors": [],
+                "Challenger Side Result": "No Signal",
+                "Challenger Scoring Result": "No Signal",
+            }
+
+        row.update(
+            {
+                "Season": schedule.get("season"),
+                "Week": schedule.get("week"),
+                "Slate Date": schedule.get("slate_date"),
+                "Scheduled Kickoff": schedule.get("scheduled_kickoff"),
+                "Sort Date": pd.to_datetime(
+                    schedule.get("scheduled_kickoff"),
+                    errors="coerce",
+                    utc=True,
+                ),
+                "Game Time": schedule.get("game_time") or row.get("Game Time"),
+                "Game": f"{away} @ {home}",
+                "Away": away,
+                "Home": home,
+                "Status": status,
+                "Decision State": decision_state,
+                "Feature Readiness": readiness,
+                "Feature Snapshot As Of": feature.get("as_of"),
+                "Feature Source": feature.get("source"),
+                "Schedule Updated At": schedule.get("updated_at"),
+                "Stadium": schedule.get("stadium"),
+                "Roof": schedule.get("roof"),
+                "Surface": schedule.get("surface"),
+                "Neutral Site": int(schedule.get("neutral_site") or 0) == 1,
+            }
+        )
+        rows.append(row)
+
+    return pd.DataFrame(rows).sort_values(
         ["Sort Date", "Game"],
         na_position="last",
     )
@@ -5220,12 +5448,66 @@ def render_nfl_current(selected_filter_override=None):
         render_nfl_performance()
         return
 
-    selected_date = st.date_input(
-        "Slate Date",
-        value=current_date_for_timezone(FALLBACK_TIMEZONE),
-        format="MM/DD/YYYY",
-        key="nfl_slate_date",
+    schedule_rows = safe_load_nfl_schedule()
+    schedule_mode = st.segmented_control(
+        "Schedule View",
+        ["Date", "Week"],
+        default="Date",
+        key="nfl_schedule_view",
     )
+    selected_date = None
+    selected_season = None
+    selected_week = None
+    selected_schedule_rows = []
+    if schedule_mode == "Week" and schedule_rows:
+        seasons = sorted(
+            {
+                int(row["season"])
+                for row in schedule_rows
+                if row.get("season") is not None
+            },
+            reverse=True,
+        )
+        controls = st.columns(2)
+        with controls[0]:
+            selected_season = st.selectbox(
+                "Season",
+                seasons,
+                key="nfl_schedule_season",
+            )
+        weeks = sorted(
+            {
+                int(row["week"])
+                for row in schedule_rows
+                if row.get("season") == selected_season
+                and row.get("week") is not None
+            }
+        )
+        with controls[1]:
+            selected_week = st.selectbox(
+                "Week",
+                weeks,
+                key="nfl_schedule_week",
+            )
+        selected_schedule_rows = [
+            row
+            for row in schedule_rows
+            if row.get("season") == selected_season
+            and row.get("week") == selected_week
+        ]
+    else:
+        selected_date = st.date_input(
+            "Slate Date",
+            value=current_date_for_timezone(FALLBACK_TIMEZONE),
+            format="MM/DD/YYYY",
+            key="nfl_slate_date",
+        )
+        selected_schedule_rows = [
+            row
+            for row in schedule_rows
+            if str(row.get("slate_date")) == str(selected_date)
+        ]
+
     render_nfl_filter_pills(selected_filter)
     show_watches, show_leans = render_nfl_discovery_controls()
 
@@ -5233,18 +5515,44 @@ def render_nfl_current(selected_filter_override=None):
         model_version=MODEL_BASELINES["NFL"],
         market_version=MARKET_RELEASES["NFL"],
     )
-    history_rows, _ = current_nfl_history_week(
-        stored_rows,
-        target_date=selected_date,
+    selected_game_ids = {
+        str(row.get("game_id")) for row in selected_schedule_rows
+    }
+    if selected_game_ids:
+        history_rows = [
+            row
+            for row in stored_rows
+            if str(row.get("game_id")) in selected_game_ids
+        ]
+    elif schedule_mode == "Week" and selected_week is not None:
+        history_rows = [
+            row
+            for row in stored_rows
+            if row.get("season") == selected_season
+            and row.get("week") == selected_week
+        ]
+    else:
+        history_rows, _ = current_nfl_history_week(
+            stored_rows,
+            target_date=selected_date,
+        )
+    feature_game_ids = selected_game_ids or {
+        str(row.get("game_id")) for row in history_rows
+    }
+    feature_rows = safe_load_nfl_features(game_ids=feature_game_ids)
+    slate = nfl_schedule_inventory_slate(
+        selected_schedule_rows,
+        history_rows,
+        feature_rows,
     )
-    slate = nfl_slate_from_history(history_rows)
     if slate.empty:
         st.caption("0 of 0")
+        st.caption(format_nfl_schedule_caption(selected_schedule_rows))
         st.caption(format_snapshot_caption(history_rows))
         st.divider()
         st.info(
-            "No NFL monitored-test snapshots are available. The hourly "
-            "workflow will load the next regular-season slate."
+            "No NFL regular-season matchups are loaded for this selection. "
+            "Run the NFL Schedule Sync workflow to refresh the season inventory."
         )
         return
     slate = slate.copy()
@@ -5280,6 +5588,7 @@ def render_nfl_current(selected_filter_override=None):
         filtered = base_filtered
 
     st.caption(f"{len(filtered)} of {len(slate)}")
+    st.caption(format_nfl_schedule_caption(selected_schedule_rows))
     st.caption(format_snapshot_caption(history_rows))
     st.divider()
 
@@ -5383,13 +5692,15 @@ def render_nfl_model_info_sidebar():
         st.markdown(f"""
 **Model Scope**: Full-game side and scoring environment
 
-**NFL Tracking**: separate NFL-only history table
+**NFL Tracking**: separate schedule, feature, and prediction tables
 
 **Snapshots**: {tracking_summary["snapshots"]}
 
 **Completed**: {tracking_summary["completed"]}
 
-**Tracking Writes**: hourly scheduled snapshot workflow in season
+**Schedule Writes**: daily schedule synchronization
+
+**Prediction Writes**: manual until regular-season activation
 
 **Lock**: scheduled kickoff
 

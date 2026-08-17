@@ -793,10 +793,12 @@ NFL:
 
 ```text
 Status: active monitored test.
-Schedule: disabled during the offseason; manual workflow dispatch remains
-available. Re-enable hourly runs at minute 15 for approved regular-season
-monitoring.
-Data source of truth: separate nfl_model_history table in Turso.
+Schedule inventory: daily nflverse synchronization into nfl_schedule; this
+does not create predictions.
+Prediction schedule: disabled until explicit regular-season activation;
+manual workflow dispatch remains available.
+Feature source of truth: timestamped nfl_pregame_features rows in Turso.
+Prediction source of truth: separate nfl_model_history table in Turso.
 Lock: scheduled kickoff.
 Performance: stored Official, Lean, and Watch decisions are graded separately;
 Not Tracked rows are excluded.

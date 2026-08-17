@@ -1,0 +1,42 @@
+name: NFL Schedule Sync
+
+on:
+  schedule:
+    - cron: "25 9 * * *"
+  workflow_dispatch:
+    inputs:
+      season:
+        description: "NFL season year. Leave blank for the active season."
+        required: false
+        type: string
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      HISTORY_BACKEND: turso
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      NFL_SCHEDULE_SEASON: ${{ github.event.inputs.season }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Synchronize NFL schedule
+        run: |
+          if [ -n "$NFL_SCHEDULE_SEASON" ]; then
+            python sync_nfl_schedule.py --season "$NFL_SCHEDULE_SEASON"
+          else
+            python sync_nfl_schedule.py
+          fi
