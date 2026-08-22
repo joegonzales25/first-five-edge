@@ -257,8 +257,8 @@ Current Slate | Historical Lab
 Slate Date
 MM/DD/YYYY date input
 Full-width All filter card
-Signals | Side | Scoring | A | Perf
-Show Watches checkbox | Show Leans checkbox
+Signals | Side | Scoring | Perf
+Watch | Lean | A+ | A
 Filtered count caption
 Snapshot as of caption
 ```
@@ -270,7 +270,6 @@ All
 Signals
 Side
 Scoring
-A
 Perf
 ```
 
@@ -283,11 +282,11 @@ Render the Current Slate mode, date input, filter cards, discovery controls,
 count, and snapshot freshness even when no current-season snapshots exist.
 Show the no-data message after those controls.
 
-Watch and Lean are discovery controls below the filter cards, not primary filter
-cards. With neither checkbox selected, the selected primary filter controls the
-slate. Selecting Watch or Lean adds those discovery decisions to a specific
-primary signal filter. When `All` is selected, the checkboxes narrow the slate
-to the selected discovery segments, matching MLB behavior.
+Watch, Lean, A+, and A are shared secondary tier pills below the primary filter
+cards. With no tier selected, the selected primary filter controls the slate.
+Selected tier pills narrow that primary view using OR logic. A and A+ are exact
+confidence matches; A does not include A+. Watch and Lean use only stored NFL
+discovery decisions and do not create or promote model selections.
 
 The count should use compact text:
 

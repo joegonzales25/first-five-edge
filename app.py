@@ -83,8 +83,8 @@ from model_history import (
     load_slate_history_rows,
 )
 
-APP_VERSION = "2.3.32"
-MODEL_CACHE_VERSION = "edge-v2332-nfl-schedule-inventory"
+APP_VERSION = "2.3.33"
+MODEL_CACHE_VERSION = "edge-v2333-secondary-tier-filters"
 # Keep performance history stable across UI/cache releases. Change this only
 # when the model baseline, grading definition, or history schema intentionally changes.
 PERFORMANCE_TRACKING_VERSION = "2.3.29"
@@ -836,6 +836,47 @@ st.markdown("""
     background: linear-gradient(135deg, #1d4ed8, #0f766e);
     box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.28), inset 0 0 26px rgba(255, 255, 255, 0.08);
 }
+.mlb-filter-grid.compact-five {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.secondary-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    margin: 8px 0 18px;
+}
+.secondary-filter-card {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 50px;
+    padding: 10px 8px;
+    border-radius: 12px;
+    background: #1e293b;
+    border: 1px solid #475569;
+    color: #f8fafc !important;
+    font-size: 13px;
+    font-weight: 900;
+    line-height: 1;
+    text-decoration: none !important;
+    white-space: nowrap;
+}
+.secondary-filter-card:nth-child(1) {
+    border-color: #38bdf8;
+}
+.secondary-filter-card:nth-child(2) {
+    border-color: #f59e0b;
+}
+.secondary-filter-card:nth-child(3) {
+    border-color: #22c55e;
+}
+.secondary-filter-card:nth-child(4) {
+    border-color: #14b8a6;
+}
+.secondary-filter-card.active {
+    background: linear-gradient(135deg, #1d4ed8, #0f766e);
+    box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.24), inset 0 0 22px rgba(255, 255, 255, 0.08);
+}
 .discovery-strip {
     margin: 12px 0 10px 0;
     padding: 10px 12px;
@@ -900,6 +941,17 @@ st.markdown("""
         text-align: center;
         font-size: 12px;
         white-space: pre-line;
+    }
+
+    .secondary-filter-grid {
+        gap: 6px;
+    }
+
+    .secondary-filter-card {
+        min-height: 42px;
+        padding: 8px 3px;
+        border-radius: 10px;
+        font-size: 12px;
     }
 
     .performance-results {
@@ -1454,6 +1506,71 @@ def has_discovery_label(row, selected_filter, label_type):
         label_type in label and discovery_label_matches_filter(label, selected_filter)
         for label in discovery_labels(row)
     )
+
+
+def mlb_confidence_mask(games, selected_filter, confidence):
+    mask = pd.Series(False, index=games.index)
+    market_columns = {
+        "NRFI": ("First Inning Pick", "First Inning Confidence"),
+        "YRFI": ("First Inning Pick", "First Inning Confidence"),
+        "F5": ("F5 Pick", "F5 Confidence"),
+        "Game": ("Full Game Pick", "Full Game Confidence"),
+    }
+    if selected_filter in market_columns:
+        pick_column, confidence_column = market_columns[selected_filter]
+        if confidence_column not in games.columns:
+            return mask
+        mask = games[confidence_column].fillna("").astype(str).eq(confidence)
+        if pick_column in games.columns:
+            pick_text = games[pick_column].fillna("").astype(str)
+            if selected_filter in ["NRFI", "YRFI"]:
+                mask = mask & pick_text.str.contains(
+                    selected_filter,
+                    case=False,
+                    na=False,
+                )
+            else:
+                mask = mask & ~games[pick_column].apply(is_no_edge_pick)
+        return mask
+
+    for confidence_column in [
+        "First Inning Confidence",
+        "F5 Confidence",
+        "Full Game Confidence",
+    ]:
+        if confidence_column in games.columns:
+            mask = mask | games[confidence_column].fillna("").astype(str).eq(
+                confidence
+            )
+    return mask
+
+
+def apply_mlb_secondary_filters(
+    games,
+    selected_filter,
+    selected_tiers,
+    top_look_game_names,
+):
+    if not selected_tiers:
+        return None
+    mask = pd.Series(False, index=games.index)
+    if "watch" in selected_tiers:
+        mask = mask | games.apply(
+            lambda row: has_discovery_label(row, selected_filter, "Watch"),
+            axis=1,
+        )
+    if "lean" in selected_tiers:
+        mask = mask | games.apply(
+            lambda row: has_discovery_label(row, selected_filter, "Lean"),
+            axis=1,
+        )
+    if "a_plus" in selected_tiers:
+        mask = mask | mlb_confidence_mask(games, selected_filter, "A+")
+    if "a" in selected_tiers:
+        mask = mask | mlb_confidence_mask(games, selected_filter, "A")
+    if selected_filter == "Top Looks":
+        mask = mask & games["Game"].isin(top_look_game_names)
+    return games[mask]
 
 
 def first_inning_pressure_summary(row):
@@ -3428,13 +3545,51 @@ def render_mlb_filter_pills(active_filter):
     st.html(f'<div class="mlb-filter-grid">{"".join(pills)}</div>')
 
 
-def render_mlb_discovery_controls():
-    columns = st.columns(2)
-    with columns[0]:
-        show_watches = st.checkbox("Show Watches", key="mlb_show_watches")
-    with columns[1]:
-        show_leans = st.checkbox("Show Leans", key="mlb_show_leans")
-    return show_watches, show_leans
+SECONDARY_FILTER_OPTIONS = [
+    ("Watch", "watch"),
+    ("Lean", "lean"),
+    ("A+", "a_plus"),
+    ("A", "a"),
+]
+
+
+def selected_secondary_filters():
+    raw_value = str(get_query_param("tiers") or "")
+    selected = {
+        value.strip().lower()
+        for value in raw_value.split(",")
+        if value.strip()
+    }
+    valid = {value for _, value in SECONDARY_FILTER_OPTIONS}
+    return selected & valid
+
+
+def render_secondary_filter_pills(sport):
+    selected = selected_secondary_filters()
+    pills = []
+    for label, value in SECONDARY_FILTER_OPTIONS:
+        next_selected = set(selected)
+        if value in next_selected:
+            next_selected.remove(value)
+        else:
+            next_selected.add(value)
+        tier_param = ",".join(
+            option_value
+            for _, option_value in SECONDARY_FILTER_OPTIONS
+            if option_value in next_selected
+        )
+        classes = ["secondary-filter-card"]
+        if value in selected:
+            classes.append("active")
+        pills.append(
+            f'<a class="{" ".join(classes)}" href="'
+            f'{query_link({"sport": sport, "tiers": tier_param or None})}">'
+            f"{escape(label)}</a>"
+        )
+    st.html(
+        f'<div class="secondary-filter-grid">{"".join(pills)}</div>'
+    )
+    return selected
 
 
 def render_discovery_labels(row):
@@ -3497,7 +3652,6 @@ def render_nfl_filter_pills(active_filter="all"):
         ("Signals", "signals"),
         ("Side", "side"),
         ("Scoring", "scoring"),
-        ("A", "a"),
         ("Perf", "perf"),
     ]
     pills = []
@@ -3510,22 +3664,7 @@ def render_nfl_filter_pills(active_filter="all"):
             f'{query_link({"sport": "NFL", "mode": "current", "filter": filter_value, "week": "all"})}">'
             f"{escape(label)}</a>"
         )
-    st.html(f'<div class="mlb-filter-grid">{"".join(pills)}</div>')
-
-
-def render_nfl_discovery_controls():
-    columns = st.columns(2)
-    with columns[0]:
-        show_watches = st.checkbox(
-            "Show Watches",
-            key="nfl_show_watches",
-        )
-    with columns[1]:
-        show_leans = st.checkbox(
-            "Show Leans",
-            key="nfl_show_leans",
-        )
-    return show_watches, show_leans
+    st.html(f'<div class="mlb-filter-grid compact-five">{"".join(pills)}</div>')
 
 
 def render_wnba_mode_pills(active_mode):
@@ -4646,16 +4785,6 @@ def filter_nfl_games(games, view, historical=False):
     return filtered
 
 
-def nfl_discovery_mask(games, view, segment):
-    side_mask = games["Side Tracking Segment"].eq(segment)
-    scoring_mask = games["Scoring Tracking Segment"].eq(segment)
-    if view == "side":
-        return side_mask
-    if view == "scoring":
-        return scoring_mask
-    return side_mask | scoring_mask
-
-
 def filter_wnba_games(games, view):
     filtered = games.copy()
     if view == "side":
@@ -4696,6 +4825,130 @@ def filter_nhl_games(games, view, historical=False):
     elif historical and view == "missed":
         filtered = filtered[filtered["Side Result"].eq("Missed")]
     return filtered
+
+
+def secondary_segment_columns(sport, view):
+    sport = str(sport).upper()
+    if sport == "MLS":
+        mapping = {
+            "double_chance": ["Side Tracking Segment"],
+            "full_match": ["Full Match Tracking Segment"],
+            "goals": ["Scoring Tracking Segment"],
+            "btts": ["BTTS Tracking Segment"],
+            "first_half": ["First Half Tracking Segment"],
+        }
+        return mapping.get(
+            view,
+            [
+                "Side Tracking Segment",
+                "Full Match Tracking Segment",
+                "Scoring Tracking Segment",
+                "BTTS Tracking Segment",
+                "First Half Tracking Segment",
+            ],
+        )
+    if sport == "CFB":
+        mapping = {
+            "full_game": ["Side Tracking Segment"],
+            "scoring": ["Scoring Tracking Segment"],
+            "first_half": ["First Half Tracking Segment"],
+        }
+        return mapping.get(
+            view,
+            [
+                "Side Tracking Segment",
+                "Scoring Tracking Segment",
+                "First Half Tracking Segment",
+            ],
+        )
+    mapping = {
+        "side": ["Side Tracking Segment"],
+        "moneyline": ["Side Tracking Segment"],
+        "scoring": ["Scoring Tracking Segment"],
+        "first_half": ["First Half Tracking Segment"],
+        "first_period": ["First Half Tracking Segment"],
+    }
+    return mapping.get(
+        view,
+        [
+            "Side Tracking Segment",
+            "Scoring Tracking Segment",
+            "First Half Tracking Segment",
+        ],
+    )
+
+
+def secondary_confidence_columns(sport, view, games):
+    if str(sport).upper() == "CFB":
+        mapping = {
+            "full_game": ["Side Confidence"],
+            "scoring": ["Scoring Confidence"],
+            "first_half": ["First Half Confidence"],
+        }
+        columns = mapping.get(
+            view,
+            [
+                "Side Confidence",
+                "Scoring Confidence",
+                "First Half Confidence",
+            ],
+        )
+        available = [column for column in columns if column in games.columns]
+        if available:
+            return available
+    return ["Confidence"] if "Confidence" in games.columns else []
+
+
+def dataframe_value_mask(games, columns, value):
+    mask = pd.Series(False, index=games.index)
+    for column in columns:
+        if column in games.columns:
+            mask = mask | games[column].fillna("").astype(str).eq(value)
+    return mask
+
+
+def apply_secondary_filters(
+    games,
+    base_filtered,
+    sport,
+    view,
+    selected_tiers,
+):
+    if games.empty or not selected_tiers:
+        return base_filtered
+
+    selected_mask = pd.Series(False, index=games.index)
+    segment_columns = secondary_segment_columns(sport, view)
+    if "watch" in selected_tiers:
+        selected_mask = selected_mask | dataframe_value_mask(
+            games,
+            segment_columns,
+            "Watch",
+        )
+    if "lean" in selected_tiers:
+        selected_mask = selected_mask | dataframe_value_mask(
+            games,
+            segment_columns,
+            "Lean",
+        )
+
+    base_mask = pd.Series(
+        games.index.isin(base_filtered.index),
+        index=games.index,
+    )
+    confidence_columns = secondary_confidence_columns(sport, view, games)
+    if "a_plus" in selected_tiers:
+        selected_mask = selected_mask | (
+            dataframe_value_mask(games, confidence_columns, "A+") & base_mask
+        )
+    if "a" in selected_tiers:
+        selected_mask = selected_mask | (
+            dataframe_value_mask(games, confidence_columns, "A") & base_mask
+        )
+
+    if view == "top":
+        selected_mask = selected_mask & base_mask
+    return games[selected_mask]
 
 
 @st.cache_data(ttl=900)
@@ -5509,7 +5762,7 @@ def render_nfl_current(selected_filter_override=None):
         ]
 
     render_nfl_filter_pills(selected_filter)
-    show_watches, show_leans = render_nfl_discovery_controls()
+    selected_tiers = render_secondary_filter_pills("NFL")
 
     stored_rows = safe_load_nfl_history(
         model_version=MODEL_BASELINES["NFL"],
@@ -5559,33 +5812,13 @@ def render_nfl_current(selected_filter_override=None):
     slate["Game Time"] = slate.apply(format_local_card_time, axis=1)
 
     base_filtered = filter_nfl_games(slate, selected_filter)
-    discovery_mask = pd.Series(False, index=slate.index)
-    if show_watches:
-        discovery_mask = discovery_mask | nfl_discovery_mask(
-            slate,
-            selected_filter,
-            "Watch",
-        )
-    if show_leans:
-        discovery_mask = discovery_mask | nfl_discovery_mask(
-            slate,
-            selected_filter,
-            "Lean",
-        )
-
-    if show_watches or show_leans:
-        if selected_filter == "all":
-            filtered = slate[discovery_mask]
-        else:
-            base_mask = pd.Series(
-                slate.index.isin(base_filtered.index),
-                index=slate.index,
-            )
-            filtered = slate[
-                base_mask | discovery_mask
-            ]
-    else:
-        filtered = base_filtered
+    filtered = apply_secondary_filters(
+        slate,
+        base_filtered,
+        "NFL",
+        selected_filter,
+        selected_tiers,
+    )
 
     st.caption(f"{len(filtered)} of {len(slate)}")
     st.caption(format_nfl_schedule_caption(selected_schedule_rows))
@@ -5708,7 +5941,7 @@ def render_nfl_model_info_sidebar():
 
 **Storage**: `{escape(storage_path)}`
 
-**Current Status**: Current slate views are All, Signals, Side, Scoring, A, and Perf.
+**Current Status**: Current slate views are All, Signals, Side, Scoring, and Perf, with shared Watch, Lean, A+, and A tier filters.
 
 **Historical Lab**: fixed 2025 regular-season model test
 """)
@@ -5792,6 +6025,7 @@ def render_wnba_current():
     )
 
     render_wnba_view_pills(selected_view)
+    selected_tiers = render_secondary_filter_pills("WNBA")
 
     if slate_error is not None:
         st.error(f"Could not load WNBA current slate: {slate_error}")
@@ -5801,11 +6035,16 @@ def render_wnba_current():
         st.info("No WNBA games found for the selected slate date.")
         return
 
-    if selected_view in ["top", "early"]:
-        filtered_count = 0
-    else:
-        filtered_count = len(filter_wnba_games(slate, selected_view))
-    st.caption(f"{filtered_count} of {len(slate)}")
+    base_filtered = filter_wnba_games(slate, selected_view)
+    filtered = apply_secondary_filters(
+        slate,
+        base_filtered,
+        "WNBA",
+        selected_view,
+        selected_tiers,
+    )
+    display_count = 0 if selected_view in ["top", "early"] else len(filtered)
+    st.caption(f"{display_count} of {len(slate)}")
     st.caption(format_snapshot_caption(wnba_history_rows))
     st.divider()
 
@@ -5816,8 +6055,6 @@ def render_wnba_current():
     if selected_view == "early":
         st.info("WNBA Early edge is pending for v1.0. Current WNBA testing is focused on full-game side and scoring-environment signals.")
         return
-
-    filtered = filter_wnba_games(slate, selected_view)
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Games", len(slate))
@@ -6723,6 +6960,7 @@ def render_nba_current():
     )
 
     render_nba_view_pills(selected_view)
+    selected_tiers = render_secondary_filter_pills("NBA")
 
     if slate_error is not None:
         st.error(f"Could not load NBA current slate: {slate_error}")
@@ -6732,11 +6970,18 @@ def render_nba_current():
         st.info("No NBA games found for the selected slate date.")
         return
 
-    if selected_view in ["top", "first_half"]:
-        filtered_count = 0
-    else:
-        filtered_count = len(filter_wnba_games(slate, selected_view))
-    st.caption(f"{filtered_count} of {len(slate)}")
+    base_filtered = filter_wnba_games(slate, selected_view)
+    filtered = apply_secondary_filters(
+        slate,
+        base_filtered,
+        "NBA",
+        selected_view,
+        selected_tiers,
+    )
+    display_count = (
+        0 if selected_view in ["top", "first_half"] else len(filtered)
+    )
+    st.caption(f"{display_count} of {len(slate)}")
     st.caption(format_snapshot_caption(nba_history_rows))
     st.divider()
 
@@ -6747,8 +6992,6 @@ def render_nba_current():
     if selected_view == "first_half":
         st.info("NBA First Half is pending until a reliable halftime-result data source is added. Full-game side and scoring signals are active in v0.")
         return
-
-    filtered = filter_wnba_games(slate, selected_view)
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Games", len(slate))
@@ -7116,6 +7359,7 @@ def render_cbb_current():
     )
 
     render_cbb_view_pills(selected_view)
+    selected_tiers = render_secondary_filter_pills("CBB")
 
     if slate_error is not None:
         st.error(f"Could not load CBB current slate: {slate_error}")
@@ -7128,11 +7372,18 @@ def render_cbb_current():
         st.info("No CBB games found for the selected slate date.")
         return
 
-    if selected_view in ["top", "first_half"]:
-        filtered_count = 0
-    else:
-        filtered_count = len(filter_wnba_games(slate, selected_view))
-    st.caption(f"{filtered_count} of {len(slate)}")
+    base_filtered = filter_wnba_games(slate, selected_view)
+    filtered = apply_secondary_filters(
+        slate,
+        base_filtered,
+        "CBB",
+        selected_view,
+        selected_tiers,
+    )
+    display_count = (
+        0 if selected_view in ["top", "first_half"] else len(filtered)
+    )
+    st.caption(f"{display_count} of {len(slate)}")
     st.caption(format_snapshot_caption(cbb_history_rows))
     st.divider()
 
@@ -7143,8 +7394,6 @@ def render_cbb_current():
     if selected_view == "first_half":
         st.info("CBB First Half is included in v0 planning, but official grading is pending until reliable halftime scores are verified.")
         return
-
-    filtered = filter_wnba_games(slate, selected_view)
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Games", len(slate))
@@ -7575,6 +7824,7 @@ def cfb_slate_from_history(rows):
                 "Predicted Winner": full_pick,
                 "Side Pick": full_pick,
                 "Side Edge": cfb_decision_display(full_pick, full_segment),
+                "Side Confidence": full_game.get("confidence") or "Pass",
                 "Side Tracking Segment": full_segment,
                 "Side Discovery Label": (
                     f"Full Game {full_segment}: {full_pick}"
@@ -7589,6 +7839,7 @@ def cfb_slate_from_history(rows):
                 )
                 if scoring_segment != "Pass"
                 else "Neutral Scoring Environment",
+                "Scoring Confidence": scoring.get("confidence") or "Pass",
                 "Scoring Tracking Segment": scoring_segment,
                 "Scoring Discovery Label": (
                     f"Scoring {scoring_segment}: {scoring_pick}"
@@ -7598,6 +7849,7 @@ def cfb_slate_from_history(rows):
                 "Scoring Result": scoring.get("result") or "Pending",
                 "First Half Pick": half_pick,
                 "Early Edge": cfb_decision_display(half_pick, half_segment),
+                "First Half Confidence": first_half.get("confidence") or "Pass",
                 "First Half Tracking Segment": half_segment,
                 "First Half Discovery Label": (
                     f"First Half {half_segment}: {half_pick}"
@@ -7890,7 +8142,15 @@ def render_cfb_current():
         return
 
     render_cfb_view_pills(selected_view)
-    filtered = filter_cfb_games(slate, selected_view)
+    selected_tiers = render_secondary_filter_pills("CFB")
+    base_filtered = filter_cfb_games(slate, selected_view)
+    filtered = apply_secondary_filters(
+        slate,
+        base_filtered,
+        "CFB",
+        selected_view,
+        selected_tiers,
+    )
     st.caption(f"{len(filtered)} of {len(slate)}")
     st.caption(format_snapshot_caption(history_rows))
     st.divider()
@@ -8011,6 +8271,7 @@ def render_mls_current():
     )
 
     render_mls_view_pills(selected_view)
+    selected_tiers = render_secondary_filter_pills("MLS")
 
     if slate_error is not None:
         st.error(f"Could not load MLS current slate: {slate_error}")
@@ -8020,19 +8281,22 @@ def render_mls_current():
         st.info("No MLS regular-season games found for the selected slate date.")
         return
 
-    if selected_view == "first_half":
-        filtered_count = 0
-    else:
-        filtered_count = len(filter_mls_games(slate, selected_view))
-    st.caption(f"{filtered_count} of {len(slate)}")
+    base_filtered = filter_mls_games(slate, selected_view)
+    filtered = apply_secondary_filters(
+        slate,
+        base_filtered,
+        "MLS",
+        selected_view,
+        selected_tiers,
+    )
+    display_count = 0 if selected_view == "first_half" else len(filtered)
+    st.caption(f"{display_count} of {len(slate)}")
     st.caption(format_snapshot_caption(mls_history_rows))
     st.divider()
 
     if selected_view == "first_half":
         st.info("MLS First Half is visible as Model Pending until a reliable halftime-result feed and grading rule are added.")
         return
-
-    filtered = filter_mls_games(slate, selected_view)
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Games", len(slate))
@@ -8374,6 +8638,7 @@ def render_nhl_current():
     )
 
     render_nhl_view_pills(selected_view)
+    selected_tiers = render_secondary_filter_pills("NHL")
 
     if slate_error is not None:
         st.error(f"Could not load NHL current slate: {slate_error}")
@@ -8383,11 +8648,18 @@ def render_nhl_current():
         st.info("No NHL games found for the selected slate date.")
         return
 
-    if selected_view in ["top", "first_period"]:
-        filtered_count = 0
-    else:
-        filtered_count = len(filter_nhl_games(slate, selected_view))
-    st.caption(f"{filtered_count} of {len(slate)}")
+    base_filtered = filter_nhl_games(slate, selected_view)
+    filtered = apply_secondary_filters(
+        slate,
+        base_filtered,
+        "NHL",
+        selected_view,
+        selected_tiers,
+    )
+    display_count = (
+        0 if selected_view in ["top", "first_period"] else len(filtered)
+    )
+    st.caption(f"{display_count} of {len(slate)}")
     st.caption(format_snapshot_caption(nhl_history_rows))
     st.divider()
 
@@ -8398,8 +8670,6 @@ def render_nhl_current():
     if selected_view == "first_period":
         st.info("NHL First Period is pending until a reliable period-result data source and grading rule are added. Full-game moneyline is active in v0.")
         return
-
-    filtered = filter_nhl_games(slate, selected_view)
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Games", len(slate))
@@ -9021,7 +9291,7 @@ yrfi_mask = first_inning_pick_text.str.contains("YRFI", case=False, na=False)
 game_mask = ~games["Full Game Pick"].apply(is_no_edge_pick)
 f5_mask = ~games["F5 Pick"].apply(is_no_edge_pick)
 render_mlb_filter_pills(selected_filter)
-show_watches, show_leans = render_mlb_discovery_controls()
+selected_tiers = render_secondary_filter_pills("MLB")
 
 filtered = games.copy()
 base_mask = pd.Series(True, index=games.index)
@@ -9037,25 +9307,13 @@ elif selected_filter == "F5":
 elif selected_filter == "Game":
     base_mask = game_mask
 
-discovery_mask = pd.Series(False, index=games.index)
-if show_watches:
-    discovery_mask = discovery_mask | games.apply(
-        lambda row: has_discovery_label(row, selected_filter, "Watch"),
-        axis=1,
-    )
-if show_leans:
-    discovery_mask = discovery_mask | games.apply(
-        lambda row: has_discovery_label(row, selected_filter, "Lean"),
-        axis=1,
-    )
-
-if show_watches or show_leans:
-    if selected_filter == "All Games":
-        filtered = games[discovery_mask]
-    else:
-        filtered = games[base_mask | discovery_mask]
-else:
-    filtered = games[base_mask]
+secondary_filtered = apply_mlb_secondary_filters(
+    games,
+    selected_filter,
+    selected_tiers,
+    top_look_game_names,
+)
+filtered = games[base_mask] if secondary_filtered is None else secondary_filtered
 
 filtered = filtered.sort_values(
     ["Status Sort", "Game Sort Time"],

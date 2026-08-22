@@ -131,6 +131,19 @@ Watches = discovery record
 
 These segments must not be blended into one hit rate.
 
+## Current-Slate Tier Filters
+
+Every sport current-slate page provides the same secondary filter row:
+
+```text
+Watch | Lean | A+ | A
+```
+
+With no tier selected, the primary market filter controls the slate. Multiple
+selected tiers use OR logic. A and A+ are exact confidence levels. Watch and
+Lean display only decisions that the sport already records; these controls do
+not turn a discovery decision into an Official Pick.
+
 Performance pages do not use the current-slate `Slate Date` input. They open on
 today's/latest tracked slate and are filtered through the report controls such
 as Day(s), market, confidence, model version, and performance segment. Current

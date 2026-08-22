@@ -870,3 +870,22 @@ Keep product, market, and model versions separate.
 Do not create Top picks until tracked performance supports them.
 Use this strategy before starting NBA, NHL, or any future market.
 ```
+
+## Shared Current-Slate Tier Filters
+
+Every sport current-slate page uses a secondary pill row below its primary
+market filters:
+
+```text
+Watch | Lean | A+ | A
+```
+
+No selected tier preserves the primary market view. Selecting one or more
+tiers narrows that view using OR logic. Confidence matching is exact, so A does
+not include A+. Watch and Lean must come from that sport's existing stored or
+derived discovery decisions; the UI must not invent, promote, or reclassify a
+model decision. A sport without stored Watch or Lean decisions may show no
+matches for those tiers until its tracking contract implements them.
+
+This is a shared presentation and filtering rule only. It does not change
+model thresholds, official selections, market releases, or storage schemas.
