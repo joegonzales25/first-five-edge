@@ -258,7 +258,7 @@ Slate Date
 MM/DD/YYYY date input
 Full-width All filter card
 Signals | Side | Scoring | Perf
-Watch | Lean | A+ | A
+A+ | A | B | C | Lean | Watch
 Filtered count caption
 Snapshot as of caption
 ```
@@ -282,11 +282,12 @@ Render the Current Slate mode, date input, filter cards, discovery controls,
 count, and snapshot freshness even when no current-season snapshots exist.
 Show the no-data message after those controls.
 
-Watch, Lean, A+, and A are shared secondary tier pills below the primary filter
-cards. With no tier selected, the selected primary filter controls the slate.
-Selected tier pills narrow that primary view using OR logic. A and A+ are exact
-confidence matches; A does not include A+. Watch and Lean use only stored NFL
-discovery decisions and do not create or promote model selections.
+The shared secondary tier pills appear below the primary filter cards in this
+order: A+, A, B, C, Lean, and Watch. With no tier selected, the selected primary
+filter controls the slate. Selected tier pills narrow that primary view using
+OR logic. A+, A, B, and C are exact confidence matches; one tier does not
+include another. Watch and Lean use only stored NFL discovery decisions and do
+not create or promote model selections.
 
 The count should use compact text:
 

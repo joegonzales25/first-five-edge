@@ -83,8 +83,8 @@ from model_history import (
     load_slate_history_rows,
 )
 
-APP_VERSION = "2.3.33"
-MODEL_CACHE_VERSION = "edge-v2333-secondary-tier-filters"
+APP_VERSION = "2.3.34"
+MODEL_CACHE_VERSION = "edge-v2334-expanded-tier-filters"
 # Keep performance history stable across UI/cache releases. Change this only
 # when the model baseline, grading definition, or history schema intentionally changes.
 PERFORMANCE_TRACKING_VERSION = "2.3.29"
@@ -841,7 +841,7 @@ st.markdown("""
 }
 .secondary-filter-grid {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 8px;
     margin: 8px 0 18px;
 }
@@ -862,16 +862,22 @@ st.markdown("""
     white-space: nowrap;
 }
 .secondary-filter-card:nth-child(1) {
-    border-color: #38bdf8;
-}
-.secondary-filter-card:nth-child(2) {
-    border-color: #f59e0b;
-}
-.secondary-filter-card:nth-child(3) {
     border-color: #22c55e;
 }
-.secondary-filter-card:nth-child(4) {
+.secondary-filter-card:nth-child(2) {
     border-color: #14b8a6;
+}
+.secondary-filter-card:nth-child(3) {
+    border-color: #a855f7;
+}
+.secondary-filter-card:nth-child(4) {
+    border-color: #f97316;
+}
+.secondary-filter-card:nth-child(5) {
+    border-color: #f59e0b;
+}
+.secondary-filter-card:nth-child(6) {
+    border-color: #38bdf8;
 }
 .secondary-filter-card.active {
     background: linear-gradient(135deg, #1d4ed8, #0f766e);
@@ -1568,6 +1574,10 @@ def apply_mlb_secondary_filters(
         mask = mask | mlb_confidence_mask(games, selected_filter, "A+")
     if "a" in selected_tiers:
         mask = mask | mlb_confidence_mask(games, selected_filter, "A")
+    if "b" in selected_tiers:
+        mask = mask | mlb_confidence_mask(games, selected_filter, "B")
+    if "c" in selected_tiers:
+        mask = mask | mlb_confidence_mask(games, selected_filter, "C")
     if selected_filter == "Top Looks":
         mask = mask & games["Game"].isin(top_look_game_names)
     return games[mask]
@@ -3546,10 +3556,12 @@ def render_mlb_filter_pills(active_filter):
 
 
 SECONDARY_FILTER_OPTIONS = [
-    ("Watch", "watch"),
-    ("Lean", "lean"),
     ("A+", "a_plus"),
     ("A", "a"),
+    ("B", "b"),
+    ("C", "c"),
+    ("Lean", "lean"),
+    ("Watch", "watch"),
 ]
 
 
@@ -4945,6 +4957,14 @@ def apply_secondary_filters(
         selected_mask = selected_mask | (
             dataframe_value_mask(games, confidence_columns, "A") & base_mask
         )
+    if "b" in selected_tiers:
+        selected_mask = selected_mask | (
+            dataframe_value_mask(games, confidence_columns, "B") & base_mask
+        )
+    if "c" in selected_tiers:
+        selected_mask = selected_mask | (
+            dataframe_value_mask(games, confidence_columns, "C") & base_mask
+        )
 
     if view == "top":
         selected_mask = selected_mask & base_mask
@@ -5941,7 +5961,7 @@ def render_nfl_model_info_sidebar():
 
 **Storage**: `{escape(storage_path)}`
 
-**Current Status**: Current slate views are All, Signals, Side, Scoring, and Perf, with shared Watch, Lean, A+, and A tier filters.
+**Current Status**: Current slate views are All, Signals, Side, Scoring, and Perf, with shared A+, A, B, C, Lean, and Watch tier filters.
 
 **Historical Lab**: fixed 2025 regular-season model test
 """)

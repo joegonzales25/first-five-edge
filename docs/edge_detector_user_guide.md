@@ -136,13 +136,14 @@ These segments must not be blended into one hit rate.
 Every sport current-slate page provides the same secondary filter row:
 
 ```text
-Watch | Lean | A+ | A
+A+ | A | B | C | Lean | Watch
 ```
 
 With no tier selected, the primary market filter controls the slate. Multiple
-selected tiers use OR logic. A and A+ are exact confidence levels. Watch and
-Lean display only decisions that the sport already records; these controls do
-not turn a discovery decision into an Official Pick.
+selected tiers use OR logic. A+, A, B, and C are exact confidence levels; one
+tier does not include another. Watch and Lean display only decisions that the
+sport already records; these controls do not turn a discovery decision into an
+Official Pick.
 
 Performance pages do not use the current-slate `Slate Date` input. They open on
 today's/latest tracked slate and are filtered through the report controls such
