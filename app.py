@@ -8001,8 +8001,8 @@ def render_cfb_performance_section():
 
     if current_summary["snapshots"] == 0:
         st.info(
-            "No CFB snapshots recorded yet. Run the manual CFB workflow after "
-            "configuring the CFBD API key."
+            "No CFB snapshots recorded yet. Run the manual CFB workflow to "
+            "record the first ESPN-backed slate."
         )
         return
 

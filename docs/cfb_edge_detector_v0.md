@@ -263,18 +263,18 @@ be refreshed before kickoff and frozen with the locked snapshot.
 Status: Approved for v0
 
 ```text
-Primary source: CollegeFootballData REST API v2
-Initial access: Free API key / free tier
+Primary source: ESPN public college-football scoreboard and team endpoints
 Persistent storage: Separate CFB tables in Turso
-Status fallback: ESPN scoreboard verification when needed
-Secrets: GitHub Actions and Streamlit secrets
+Optional enrichment: CollegeFootballData REST API v2 when a key is available
+Secrets: GitHub Actions and Streamlit secrets for storage; CFBD is optional
 Paid upgrade: Only when measured call volume or required endpoints justify it
 ```
 
-CFBD should provide the primary schedule, score, team-statistics, historical,
-ratings, rankings, roster, venue, and available weather inputs. The loader
-should batch requests, cache stable reference data, and record source
-timestamps so the free allowance is not consumed by unnecessary page loads.
+ESPN provides the v0 schedule, FBS membership, status, scores, first-half
+line scores, venue, and neutral-site fields without an API key. CFBD may enrich
+missing classifications, conference labels, venues, notes, or historical
+line scores when a key is configured, but a missing or failed CFBD key must not
+prevent a snapshot. The loader records source provenance on every row.
 
 Current references:
 
@@ -451,8 +451,8 @@ explicit revisit item before the CFB scheduler is enabled for production.
 Implemented components:
 
 ```text
-Primary source: CollegeFootballData.com API
-Status and score overlay: ESPN scoreboard
+Primary source: ESPN public college-football endpoints
+Optional enrichment: CollegeFootballData.com API
 Markets: Full Game, Scoring Environment, First Half
 Decision tiers: Official, Lean, Watch, Pass
 History authority: cfb_model_history in the configured Turso database
@@ -463,9 +463,9 @@ Workflow trigger: Manual only
 ```
 
 The workflow requires the existing `TURSO_DATABASE_URL` and
-`TURSO_AUTH_TOKEN` secrets plus a CFB-specific `CFBD_API_KEY` secret. The
-Streamlit page does not require the CFBD key because it does not contact CFBD
-or create snapshots.
+`TURSO_AUTH_TOKEN` secrets. `CFBD_API_KEY` is optional and enables enrichment
+when present. The Streamlit page does not contact ESPN or CFBD and does not
+create snapshots.
 
 The initial rating and scoring thresholds are provisional development bands,
 not production-calibrated thresholds. The source does not yet include the
@@ -476,6 +476,5 @@ an Official decision before that hard gate is satisfied.
 The manual workflow should be used to verify schedule normalization, Turso
 writes, kickoff locking, grading, current-slate cards, freshness timestamps,
 performance filters, and export reconciliation. Hourly scheduling remains
-disabled until the production gate is approved. Before enabling it, confirm
-the CFBD monthly request budget for the final loader cadence and reference-data
-refresh strategy.
+disabled until the production gate is approved. Before enabling it, validate
+ESPN field coverage and response stability across multiple complete slates.
