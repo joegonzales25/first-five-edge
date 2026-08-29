@@ -2,7 +2,12 @@ import unittest
 from datetime import date
 from unittest.mock import patch
 
-from cfb_data import load_cfb_season, normalize_espn_games, season_for_date
+from cfb_data import (
+    load_cfb_prior_season,
+    load_cfb_season,
+    normalize_espn_games,
+    season_for_date,
+)
 
 
 def competitor(team_id, location, side, score=None, quarters=None):
@@ -86,6 +91,23 @@ class CfbDataTests(unittest.TestCase):
 
     def test_january_uses_previous_cfb_season(self):
         self.assertEqual(season_for_date(date(2027, 1, 10)), 2026)
+
+    @patch("cfb_data.fetch_espn_season")
+    @patch("cfb_data.fetch_espn_fbs_teams")
+    def test_prior_loader_uses_previous_completed_season(
+        self,
+        fetch_teams,
+        fetch_season,
+    ):
+        fetch_teams.return_value = {"1": "Example Conference"}
+        fetch_season.return_value = {"events": [event(completed=True)]}
+
+        games = load_cfb_prior_season(2026)
+
+        self.assertEqual(len(games), 1)
+        fetch_season.assert_called_once_with(
+            date(2025, 7, 1), date(2026, 1, 31)
+        )
 
     def test_excludes_non_playoff_postseason_games(self):
         bowl = event()

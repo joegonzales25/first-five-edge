@@ -106,7 +106,7 @@ MODEL_BASELINES = {
     "NBA": "0.1.0-test",
     "NHL": "0.1.0-test",
     "CBB": "0.1.0-test",
-    "CFB": "0.1.0-test",
+    "CFB": "0.2.0-test",
     "MLS": "0.1.0-test",
 }
 SPORT_CONFIG = {
@@ -7805,20 +7805,29 @@ def cfb_slate_from_history(rows):
             if model_margin >= 0
             else base.get("away_team")
         )
-        downgrade_text = base.get("downgrade_reasons") or ""
-        factors = [
-            (
-                f"Model margin {model_margin:+.1f} "
-                f"toward {margin_direction}"
-            ),
-            (
-                f"Projected total {cfb_safe_float(base.get('projected_total')):.1f} "
-                f"vs baseline {cfb_safe_float(base.get('league_total_baseline')):.1f}"
-            ),
-        ]
-        factors.extend(
-            item.strip() for item in str(downgrade_text).split(";") if item.strip()
-        )
+        try:
+            factors = json.loads(base.get("key_factors") or "[]")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            factors = []
+        if not isinstance(factors, list) or not factors:
+            downgrade_text = base.get("downgrade_reasons") or ""
+            factors = [
+                (
+                    f"Model margin {model_margin:+.1f} "
+                    f"toward {margin_direction}"
+                ),
+                (
+                    f"Projected total "
+                    f"{cfb_safe_float(base.get('projected_total')):.1f} "
+                    f"vs baseline "
+                    f"{cfb_safe_float(base.get('league_total_baseline')):.1f}"
+                ),
+            ]
+            factors.extend(
+                item.strip()
+                for item in str(downgrade_text).split(";")
+                if item.strip()
+            )
         status = base.get("status") or "Scheduled"
         slate_rows.append(
             {
@@ -8234,6 +8243,8 @@ def render_cfb_model_info_sidebar():
 **Discovery**: Scoring Environment and First Half Lean/Watch
 
 **Availability Gate**: Initial v0 decisions are capped until a reliable feed is integrated
+
+**Preseason Bootstrap**: Prior-season ESPN results, regressed and decayed through six current-season games
 
 **Snapshots**: {summary["snapshots"]}
 

@@ -8,7 +8,7 @@ from cfb_model_history import record_cfb_history
 
 DEFAULT_TIMEZONE = "America/New_York"
 DEFAULT_MARKET_VERSION = "0.1.0-test"
-DEFAULT_MODEL_VERSION = "0.1.0-test"
+DEFAULT_MODEL_VERSION = "0.2.0-test"
 
 
 def parse_args():

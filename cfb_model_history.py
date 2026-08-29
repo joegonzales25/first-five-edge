@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 import tempfile
@@ -137,6 +138,7 @@ def init_db(connection):
             stored_outcome TEXT,
             data_quality TEXT,
             downgrade_reasons TEXT,
+            key_factors TEXT,
             source TEXT,
             source_timestamp TEXT,
             created_at TEXT NOT NULL,
@@ -148,6 +150,14 @@ def init_db(connection):
         )
         """
     )
+    columns = {
+        row.get("name")
+        for row in fetch_rows(connection, "PRAGMA table_info(cfb_model_history)")
+    }
+    if "key_factors" not in columns:
+        connection.execute(
+            "ALTER TABLE cfb_model_history ADD COLUMN key_factors TEXT"
+        )
     connection.commit()
 
 
@@ -217,6 +227,9 @@ def prediction_values(
     downgrade_reasons = row.get("Downgrade Reasons") or []
     if not isinstance(downgrade_reasons, list):
         downgrade_reasons = [str(downgrade_reasons)]
+    key_factors = row.get("Key Factors List") or []
+    if not isinstance(key_factors, list):
+        key_factors = [str(key_factors)]
     return {
         "game_id": str(row.get("Game ID") or ""),
         "season": safe_int(row.get("Season")),
@@ -241,6 +254,7 @@ def prediction_values(
         "status": row.get("Status"),
         "data_quality": row.get("Data Quality"),
         "downgrade_reasons": "; ".join(downgrade_reasons),
+        "key_factors": json.dumps(key_factors),
         "source": row.get("Source"),
         "source_timestamp": row.get("Source Timestamp"),
         "created_at": now_text,
@@ -308,6 +322,7 @@ def update_open_prediction(connection, row_id, values):
         "status",
         "data_quality",
         "downgrade_reasons",
+        "key_factors",
         "source",
         "source_timestamp",
         "scheduled_kickoff",

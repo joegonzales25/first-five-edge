@@ -5,7 +5,7 @@
 ```text
 Experimental v0 implemented; shadow validation pending
 Market release: 0.1.0-test
-Model baseline: 0.1.0-test
+Model baseline: 0.2.0-test
 Scheduled snapshots: disabled
 ```
 
@@ -478,3 +478,18 @@ writes, kickoff locking, grading, current-slate cards, freshness timestamps,
 performance filters, and export reconciliation. Hourly scheduling remains
 disabled until the production gate is approved. Before enabling it, validate
 ESPN field coverage and response stability across multiple complete slates.
+
+### 0.2.0-test Preseason Bootstrap
+
+The baseline seeds each current FBS team from the previous season's completed
+regular-season, conference-championship, and CFP results. Teams require six
+usable prior games. End-of-season ratings retain 55 percent of their distance
+from 1500, while offense and defense retain 50 percent of their distance from
+the 26-point team baseline.
+
+The preseason prior has 100 percent influence before a team's first current-
+season game and declines linearly to zero after six current-season games.
+Prior-season games never count toward the current-season history gate. Missing
+or insufficient prior history uses league-average defaults and adds an
+`Insufficient preseason history` downgrade. Existing thresholds and the
+availability-based Watch cap remain unchanged.

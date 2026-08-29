@@ -187,6 +187,8 @@ def normalize_cfbd_games(
                 "week": game.get("week"),
                 "season_type": season_type or "regular",
                 "game_date": game.get("start_date"),
+                "away_team_id": None,
+                "home_team_id": None,
                 "away_team": away_team,
                 "home_team": home_team,
                 "away_conference": game.get("away_conference"),
@@ -336,6 +338,8 @@ def normalize_espn_games(
                 "week": (event.get("week") or {}).get("number"),
                 "season_type": season_type,
                 "game_date": event.get("date") or competition.get("date"),
+                "away_team_id": str(away_team.get("id") or ""),
+                "home_team_id": str(home_team.get("id") or ""),
                 "away_team": espn_team_name(away),
                 "home_team": espn_team_name(home),
                 "away_conference": fbs_teams.get(str(away_team.get("id")))
@@ -441,6 +445,21 @@ def apply_espn_status(games: pd.DataFrame, target_dates) -> pd.DataFrame:
 
 def season_for_date(target_date: date) -> int:
     return target_date.year - 1 if target_date.month <= 2 else target_date.year
+
+
+def load_cfb_prior_season(season: int) -> pd.DataFrame:
+    prior_season = int(season) - 1
+    season_start = date(prior_season, 7, 1)
+    season_end = date(prior_season + 1, 1, 31)
+    try:
+        fbs_teams = fetch_espn_fbs_teams()
+        payload = fetch_espn_season(season_start, season_end)
+    except (requests.RequestException, ValueError):
+        return pd.DataFrame()
+    games = normalize_espn_games(payload.get("events", []), fbs_teams)
+    if games.empty:
+        return games
+    return games[games["completed"]].reset_index(drop=True)
 
 
 def apply_cfbd_enrichment(
