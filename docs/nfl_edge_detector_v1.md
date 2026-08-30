@@ -18,9 +18,9 @@ Model baseline: 1.0.0
 Classification: active monitored test
 ```
 
-The prediction snapshot trigger remains manual until regular-season activation.
-The separate schedule-inventory workflow runs daily because flex scheduling,
-kickoff times, venues, and game status can change without creating a model pick.
+The prediction snapshot and separate schedule-inventory workflows remain manual
+until regular-season activation. Schedule synchronization can be run after flex
+scheduling, kickoff, venue, or game-status changes without creating a model pick.
 
 This release changes the NFL data and grading lifecycle only. It does not
 change the model calculations, official side thresholds, scoring threshold,
@@ -44,8 +44,8 @@ stored NFL snapshots and must not create or mutate tracked performance rows.
 
 ## Schedule And Feature Lifecycle
 
-The complete active regular-season schedule is synchronized from nflverse once
-daily and may also be refreshed manually:
+The complete active regular-season schedule is synchronized manually from
+nflverse:
 
 ```powershell
 python sync_nfl_schedule.py --season 2026

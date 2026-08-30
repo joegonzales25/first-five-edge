@@ -793,7 +793,7 @@ NFL:
 
 ```text
 Status: active monitored test.
-Schedule inventory: daily nflverse synchronization into nfl_schedule; this
+Schedule inventory: manual nflverse synchronization into nfl_schedule; this
 does not create predictions.
 Prediction schedule: disabled until explicit regular-season activation;
 manual workflow dispatch remains available.
