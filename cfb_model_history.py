@@ -2,7 +2,7 @@ import json
 import os
 import sqlite3
 import tempfile
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -445,6 +445,194 @@ def record_cfb_history(
                 counts["locked_or_graded"] += 1
         connection.commit()
     return counts
+
+
+def pending_cfb_snapshots(connection, start_date, end_date):
+    return fetch_rows(
+        connection,
+        """
+        SELECT *
+        FROM cfb_model_history
+        WHERE slate_date BETWEEN ? AND ?
+          AND (
+              LOWER(COALESCE(status, '')) NOT IN (
+                  'final', 'game over', 'completed early', 'full time',
+                  'full-time'
+              )
+              OR result IS NULL
+              OR result = 'Pending'
+          )
+        ORDER BY slate_date, market_version, model_version, game_id, market
+        """,
+        (str(start_date), str(end_date)),
+    )
+
+
+def load_pending_cfb_snapshots(
+    through_date=None,
+    lookback_days=14,
+    db_path=DB_PATH,
+):
+    through_date = through_date or date.today()
+    start_date = through_date - timedelta(days=max(0, lookback_days))
+    connection = connect(db_path)
+    try:
+        init_db(connection)
+        return pending_cfb_snapshots(connection, start_date, through_date)
+    finally:
+        connection.close()
+
+
+def completed_result(row):
+    completed = row.get("completed")
+    if completed is not None and not pd.isna(completed) and bool(completed):
+        return True
+    return str(row.get("status") or "").strip().lower() in {
+        "final",
+        "game over",
+        "completed early",
+        "full time",
+        "full-time",
+    }
+
+
+def stored_result_values(snapshot, row, now_text):
+    status = "Final" if completed_result(row) else row.get("status")
+    away_score = safe_int(row.get("away_score"))
+    home_score = safe_int(row.get("home_score"))
+    away_half = safe_int(row.get("away_first_half"))
+    home_half = safe_int(row.get("home_first_half"))
+    final = completed_result(row)
+    pick = snapshot.get("pick")
+    result = snapshot.get("result") or "Pending"
+
+    if final:
+        if snapshot.get("market") == "Scoring Environment":
+            baseline = safe_float(snapshot.get("league_total_baseline"))
+            if pick == "Neutral Scoring Environment" or pick == "Pass":
+                result = "No Signal"
+            elif None in {away_score, home_score, baseline}:
+                result = "Pending"
+            else:
+                actual_total = away_score + home_score
+                if pick == "High Scoring Environment":
+                    result = "Correct" if actual_total > baseline else "Missed"
+                else:
+                    result = "Correct" if actual_total < baseline else "Missed"
+        elif snapshot.get("market") == "First Half":
+            if not pick or pick == "Pass":
+                result = "No Signal"
+            elif None in {away_half, home_half}:
+                result = "Pending"
+            elif away_half == home_half:
+                result = "Push"
+            else:
+                winner = (
+                    snapshot.get("away_team")
+                    if away_half > home_half
+                    else snapshot.get("home_team")
+                )
+                result = "Correct" if pick == winner else "Missed"
+        else:
+            if not pick or pick == "Pass":
+                result = "No Signal"
+            elif None in {away_score, home_score}:
+                result = "Pending"
+            elif away_score == home_score:
+                result = "Push"
+            else:
+                winner = (
+                    snapshot.get("away_team")
+                    if away_score > home_score
+                    else snapshot.get("home_team")
+                )
+                result = "Correct" if pick == winner else "Missed"
+
+    return {
+        "status": status,
+        "away_score": away_score,
+        "home_score": home_score,
+        "away_first_half": away_half,
+        "home_first_half": home_half,
+        "result": result,
+        "stored_outcome": outcome_for_result(result),
+        "updated_at": now_text,
+        "graded_at": now_text
+        if final and result in {"Correct", "Missed", "Push", "No Signal"}
+        else None,
+    }
+
+
+def reconcile_cfb_history(
+    results,
+    snapshots,
+    apply=False,
+    db_path=DB_PATH,
+    now=None,
+):
+    counts = {
+        "candidates": len(snapshots),
+        "matched": 0,
+        "final": 0,
+        "still_pending": 0,
+        "unmatched": 0,
+        "updated": 0,
+    }
+    details = []
+    if results is None or results.empty:
+        counts["unmatched"] = len(snapshots)
+        return counts, details
+
+    current_rows = {
+        str(row.get("game_id") or ""): row
+        for _, row in results.iterrows()
+        if row.get("game_id")
+    }
+    reconciliation_time = now or utc_now()
+    updates = []
+    for snapshot in snapshots:
+        game_id = str(snapshot.get("game_id") or "")
+        current = current_rows.get(game_id)
+        if current is None:
+            counts["unmatched"] += 1
+            details.append(
+                {
+                    "game_id": game_id,
+                    "game": snapshot.get("game"),
+                    "status": "Unmatched",
+                }
+            )
+            continue
+
+        counts["matched"] += 1
+        final = completed_result(current)
+        counts["final" if final else "still_pending"] += 1
+        values = stored_result_values(snapshot, current, reconciliation_time)
+        updates.append((snapshot, values, not is_pregame_status(values["status"])))
+        details.append(
+            {
+                "game_id": game_id,
+                "game": snapshot.get("game"),
+                "market": snapshot.get("market"),
+                "market_version": snapshot.get("market_version"),
+                "model_version": snapshot.get("model_version"),
+                "result": values["result"],
+                "status": "Would update" if not apply else "Updated",
+            }
+        )
+
+    if apply and updates:
+        connection = connect(db_path)
+        try:
+            init_db(connection)
+            for snapshot, values, should_lock in updates:
+                update_result(connection, snapshot["id"], values, should_lock)
+                counts["updated"] += 1
+            connection.commit()
+        finally:
+            connection.close()
+
+    return counts, details
 
 
 def load_cfb_history(

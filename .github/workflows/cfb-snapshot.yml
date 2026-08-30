@@ -1,8 +1,8 @@
 name: CFB Slate Snapshot
 
 on:
-  # Production schedule remains disabled until the approved release gate.
-  # Hourly cadence will be enabled in season after explicit owner approval.
+  schedule:
+    - cron: "0 * * * *"
   workflow_dispatch:
     inputs:
       slate_date:
@@ -38,6 +38,8 @@ jobs:
         run: |
           if [ -n "$SNAPSHOT_SLATE_DATE" ]; then
             python snapshot_cfb_slate.py --date "$SNAPSHOT_SLATE_DATE"
+            python reconcile_cfb_history.py --date "$SNAPSHOT_SLATE_DATE" --apply
           else
             python snapshot_cfb_slate.py
+            python reconcile_cfb_history.py --lookback-days 14 --apply
           fi

@@ -6,7 +6,7 @@
 Experimental v0 implemented; shadow validation pending
 Market release: 0.1.0-test
 Model baseline: 0.2.0-test
-Scheduled snapshots: disabled
+Scheduled snapshots: hourly with 14-day reconciliation
 ```
 
 The policy interview and experimental v0 build are complete. No CFB model
@@ -36,7 +36,7 @@ Discovery tiers: Lean and Watch
 Selection posture: Very selective
 Data cost: Free/public sources first
 Storage: Separate CFB Turso history
-Snapshots: Separate CFB workflow, disabled until season readiness
+Snapshots: Separate hourly CFB workflow with a 14-day pending-result reconciliation
 Performance: Official, Lean, and Watch reported separately
 ```
 
@@ -443,8 +443,9 @@ integrity together.
 
 ### Interview Status
 
-The v0 policy interview is complete. The production release gate remains an
-explicit revisit item before the CFB scheduler is enabled for production.
+The v0 policy interview is complete. The owner approved hourly shadow-mode
+scheduling on August 30, 2026; this does not designate model outputs as
+production decisions.
 
 ## Experimental V0 Implementation
 
@@ -459,7 +460,7 @@ History authority: cfb_model_history in the configured Turso database
 Page behavior: Read-only from stored CFB history
 Snapshot command: snapshot_cfb_slate.py
 Workflow: .github/workflows/cfb-snapshot.yml
-Workflow trigger: Manual only
+Workflow trigger: Hourly and manual
 ```
 
 The workflow requires the existing `TURSO_DATABASE_URL` and
@@ -473,11 +474,11 @@ approved material-availability feed, so every non-Pass decision is currently
 capped at Watch. This prevents the experimental implementation from producing
 an Official decision before that hard gate is satisfied.
 
-The manual workflow should be used to verify schedule normalization, Turso
-writes, kickoff locking, grading, current-slate cards, freshness timestamps,
-performance filters, and export reconciliation. Hourly scheduling remains
-disabled until the production gate is approved. Before enabling it, validate
-ESPN field coverage and response stability across multiple complete slates.
+The hourly workflow records the current ET slate and reconciles pending stored
+snapshots over a 14-day lookback. Manual runs support a specific slate date.
+Continue verifying schedule normalization, Turso writes, kickoff locking,
+grading, current-slate cards, freshness timestamps, performance filters, ESPN
+field coverage, response stability, and export reconciliation.
 
 ### 0.2.0-test Preseason Bootstrap
 
