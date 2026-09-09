@@ -1,4 +1,6 @@
 import json
+import math
+import numbers
 import os
 import sqlite3
 import tempfile
@@ -191,9 +193,32 @@ def safe_float(value):
     try:
         if value is None or pd.isna(value):
             return None
-        return float(value)
+        number = float(value)
+        return number if math.isfinite(number) else None
     except Exception:
         return None
+
+
+def db_value(value):
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, numbers.Real):
+        number = float(value)
+        if not math.isfinite(number):
+            return None
+        if isinstance(value, numbers.Integral):
+            return int(value)
+        return number
+    return value
+
+
+def db_values(values):
+    return [db_value(value) for value in values]
 
 
 def json_text(value, default):
@@ -428,7 +453,7 @@ def insert_values(connection, values):
         INSERT INTO nfl_model_history ({", ".join(columns)})
         VALUES ({placeholders})
         """,
-        [values[column] for column in columns],
+        db_values(values[column] for column in columns),
     )
 
 
@@ -447,7 +472,7 @@ def update_prediction(connection, row_id, values):
         SET {", ".join(f"{column} = ?" for column in columns)}
         WHERE id = ? AND snapshot_status = 'Pregame'
         """,
-        [*[values[column] for column in columns], row_id],
+        db_values([*[values[column] for column in columns], row_id]),
     )
 
 
@@ -481,26 +506,28 @@ def update_result(connection, row_id, values, should_lock):
             END
         WHERE id = ?
         """,
-        (
-            values["status"],
-            values["away_score"],
-            values["home_score"],
-            values["actual_winner"],
-            values["actual_total"],
-            values["side_result"],
-            values["side_discovery_result"],
-            values["scoring_result"],
-            values["scoring_discovery_result"],
-            values["challenger_side_result"],
-            values["challenger_scoring_result"],
-            values["margin_error"],
-            values["total_error"],
-            values["updated_at"],
-            values["graded_at"],
-            should_lock,
-            values["updated_at"],
-            should_lock,
-            row_id,
+        db_values(
+            (
+                values["status"],
+                values["away_score"],
+                values["home_score"],
+                values["actual_winner"],
+                values["actual_total"],
+                values["side_result"],
+                values["side_discovery_result"],
+                values["scoring_result"],
+                values["scoring_discovery_result"],
+                values["challenger_side_result"],
+                values["challenger_scoring_result"],
+                values["margin_error"],
+                values["total_error"],
+                values["updated_at"],
+                values["graded_at"],
+                should_lock,
+                values["updated_at"],
+                should_lock,
+                row_id,
+            )
         ),
     )
 
