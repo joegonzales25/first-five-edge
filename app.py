@@ -4563,6 +4563,68 @@ def wnba_result_icon(result):
     return f'<span class="result-outcome result-push">{escape(result)}</span>'
 
 
+def render_cfb_inline_results(row):
+    if not should_show_game_result(row.get("Status")):
+        return "", "", ""
+
+    outcome_map = {
+        "Correct": "Hit",
+        "Missed": "Miss",
+        "Push": "Push",
+    }
+    away_team, home_team = split_game_name(row["Game"])
+    away_abbr = team_abbreviation(away_team)
+    home_abbr = team_abbreviation(home_team)
+    away_score = row.get("Away Score")
+    home_score = row.get("Home Score")
+
+    side_result = ""
+    side_outcome = outcome_map.get(row.get("Side Result"))
+    if side_outcome and away_score is not None and home_score is not None:
+        final_score = (
+            f"Final: {away_abbr} {away_score}, {home_abbr} {home_score}"
+        )
+        side_result = render_decision_result(
+            final_score,
+            final_score,
+            side_outcome,
+        )
+
+    scoring_result = ""
+    scoring_outcome = outcome_map.get(row.get("Scoring Result"))
+    actual_total = row.get("Actual Total")
+    if actual_total is None and away_score is not None and home_score is not None:
+        actual_total = away_score + home_score
+    if scoring_outcome and actual_total is not None:
+        total_result = f"Total: {actual_total}"
+        scoring_result = render_decision_result(
+            total_result,
+            total_result,
+            scoring_outcome,
+        )
+
+    first_half_result = ""
+    first_half_outcome = outcome_map.get(row.get("First Half Result"))
+    away_first_half = row.get("Away First Half")
+    home_first_half = row.get("Home First Half")
+    if (
+        first_half_outcome
+        and away_first_half is not None
+        and home_first_half is not None
+    ):
+        halftime_score = (
+            f"Halftime: {away_abbr} {away_first_half}, "
+            f"{home_abbr} {home_first_half}"
+        )
+        first_half_result = render_decision_result(
+            halftime_score,
+            halftime_score,
+            first_half_outcome,
+        )
+
+    return side_result, scoring_result, first_half_result
+
+
 def render_wnba_result_strip(row):
     sport = row.get("Sport")
     status = str(row.get("Status", "Scheduled"))
@@ -4728,7 +4790,7 @@ def render_wnba_card(row, historical=False):
         else ""
     )
     result_line = ""
-    if historical:
+    if historical and sport != "CFB":
         result_line = f"""
         <div class="muted">
             Final: <strong>{escape(str(row["Away Score"]))}-{escape(str(row["Home Score"]))}</strong>
@@ -4738,6 +4800,12 @@ def render_wnba_card(row, historical=False):
             &nbsp; - &nbsp; Total Error: <strong>{escape(str(row["Total Error"]))}</strong>
         </div>
         """
+    side_result = ""
+    scoring_result = ""
+    early_result = ""
+    if sport == "CFB":
+        side_result, scoring_result, early_result = render_cfb_inline_results(row)
+    model_results = "" if sport == "CFB" else render_wnba_result_strip(row)
 
     st.html(f"""
     <div class="game-card">
@@ -4749,13 +4817,13 @@ def render_wnba_card(row, historical=False):
         <div class="muted">{lock_marker}{escape(str(game_time_display))} - {escape(str(row["Status"]))}</div>
 
         <div class="decision-stack">
-            <div class="decision-line decision-first">{escape(side_label)}: {escape(str(row["Side Edge"]))}</div>
-            <div class="decision-line decision-f5">{escape(scoring_label)}: {escape(str(row["Scoring Edge"]))}</div>
-            <div class="decision-line decision-full">{escape(half_label)}: {escape(str(row["Early Edge"]))}</div>
+            <div class="decision-line decision-first">{escape(side_label)}: {escape(str(row["Side Edge"]))}{side_result}</div>
+            <div class="decision-line decision-f5">{escape(scoring_label)}: {escape(str(row["Scoring Edge"]))}{scoring_result}</div>
+            <div class="decision-line decision-full">{escape(half_label)}: {escape(str(row["Early Edge"]))}{early_result}</div>
             {extra_decisions}
         </div>
 
-        {render_wnba_result_strip(row)}
+        {model_results}
 
         {render_wnba_key_factors(row)}
 
@@ -7882,6 +7950,14 @@ def cfb_slate_from_history(rows):
                 "Home": base.get("home_team"),
                 "Away Score": base.get("away_score"),
                 "Home Score": base.get("home_score"),
+                "Away First Half": base.get("away_first_half"),
+                "Home First Half": base.get("home_first_half"),
+                "Actual Total": (
+                    base.get("away_score") + base.get("home_score")
+                    if base.get("away_score") is not None
+                    and base.get("home_score") is not None
+                    else None
+                ),
                 "Model Signal": (
                     primary_pick
                 ),
