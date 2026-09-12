@@ -18,9 +18,9 @@ Model baseline: 1.0.0
 Classification: active monitored test
 ```
 
-The prediction snapshot and separate schedule-inventory workflows remain manual
-until regular-season activation. Schedule synchronization can be run after flex
-scheduling, kickoff, venue, or game-status changes without creating a model pick.
+The prediction snapshot workflow runs hourly at minute 15. The separate
+schedule-inventory workflow remains manual and can be run after flex scheduling,
+kickoff, venue, or game-status changes without creating a model pick.
 
 This release changes the NFL data and grading lifecycle only. It does not
 change the model calculations, official side thresholds, scoring threshold,
@@ -86,7 +86,7 @@ Schedule-only rows are not model signals and are excluded from performance.
 ## Snapshot, Lock, And Grading
 
 ```text
-Approved prediction cadence: hourly at minute 15 once activated; currently manual
+Prediction cadence: hourly at minute 15; manual dispatch also available
 Lock: scheduled kickoff
 Pregame: decisions may update
 Locked: decision fields freeze; only status and result fields update

@@ -795,8 +795,8 @@ NFL:
 Status: active monitored test.
 Schedule inventory: manual nflverse synchronization into nfl_schedule; this
 does not create predictions.
-Prediction schedule: disabled until explicit regular-season activation;
-manual workflow dispatch remains available.
+Prediction schedule: hourly at minute 15; manual workflow dispatch remains
+available.
 Feature source of truth: timestamped nfl_pregame_features rows in Turso.
 Prediction source of truth: separate nfl_model_history table in Turso.
 Lock: scheduled kickoff.
