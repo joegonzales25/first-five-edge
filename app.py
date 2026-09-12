@@ -4337,6 +4337,43 @@ def render_nfl_card(row, historical=False):
         "Model Pending" if schedule_only else row["Scoring Edge"]
     )
     displayed_early = "Model Pending" if schedule_only else row["Early Edge"]
+    side_result = ""
+    scoring_result = ""
+    if not historical and should_show_game_result(row.get("Status")):
+        away_score = row.get("Away Score")
+        home_score = row.get("Home Score")
+        side_outcome = {
+            "Correct": "Hit",
+            "Missed": "Miss",
+            "Push": "Push",
+        }.get(row.get("Side Result"))
+        scoring_outcome = {
+            "Correct": "Hit",
+            "Missed": "Miss",
+            "Push": "Push",
+        }.get(row.get("Scoring Result"))
+
+        if side_outcome and away_score is not None and home_score is not None:
+            final_score = (
+                f"Final: {team_abbreviation(away_team)} {away_score}, "
+                f"{team_abbreviation(home_team)} {home_score}"
+            )
+            side_result = render_decision_result(
+                final_score,
+                final_score,
+                side_outcome,
+            )
+
+        actual_total = row.get("Actual Total")
+        if actual_total is None and away_score is not None and home_score is not None:
+            actual_total = away_score + home_score
+        if scoring_outcome and actual_total is not None:
+            total_result = f"Total: {actual_total}"
+            scoring_result = render_decision_result(
+                total_result,
+                total_result,
+                scoring_outcome,
+            )
     result_line = ""
     if historical:
         result_line = f"""
@@ -4370,8 +4407,8 @@ def render_nfl_card(row, historical=False):
         <input class="edge-view-control edge-view-full" type="radio" name="{card_anchor}-edge-view" id="{card_anchor}-early">
 
         <div class="decision-stack">
-            <label class="decision-line decision-first" for="{card_anchor}-side">Side Edge: {escape(str(displayed_side))}</label>
-            <label class="decision-line decision-f5" for="{card_anchor}-scoring">Scoring Environment: {escape(str(displayed_scoring))}</label>
+            <label class="decision-line decision-first" for="{card_anchor}-side">Side Edge: {escape(str(displayed_side))}{side_result}</label>
+            <label class="decision-line decision-f5" for="{card_anchor}-scoring">Scoring Environment: {escape(str(displayed_scoring))}{scoring_result}</label>
             <label class="decision-line decision-full" for="{card_anchor}-early">Early Edge: {escape(str(displayed_early))}</label>
         </div>
 
