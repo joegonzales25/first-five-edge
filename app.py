@@ -3567,35 +3567,25 @@ SECONDARY_FILTER_OPTIONS = [
 
 def selected_secondary_filters():
     raw_value = str(get_query_param("tiers") or "")
-    selected = {
-        value.strip().lower()
-        for value in raw_value.split(",")
-        if value.strip()
-    }
     valid = {value for _, value in SECONDARY_FILTER_OPTIONS}
-    return selected & valid
+    for raw_selected in raw_value.split(","):
+        selected = raw_selected.strip().lower()
+        if selected in valid:
+            return {selected}
+    return set()
 
 
 def render_secondary_filter_pills(sport):
     selected = selected_secondary_filters()
     pills = []
     for label, value in SECONDARY_FILTER_OPTIONS:
-        next_selected = set(selected)
-        if value in next_selected:
-            next_selected.remove(value)
-        else:
-            next_selected.add(value)
-        tier_param = ",".join(
-            option_value
-            for _, option_value in SECONDARY_FILTER_OPTIONS
-            if option_value in next_selected
-        )
+        tier_param = None if value in selected else value
         classes = ["secondary-filter-card"]
         if value in selected:
             classes.append("active")
         pills.append(
             f'<a class="{" ".join(classes)}" href="'
-            f'{query_link({"sport": sport, "tiers": tier_param or None})}">'
+            f'{query_link({"sport": sport, "tiers": tier_param})}">'
             f"{escape(label)}</a>"
         )
     st.html(
