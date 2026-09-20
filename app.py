@@ -5282,6 +5282,20 @@ def format_nfl_schedule_caption(schedule_rows):
     return f"Schedule as of: {format_snapshot_time(max(timestamps))}"
 
 
+def nfl_card_status(schedule, snapshot):
+    schedule_status = schedule.get("status")
+    snapshot_status = snapshot.get("Status")
+    schedule_time = pd.to_datetime(schedule.get("updated_at"), utc=True, errors="coerce")
+    snapshot_time = pd.to_datetime(snapshot.get("Snapshot Updated At"), utc=True, errors="coerce")
+    if snapshot_status and (
+        not schedule_status
+        or pd.isna(schedule_time)
+        or (pd.notna(snapshot_time) and snapshot_time >= schedule_time)
+    ):
+        return snapshot_status
+    return schedule_status or snapshot_status or "Scheduled"
+
+
 def nfl_schedule_inventory_slate(schedule_rows, history_rows, feature_rows):
     if not schedule_rows:
         return nfl_slate_from_history(history_rows)
@@ -5310,7 +5324,7 @@ def nfl_schedule_inventory_slate(schedule_rows, history_rows, feature_rows):
         if stored:
             row = stored.copy()
             snapshot_status = str(row.get("Snapshot Status") or "")
-            status = schedule.get("status") or row.get("Status") or "Scheduled"
+            status = nfl_card_status(schedule, row)
             if str(status).lower() == "final":
                 decision_state = "Final"
             elif snapshot_status == "Locked":
