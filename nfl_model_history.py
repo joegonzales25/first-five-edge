@@ -139,6 +139,14 @@ def init_db(connection):
         for row in fetch_rows(connection, "PRAGMA table_info(nfl_model_history)")
     }
     optional_columns = {
+        "first_half_version": "TEXT",
+        "first_half_pick": "TEXT",
+        "first_half_margin": "REAL",
+        "first_half_segment": "TEXT",
+        "first_half_history_games": "INTEGER",
+        "away_first_half": "INTEGER",
+        "home_first_half": "INTEGER",
+        "first_half_result": "TEXT",
         "agent_notes": "TEXT",
         "side_tracking_segment": "TEXT",
         "side_discovery_pick": "TEXT",
@@ -286,6 +294,11 @@ def grade_scoring(segment, pick, actual_total, baseline, completed):
 
 def prediction_values(row, market_version, model_version, now_text):
     return {
+        "first_half_version": row.get("First Half Version"),
+        "first_half_pick": row.get("First Half Pick"),
+        "first_half_margin": safe_float(row.get("First Half Margin")),
+        "first_half_segment": row.get("First Half Tracking Segment") or "No Edge",
+        "first_half_history_games": safe_int(row.get("First Half History Games")),
         "game_id": str(row.get("Game ID") or ""),
         "season": safe_int(row.get("Season")),
         "week": safe_int(row.get("Week")),
@@ -466,6 +479,8 @@ def update_prediction(connection, row_id, values):
         "snapshot_status",
     }
     columns = [column for column in values if column not in immutable]
+    if not values.get("first_half_version"):
+        columns = [column for column in columns if not column.startswith("first_half_")]
     connection.execute(
         f"""
         UPDATE nfl_model_history
@@ -598,6 +613,28 @@ def record_nfl_history(
                 )
 
             should_lock = not is_open
+            away_half = safe_int(row.get("Away First Half"))
+            home_half = safe_int(row.get("Home First Half"))
+            if existing.get("snapshot_status") == "Not Tracked":
+                half_result = "No Signal"
+            elif away_half is not None and home_half is not None:
+                half_winner = "Tie" if away_half == home_half else (
+                    existing.get("home_team") if home_half > away_half else existing.get("away_team")
+                )
+                half_result = grade_side(existing.get("first_half_segment"),
+                                         existing.get("first_half_pick"), half_winner, True)
+            else:
+                half_result = existing.get("first_half_result") or grade_side(
+                    existing.get("first_half_segment"), existing.get("first_half_pick"), None, False
+                )
+                if is_open:
+                    half_result = grade_side(existing.get("first_half_segment"), existing.get("first_half_pick"), None, False)
+            connection.execute(
+                """UPDATE nfl_model_history SET first_half_result = ?,
+                   away_first_half = COALESCE(?, away_first_half),
+                   home_first_half = COALESCE(?, home_first_half) WHERE id = ?""",
+                db_values([half_result, away_half, home_half, existing["id"]]),
+            )
             update_result(
                 connection,
                 existing["id"],

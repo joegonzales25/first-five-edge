@@ -34,6 +34,9 @@ class NflModelHistoryTests(unittest.TestCase):
             "Side Tracking Segment": "No Edge", "Confidence": "Pass",
             "Scoring Tracking Segment": "No Edge",
             "Scoring Edge": "Neutral Scoring Environment",
+            "Away": "IND", "Home": "KC",
+            "First Half Version": "0.1.0-watch", "First Half Pick": "KC",
+            "First Half Tracking Segment": "Watch", "First Half Margin": 3.0,
         }
         now = datetime(2026, 9, 20, 12, tzinfo=timezone.utc)
         try:
@@ -49,17 +52,25 @@ class NflModelHistoryTests(unittest.TestCase):
                 self.assertEqual(stored["side_result"], "Pending")
                 self.assertEqual(stored["scoring_result"], "Pending")
                 self.assertEqual(stored["side_tracking_segment"], "Official")
+                self.assertEqual(stored["first_half_result"], "Pending")
                 row.update({"Side Edge": "Pass", "Side Tracking Segment": "No Edge"})
                 record_nfl_history(pd.DataFrame([row]), "test", "test", now=now)
                 self.assertEqual(connection.execute("SELECT side_result FROM nfl_model_history").fetchone()[0], "No Signal")
                 row.update({"Side Edge": "KC Edge", "Side Tracking Segment": "Official"})
                 record_nfl_history(pd.DataFrame([row]), "test", "test", now=now)
                 connection.execute("UPDATE nfl_model_history SET snapshot_status = 'Locked'")
+                row.update({"First Half Pick": "IND", "Away First Half": 7, "Home First Half": 7})
                 row.update({"Predicted Winner": "IND", "Status": "Final", "Actual Winner": "KC", "Away Score": 10, "Home Score": 20, "Actual Total": 30})
                 record_nfl_history(pd.DataFrame([row]), "test", "test", now=now)
                 stored = dict(connection.execute("SELECT * FROM nfl_model_history").fetchone())
                 self.assertEqual(stored["predicted_winner"], "KC")
                 self.assertEqual(stored["side_result"], "Correct")
+                self.assertEqual(stored["first_half_pick"], "KC")
+                self.assertEqual(stored["first_half_result"], "Push")
+                row.pop("Away First Half")
+                row.pop("Home First Half")
+                record_nfl_history(pd.DataFrame([row]), "test", "test", now=now)
+                self.assertEqual(connection.execute("SELECT first_half_result FROM nfl_model_history").fetchone()[0], "Push")
         finally:
             connection.close()
 

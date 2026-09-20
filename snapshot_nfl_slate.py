@@ -8,6 +8,7 @@ import pandas as pd
 from nfl_agent import build_current_slate, load_nfl_schedule
 from nfl_challenger import attach_features, load_feature_file
 from nfl_model_history import record_nfl_history
+from nfl_first_half import load_history as load_half_history, attach_first_half
 from nfl_schedule_store import (
     feature_rows_to_frame,
     load_latest_nfl_features,
@@ -107,6 +108,12 @@ def main():
         return 0
 
     totals = {"inserted": 0, "updated": 0, "not_tracked": 0}
+    half_history = {}
+    for year in sorted({year for year, _ in weeks}):
+        try:
+            half_history[year] = load_half_history(year, max(w for y, w in weeks if y == year))
+        except Exception as exc:
+            print(f"NFL first-half data unavailable for {year}: {type(exc).__name__}")
     for season, week in weeks:
         slate, _ = build_current_slate(
             season=season,
@@ -114,6 +121,8 @@ def main():
             today=target_date,
             games=games,
         )
+        if season in half_history:
+            slate = attach_first_half(slate, half_history[season])
         counts = record_nfl_history(
             slate,
             args.market_version,

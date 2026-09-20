@@ -206,7 +206,7 @@ def build_historical_lab(season=2025):
     results["Status"] = "Final"
     results["Game Time"] = "Final"
     results["Side Edge"] = results.apply(side_edge_display, axis=1)
-    results["Early Edge"] = "Model Pending"
+    results["Early Edge"] = "Not Available"
     results["Model Signal"] = results.apply(
         lambda row: model_signal_display(row["Side Edge"], row["Scoring Edge"]),
         axis=1,
@@ -416,7 +416,8 @@ def build_current_slate(season=None, week=None, today=None, games=None):
                     "Scoring Discovery Pick": scoring_release["pick"],
                     "Scoring Discovery Label": scoring_release["label"],
                     "Scoring Result": scoring_result,
-                    "Early Edge": "Model Pending",
+                    "Early Edge": "Not Available",
+                    "Neutral Site": game.get("location") != "Home",
                     "Model Margin": round(model_margin, 2),
                     "Projected Total": round(projected_total, 2),
                     "League Total Baseline": round(league_total, 2),

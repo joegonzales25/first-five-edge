@@ -1,5 +1,15 @@
 # NFL baseline validation
 
+## First-half Watch experiment
+
+First-half version 0.1.0-watch uses completed regular-season quarter scores from the ESPN scoreboard. Team aliases align with nflverse IDs. Quarter-two scores are accepted only at halftime or later. Missing quarters are not interpreted as zero.
+
+The model fits opponent-adjusted first-half team strengths and a home-field coefficient using ridge regression. It requires eight prior games for each team, uses a 180-day weight half-life and ridge penalty 4, and emits only Watch picks at an absolute predicted margin of at least two points. These are experimental settings, not validated confidence thresholds. Games within six hours of the target kickoff are excluded from training. Neutral sites omit home advantage. No injury, quarterback, pace, or possession features are currently included.
+
+Run `python nfl_first_half.py --season 2025` for a chronological holdout report using 2024/2025 data. Inspect coverage and results before promoting any signals. Live source access was denied in the local development environment; synthetic regression tests do not establish predictive accuracy or live feed availability.
+
+The snapshot workflow loads first-half data once per season per run. Source failure is logged and does not stop the baseline snapshot. Existing first-half predictions survive transient fetch failures. Older already-locked snapshots are never given retrospective first-half picks. Halftime results settle independently, ties push, and settled results survive missing subsequent data. The GUI displays Not Available until sufficient data is recorded.
+
 Keep baseline 1.0.0 decision thresholds unchanged during monitoring.
 
 ## Reporting definitions

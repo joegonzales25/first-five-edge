@@ -4105,9 +4105,9 @@ def nfl_factor_groups(row):
         ] + side_factors
 
     early_factors = [
-        "Early Edge model pending",
-        "First-half specific inputs are not yet modeled",
-        "Use Side Edge and Scoring Environment for v1 review",
+        f"First Half: {row.get('Early Edge', 'Not Available')}",
+        f"Home margin: {row.get('First Half Margin', 'N/A')} points",
+        f"Minimum team history: {row.get('First Half History Games', 0)} games",
     ]
 
     return {
@@ -4161,7 +4161,7 @@ def render_nfl_key_factor_panel(row, view):
     headings = {
         "first": "Key Factors: Side Edge",
         "f5": "Key Factors: Scoring Environment",
-        "full": "Key Factors: Early Edge",
+        "full": "Key Factors: First Half",
     }
     factors = nfl_factor_groups(row).get(view, ["Neutral model profile"])
     items = []
@@ -4326,7 +4326,12 @@ def render_nfl_card(row, historical=False):
     displayed_scoring = (
         "Model Pending" if schedule_only else row["Scoring Edge"]
     )
-    displayed_early = "Model Pending" if schedule_only else row["Early Edge"]
+    displayed_early = "Not Available" if schedule_only else row["Early Edge"]
+    half_result = ""
+    half_outcome = {"Correct": "Hit", "Missed": "Miss", "Push": "Push"}.get(row.get("First Half Result"))
+    if half_outcome and pd.notna(row.get("Away First Half")) and pd.notna(row.get("Home First Half")):
+        half_score = f"Halftime: {away_team} {int(row['Away First Half'])}, {home_team} {int(row['Home First Half'])}"
+        half_result = render_decision_result(half_score, half_score, half_outcome)
     side_result = ""
     scoring_result = ""
     if not historical and should_show_game_result(row.get("Status")):
@@ -4399,7 +4404,7 @@ def render_nfl_card(row, historical=False):
         <div class="decision-stack">
             <label class="decision-line decision-first" for="{card_anchor}-side">Side Edge: {escape(str(displayed_side))}{side_result}</label>
             <label class="decision-line decision-f5" for="{card_anchor}-scoring">Scoring Environment: {escape(str(displayed_scoring))}{scoring_result}</label>
-            <label class="decision-line decision-full" for="{card_anchor}-early">Early Edge: {escape(str(displayed_early))}</label>
+            <label class="decision-line decision-full" for="{card_anchor}-early">First Half: {escape(str(displayed_early))}{half_result}</label>
         </div>
 
         {render_nfl_key_factor_panels(row)}
@@ -4453,6 +4458,13 @@ def render_nfl_card(row, historical=False):
             return
 
         render_nfl_analysis_sections(row)
+        st.markdown("### First Half Watch")
+        st.write({
+            "Model": row.get("First Half Version") or "Not Available",
+            "Home margin (points)": row.get("First Half Margin"),
+            "Minimum team history": row.get("First Half History Games"),
+            "Result": row.get("First Half Result") or "No Signal",
+        })
 
         st.markdown("### Challenger Track")
         st.markdown(f"""
@@ -5167,7 +5179,17 @@ def nfl_slate_from_history(rows):
                     "scoring_discovery_label"
                 ),
                 "Scoring Result": row.get("scoring_result") or "Pending",
-                "Early Edge": "Model Pending",
+                "Early Edge": (
+                    f"{row['first_half_pick']} Watch" if row.get("first_half_pick")
+                    else "Pass" if row.get("first_half_margin") is not None else "Not Available"
+                ),
+                "First Half Version": row.get("first_half_version"),
+                "First Half Margin": row.get("first_half_margin"),
+                "First Half History Games": row.get("first_half_history_games"),
+                "First Half Tracking Segment": row.get("first_half_segment") or "No Edge",
+                "First Half Result": row.get("first_half_result"),
+                "Away First Half": row.get("away_first_half"),
+                "Home First Half": row.get("home_first_half"),
                 "Model Margin": row.get("model_margin"),
                 "Projected Total": row.get("projected_total"),
                 "League Total Baseline": row.get(
@@ -5329,7 +5351,7 @@ def nfl_schedule_inventory_slate(schedule_rows, history_rows, feature_rows):
                 "Scoring Discovery Pick": None,
                 "Scoring Discovery Label": None,
                 "Scoring Result": "No Signal",
-                "Early Edge": "Model Pending",
+                "Early Edge": "Not Available",
                 "Model Margin": "N/A",
                 "Projected Total": "N/A",
                 "League Total Baseline": "N/A",
@@ -5495,6 +5517,8 @@ def current_nfl_history_week(rows, target_date=None):
 def nfl_signal_segment(row, market):
     if row.get("snapshot_status") == "Not Tracked":
         return "No Edge"
+    if market == "First Half":
+        return row.get("first_half_segment") or "No Edge"
     column = (
         "side_tracking_segment"
         if market == "Side"
@@ -5507,6 +5531,8 @@ def nfl_signal_result(row, market, segment):
     row_segment = nfl_signal_segment(row, market)
     if row_segment != segment:
         return None
+    if market == "First Half":
+        return row.get("first_half_result") or "Pending"
     if market == "Side":
         field = (
             "side_result"
@@ -5523,6 +5549,8 @@ def nfl_signal_result(row, market, segment):
 
 
 def nfl_signal_pick(row, market, segment):
+    if market == "First Half":
+        return row.get("first_half_pick")
     if market == "Side":
         return (
             row.get("predicted_winner")
@@ -5539,6 +5567,8 @@ def nfl_signal_pick(row, market, segment):
 def nfl_track_segment(row, market, model_track):
     if model_track == "Baseline":
         return nfl_signal_segment(row, market)
+    if market == "First Half":
+        return "No Edge"
     if row.get("challenger_status") != "Tracked":
         return "No Edge"
     if market == "Side":
@@ -5604,7 +5634,7 @@ def render_nfl_performance():
     with columns[0]:
         market_filter = st.selectbox(
             "Signal",
-            ["All", "Side", "Scoring"],
+            ["All", "Side", "Scoring", "First Half"],
             key="nfl_performance_signal",
         )
     with columns[1]:
@@ -5664,7 +5694,7 @@ def render_nfl_performance():
         filtered.append(row)
 
     markets = (
-        ["Side", "Scoring"]
+        ["Side", "Scoring", "First Half"]
         if market_filter == "All"
         else [market_filter]
     )
@@ -5714,6 +5744,8 @@ def render_nfl_performance():
                             ),
                             "Confidence": row_confidence,
                             "Side Confidence": row_confidence,
+                            "First Half Version": row.get("first_half_version") if market == "First Half" else None,
+                            "First Half Margin": row.get("first_half_margin") if market == "First Half" else None,
                             "Scoring Confidence": "Uncalibrated",
                             "Side Score (margin points)": abs(float(
                                 row.get("model_margin")
