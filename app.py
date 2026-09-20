@@ -4459,12 +4459,26 @@ def render_nfl_card(row, historical=False):
 
         render_nfl_analysis_sections(row)
         st.markdown("### First Half Watch")
-        st.write({
-            "Model": row.get("First Half Version") or "Not Available",
-            "Home margin (points)": row.get("First Half Margin"),
-            "Minimum team history": row.get("First Half History Games"),
-            "Result": row.get("First Half Result") or "No Signal",
-        })
+        half_version = row.get("First Half Version")
+        half_margin = row.get("First Half Margin")
+        half_history = row.get("First Half History Games")
+        half_version_text = half_version if pd.notna(half_version) and half_version else "Not Available"
+        half_margin_text = f"{float(half_margin):+.2f}" if pd.notna(half_margin) else "Not Available"
+        half_history_text = f"{int(half_history)} games" if pd.notna(half_history) else "Not Available"
+        half_status = (
+            "No stored first-half prediction" if half_version_text == "Not Available"
+            else "Insufficient first-half history" if pd.isna(half_margin)
+            else row.get("Early Edge", "Pass")
+        )
+        st.markdown(f"""
+        | Metric | Value |
+        |---|---|
+        | Status | {half_status} |
+        | Model Version | {half_version_text} |
+        | Home Margin (points) | {half_margin_text} |
+        | Minimum Team History | {half_history_text} |
+        | Result | {row.get("First Half Result") or "No Signal"} |
+        """)
 
         st.markdown("### Challenger Track")
         st.markdown(f"""
