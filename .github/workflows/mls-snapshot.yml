@@ -1,8 +1,7 @@
 name: MLS Slate Snapshot
 
 on:
-  schedule:
-    - cron: "0 * * * *"
+  # Automatic snapshots paused until explicitly re-enabled.
   workflow_dispatch:
     inputs:
       slate_date:

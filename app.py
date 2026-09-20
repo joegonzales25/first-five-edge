@@ -8,7 +8,7 @@ import json
 import re
 import sqlite3
 from zoneinfo import ZoneInfo
-from mlb_agent import get_today_games, team_abbreviation
+from mlb_agent import get_today_games, team_abbreviation, game_status_sort_value
 from nfl_agent import (
     build_current_slate,
     build_historical_lab,
@@ -6014,6 +6014,13 @@ def render_nfl_current(selected_filter_override=None):
         st.info("No NFL games match the selected filter.")
         return
 
+    filtered = filtered.assign(
+        **{"Status Sort": filtered["Status"].map(game_status_sort_value)}
+    ).sort_values(
+        ["Status Sort", "Sort Date", "Game"],
+        ascending=True,
+        na_position="last",
+    )
     for _, row in filtered.iterrows():
         render_nfl_card(row)
 
