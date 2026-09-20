@@ -14,13 +14,42 @@ def date_range_param(start_date: date, end_date: date) -> str:
 
 
 def fetch_wnba_scoreboard(start_date: date, end_date: date, limit: int = 500) -> dict:
-    response = requests.get(
-        ESPN_WNBA_SCOREBOARD_URL,
-        params={"dates": date_range_param(start_date, end_date), "limit": limit},
-        timeout=20,
-    )
-    response.raise_for_status()
-    return response.json()
+    def fetch_dates(dates):
+        response = requests.get(
+            ESPN_WNBA_SCOREBOARD_URL,
+            params={"dates": dates, "limit": limit},
+            timeout=20,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload.get("events"), list):
+            raise ValueError("ESPN WNBA response is missing its events list")
+        return payload
+
+    events = {}
+    cursor = start_date
+    while cursor <= end_date:
+        chunk_end = min(cursor + timedelta(days=7), end_date)
+        try:
+            payloads = [fetch_dates(
+                f"{cursor:%Y%m%d}" if cursor == chunk_end
+                else date_range_param(cursor, chunk_end)
+            )]
+        except requests.HTTPError as exc:
+            if cursor == chunk_end or exc.response is None or exc.response.status_code != 400:
+                raise
+            payloads = [fetch_dates(f"{cursor + timedelta(days=offset):%Y%m%d}")
+                        for offset in range((chunk_end - cursor).days + 1)]
+        for payload in payloads:
+            for event in payload["events"]:
+                if not event.get("id"):
+                    raise ValueError("ESPN WNBA event is missing its id")
+                events[str(event["id"])] = event
+        if chunk_end == end_date:
+            break
+        # Overlap range boundaries; event IDs prevent double-counting games.
+        cursor = chunk_end
+    return {"events": list(events.values())}
 
 
 def competitor_by_side(competition: dict, side: str) -> dict:
