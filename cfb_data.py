@@ -87,20 +87,41 @@ def fetch_espn_season(
     start_date: date,
     end_date: date,
 ) -> dict:
-    response = requests.get(
-        ESPN_CFB_SCOREBOARD_URL,
-        params={
-            "dates": (
-                f"{start_date.strftime('%Y%m%d')}-"
-                f"{end_date.strftime('%Y%m%d')}"
-            ),
-            "groups": 80,
-            "limit": 1000,
-        },
-        timeout=45,
-    )
-    response.raise_for_status()
-    return response.json()
+    events = {}
+    cursor = start_date
+    while cursor <= end_date:
+        chunk_end = min(cursor + timedelta(days=7), end_date)
+        if cursor == chunk_end:
+            payloads = [fetch_espn_scoreboard(cursor)]
+        else:
+            response = requests.get(
+                ESPN_CFB_SCOREBOARD_URL,
+                params={
+                    "dates": f"{cursor:%Y%m%d}-{chunk_end:%Y%m%d}",
+                    "groups": 80,
+                    "limit": 1000,
+                },
+                timeout=45,
+            )
+            if response.status_code == 400:
+                # Some range requests are rejected; retain full history via dates.
+                payloads = [fetch_espn_scoreboard(cursor + timedelta(days=offset))
+                            for offset in range((chunk_end - cursor).days + 1)]
+            else:
+                response.raise_for_status()
+                payloads = [response.json()]
+        for payload in payloads:
+            if not isinstance(payload.get("events"), list):
+                raise ValueError("ESPN CFB response is missing its events list")
+            for event in payload["events"]:
+                if not event.get("id"):
+                    raise ValueError("ESPN CFB event is missing its id")
+                events[str(event["id"])] = event
+        if chunk_end == end_date:
+            break
+        # Overlap boundaries because range end-date inclusion can vary.
+        cursor = chunk_end
+    return {"events": list(events.values())}
 
 
 def fetch_espn_fbs_teams() -> dict[str, str]:

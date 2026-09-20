@@ -1,8 +1,11 @@
 import unittest
 from datetime import date
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+
+import requests
 
 from cfb_data import (
+    fetch_espn_season,
     load_cfb_prior_season,
     load_cfb_season,
     normalize_espn_games,
@@ -126,6 +129,47 @@ class CfbDataTests(unittest.TestCase):
         )
 
         self.assertTrue(games.empty)
+
+
+class EspnRangeTests(unittest.TestCase):
+    @patch("cfb_data.requests.get")
+    def test_weekly_ranges_overlap_and_deduplicate(self, get):
+        get.return_value = Mock(status_code=200)
+        get.return_value.json.return_value = {"events": [{"id": "1"}]}
+        result = fetch_espn_season(date(2026, 9, 1), date(2026, 9, 16))
+        self.assertEqual([call.kwargs["params"]["dates"] for call in get.call_args_list],
+                         ["20260901-20260908", "20260908-20260915", "20260915-20260916"])
+        self.assertEqual(result, {"events": [{"id": "1"}]})
+
+    @patch("cfb_data.fetch_espn_scoreboard")
+    @patch("cfb_data.requests.get")
+    def test_400_falls_back_to_each_date(self, get, daily):
+        get.return_value = Mock(status_code=400)
+        daily.side_effect = [{"events": [{"id": "1"}]}, {"events": [{"id": "2"}]}]
+        result = fetch_espn_season(date(2026, 9, 1), date(2026, 9, 2))
+        self.assertEqual([call.args[0] for call in daily.call_args_list],
+                         [date(2026, 9, 1), date(2026, 9, 2)])
+        self.assertEqual(len(result["events"]), 2)
+
+    @patch("cfb_data.fetch_espn_scoreboard")
+    @patch("cfb_data.requests.get")
+    def test_daily_failure_is_not_silently_skipped(self, get, daily):
+        get.return_value = Mock(status_code=400)
+        daily.side_effect = requests.HTTPError("400")
+        with self.assertRaises(requests.HTTPError):
+            fetch_espn_season(date(2026, 9, 1), date(2026, 9, 2))
+
+    @patch("cfb_data.requests.get")
+    def test_other_http_errors_propagate(self, get):
+        get.return_value = Mock(status_code=503)
+        get.return_value.raise_for_status.side_effect = requests.HTTPError("503")
+        with self.assertRaises(requests.HTTPError):
+            fetch_espn_season(date(2026, 9, 1), date(2026, 9, 2))
+
+    @patch("cfb_data.fetch_espn_scoreboard", return_value={"events": []})
+    def test_single_day(self, daily):
+        self.assertEqual(fetch_espn_season(date(2026, 9, 1), date(2026, 9, 1)), {"events": []})
+        daily.assert_called_once_with(date(2026, 9, 1))
 
 
 if __name__ == "__main__":
