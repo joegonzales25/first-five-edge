@@ -5622,7 +5622,7 @@ def render_nfl_performance():
     columns = st.columns(3)
     with columns[0]:
         confidence_filter = st.selectbox(
-            "Confidence",
+            "Side Confidence",
             ["All", "A", "B", "C", "Pass"],
             key="nfl_performance_confidence",
         )
@@ -5713,6 +5713,30 @@ def render_nfl_performance():
                                 row, market, segment, model_track
                             ),
                             "Confidence": row_confidence,
+                            "Side Confidence": row_confidence,
+                            "Scoring Confidence": "Uncalibrated",
+                            "Side Score (margin points)": abs(float(
+                                row.get("model_margin")
+                                if model_track == "Baseline"
+                                else row.get("challenger_model_margin")
+                            )) if (
+                                row.get("model_margin")
+                                if model_track == "Baseline"
+                                else row.get("challenger_model_margin")
+                            ) is not None else None,
+                            "Scoring Score (total deviation points)": (
+                                abs(float(
+                                    row.get("projected_total")
+                                    if model_track == "Baseline"
+                                    else row.get("challenger_projected_total")
+                                ) - float(row["league_total_baseline"]))
+                                if row.get("league_total_baseline") is not None
+                                and (
+                                    row.get("projected_total")
+                                    if model_track == "Baseline"
+                                    else row.get("challenger_projected_total")
+                                ) is not None else None
+                            ),
                             "Score": (
                                 row.get("edge_score")
                                 if model_track == "Baseline"

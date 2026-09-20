@@ -593,8 +593,9 @@ def record_nfl_history(
                         now_text,
                     ),
                 )
-                counts["updated"] += 1
-                continue
+                existing = existing_snapshot(
+                    connection, game_id, market_version, model_version
+                )
 
             should_lock = not is_open
             update_result(

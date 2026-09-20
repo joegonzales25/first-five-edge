@@ -1,10 +1,15 @@
 import math
 import unittest
+import sqlite3
+from datetime import datetime, timezone
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
 
-from nfl_model_history import db_values, insert_values, safe_float
+from nfl_model_history import (
+    db_values, insert_values, safe_float, record_nfl_history,
+)
 
 
 class CapturingConnection:
@@ -16,6 +21,48 @@ class CapturingConnection:
 
 
 class NflModelHistoryTests(unittest.TestCase):
+    def test_pregame_tier_changes_refresh_results_and_locked_pick_is_preserved(self):
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        from contextlib import nullcontext
+
+        row = {
+            "Game ID": "2026_02_IND_KC", "Game": "IND @ KC",
+            "Scheduled Kickoff": "2026-09-20T20:00:00+00:00",
+            "Slate Date": "2026-09-20", "Status": "Scheduled",
+            "Predicted Winner": "KC", "Side Edge": "Pass",
+            "Side Tracking Segment": "No Edge", "Confidence": "Pass",
+            "Scoring Tracking Segment": "No Edge",
+            "Scoring Edge": "Neutral Scoring Environment",
+        }
+        now = datetime(2026, 9, 20, 12, tzinfo=timezone.utc)
+        try:
+            with patch("nfl_model_history.connect", return_value=nullcontext(connection)):
+                record_nfl_history(pd.DataFrame([row]), "test", "test", now=now)
+                row.update({
+                    "Side Edge": "KC Edge", "Side Tracking Segment": "Official", "Confidence": "C",
+                    "Scoring Edge": "High Scoring Environment", "Scoring Tracking Segment": "Official",
+                    "League Total Baseline": 44,
+                })
+                record_nfl_history(pd.DataFrame([row]), "test", "test", now=now)
+                stored = dict(connection.execute("SELECT * FROM nfl_model_history").fetchone())
+                self.assertEqual(stored["side_result"], "Pending")
+                self.assertEqual(stored["scoring_result"], "Pending")
+                self.assertEqual(stored["side_tracking_segment"], "Official")
+                row.update({"Side Edge": "Pass", "Side Tracking Segment": "No Edge"})
+                record_nfl_history(pd.DataFrame([row]), "test", "test", now=now)
+                self.assertEqual(connection.execute("SELECT side_result FROM nfl_model_history").fetchone()[0], "No Signal")
+                row.update({"Side Edge": "KC Edge", "Side Tracking Segment": "Official"})
+                record_nfl_history(pd.DataFrame([row]), "test", "test", now=now)
+                connection.execute("UPDATE nfl_model_history SET snapshot_status = 'Locked'")
+                row.update({"Predicted Winner": "IND", "Status": "Final", "Actual Winner": "KC", "Away Score": 10, "Home Score": 20, "Actual Total": 30})
+                record_nfl_history(pd.DataFrame([row]), "test", "test", now=now)
+                stored = dict(connection.execute("SELECT * FROM nfl_model_history").fetchone())
+                self.assertEqual(stored["predicted_winner"], "KC")
+                self.assertEqual(stored["side_result"], "Correct")
+        finally:
+            connection.close()
+
     def test_safe_float_rejects_missing_and_non_finite_values(self):
         for value in [pd.NA, np.nan, math.inf, -math.inf]:
             with self.subTest(value=value):
