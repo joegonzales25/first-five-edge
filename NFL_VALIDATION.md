@@ -35,3 +35,17 @@ Capture moneyline prices for winner picks; spread and total lines require their 
 ## Reconciliation
 
 The snapshot writer now refreshes result fields after updating a Pregame prediction. The next NFL snapshot run repairs stale Pending/No Signal states for games in its processing window. Locked predictions remain immutable and are graded using their stored selections. Older games outside the window require an explicit run for their date; do not assume a deployment itself repaired production records.
+# Pregame Team Comparisons
+
+The NFL snapshot stores informational current-season offense, defense, league
+averages, and each team's last five completed regular-season games in
+`pregame_analysis`. Yardage comes from nflverse weekly team stats; passing yards
+are gross (before sack deductions). Defensive yardage is the opponent's offense.
+Each average includes its own nonmissing team-game count. Missing data is not zero.
+
+Comparisons are captured only before kickoff, using completed games at least six
+hours earlier than the snapshot. Existing snapshot locking freezes this JSON;
+result updates do not rewrite it. Source outages preserve previously saved
+comparisons. Older games without a pregame capture remain unavailable rather than
+receiving reconstructed analysis. New cards populate after a successful pregame
+NFL snapshot run. No baseline or challenger weights use these display statistics.

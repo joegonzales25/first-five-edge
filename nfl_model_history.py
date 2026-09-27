@@ -139,6 +139,7 @@ def init_db(connection):
         for row in fetch_rows(connection, "PRAGMA table_info(nfl_model_history)")
     }
     optional_columns = {
+        "pregame_analysis": "TEXT",
         "first_half_version": "TEXT",
         "first_half_pick": "TEXT",
         "first_half_margin": "REAL",
@@ -294,6 +295,7 @@ def grade_scoring(segment, pick, actual_total, baseline, completed):
 
 def prediction_values(row, market_version, model_version, now_text):
     return {
+        "pregame_analysis": row.get("Pregame Analysis"),
         "first_half_version": row.get("First Half Version"),
         "first_half_pick": row.get("First Half Pick"),
         "first_half_margin": safe_float(row.get("First Half Margin")),
@@ -479,6 +481,8 @@ def update_prediction(connection, row_id, values):
         "snapshot_status",
     }
     columns = [column for column in values if column not in immutable]
+    if not values.get("pregame_analysis"):
+        columns = [column for column in columns if column != "pregame_analysis"]
     if not values.get("first_half_version"):
         columns = [column for column in columns if not column.startswith("first_half_")]
     connection.execute(
@@ -586,6 +590,7 @@ def record_nfl_history(
                     now_text,
                 )
                 if not is_open:
+                    values["pregame_analysis"] = None
                     values["snapshot_status"] = "Not Tracked"
                     values["locked_at"] = now_text
                     counts["not_tracked"] += 1

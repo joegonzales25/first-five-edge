@@ -37,11 +37,15 @@ class NflModelHistoryTests(unittest.TestCase):
             "Away": "IND", "Home": "KC",
             "First Half Version": "0.1.0-watch", "First Half Pick": "KC",
             "First Half Tracking Segment": "Watch", "First Half Margin": 3.0,
+            "Pregame Analysis": '{"version":1,"as_of":"pregame"}',
         }
         now = datetime(2026, 9, 20, 12, tzinfo=timezone.utc)
         try:
             with patch("nfl_model_history.connect", return_value=nullcontext(connection)):
                 record_nfl_history(pd.DataFrame([row]), "test", "test", now=now)
+                row["Pregame Analysis"] = None
+                record_nfl_history(pd.DataFrame([row]), "test", "test", now=now)
+                self.assertIn("pregame", connection.execute("SELECT pregame_analysis FROM nfl_model_history").fetchone()[0])
                 row.update({
                     "Side Edge": "KC Edge", "Side Tracking Segment": "Official", "Confidence": "C",
                     "Scoring Edge": "High Scoring Environment", "Scoring Tracking Segment": "Official",
@@ -59,6 +63,7 @@ class NflModelHistoryTests(unittest.TestCase):
                 row.update({"Side Edge": "KC Edge", "Side Tracking Segment": "Official"})
                 record_nfl_history(pd.DataFrame([row]), "test", "test", now=now)
                 connection.execute("UPDATE nfl_model_history SET snapshot_status = 'Locked'")
+                row["Pregame Analysis"] = '{"as_of":"after kickoff"}'
                 row.update({"First Half Pick": "IND", "Away First Half": 7, "Home First Half": 7})
                 row.update({"Predicted Winner": "IND", "Status": "Final", "Actual Winner": "KC", "Away Score": 10, "Home Score": 20, "Actual Total": 30})
                 record_nfl_history(pd.DataFrame([row]), "test", "test", now=now)
@@ -67,6 +72,10 @@ class NflModelHistoryTests(unittest.TestCase):
                 self.assertEqual(stored["side_result"], "Correct")
                 self.assertEqual(stored["first_half_pick"], "KC")
                 self.assertEqual(stored["first_half_result"], "Push")
+                self.assertIn("pregame", stored["pregame_analysis"])
+                late = {**row, "Game ID": "late-first-seen"}
+                record_nfl_history(pd.DataFrame([late]), "test", "test", now=now)
+                self.assertIsNone(connection.execute("SELECT pregame_analysis FROM nfl_model_history WHERE game_id = 'late-first-seen'").fetchone()[0])
                 row.pop("Away First Half")
                 row.pop("Home First Half")
                 record_nfl_history(pd.DataFrame([row]), "test", "test", now=now)

@@ -4315,6 +4315,63 @@ def render_nfl_analysis_sections(row):
         st.markdown("| Metric | Value |\n|---|---|\n" + table_rows)
 
 
+def render_nfl_pregame_comparison(row):
+    raw = row.get("Pregame Analysis")
+    try:
+        analysis = json.loads(raw) if isinstance(raw, str) else raw
+    except (ValueError, TypeError):
+        analysis = None
+    st.markdown("### Pregame Team Comparison")
+    if not isinstance(analysis, dict) or not analysis.get("teams"):
+        st.caption("Pregame comparison unavailable: no saved pregame analysis.")
+        return
+    away, home = row.get("Away"), row.get("Home")
+    teams, league = analysis["teams"], analysis["league"]
+    st.caption(
+        f"{analysis['season']} regular season | As of: {format_snapshot_time(analysis['as_of'])} | "
+        f"Results through: {analysis.get('through') or 'Unavailable'} | Source: nflverse"
+    )
+    st.caption("Pregame context only; not additional model inputs. Passing yards exclude sack deductions.")
+    if row.get("Snapshot Status") == "Locked":
+        st.caption("Frozen pregame analysis")
+
+    def cell(summary, key, reference=None):
+        value = summary.get(key)
+        if value is None:
+            return "Unavailable"
+        delta = f" ({value - reference:+.1f})" if reference is not None else ""
+        return f"{value:.1f}{delta}; n={summary.get(key + '_games', 0)}"
+
+    for heading, metrics in (
+        ("Offense", (("Points/game", "points"), ("Pass yards/game", "passing"), ("Rush yards/game", "rushing"))),
+        ("Defense", (("Points allowed/game", "points_allowed"), ("Pass yards allowed/game", "passing_allowed"), ("Rush yards allowed/game", "rushing_allowed"))),
+    ):
+        st.markdown(f"#### {heading}")
+        st.caption("Difference from league average in parentheses; n = games with data." +
+                   (" Lower is better for defense." if heading == "Defense" else ""))
+        lines = [f"| Metric | {away} | League | {home} |", "|---|---|---|---|"]
+        for label, key in metrics:
+            reference = league.get(key)
+            lines.append(f"| {label} | {cell(teams.get(away, {}), key, reference)} | {cell(league, key)} | {cell(teams.get(home, {}), key, reference)} |")
+        st.markdown("\n".join(lines))
+    st.markdown("#### Last Five Games")
+    for team in (away, home):
+        recent = teams.get(team, {}).get("last_five", [])
+        st.markdown(f"**{team}**")
+        if not recent:
+            st.caption("No completed regular-season games before this snapshot.")
+            continue
+        wins = sum(game["result"] == "W" for game in recent)
+        losses = sum(game["result"] == "L" for game in recent)
+        ties = sum(game["result"] == "T" for game in recent)
+        summary = teams[team]["last_five_summary"]
+        st.caption(f"{wins}-{losses}-{ties} | {summary['points']:.1f} points/game | {summary['points_allowed']:.1f} allowed/game | {len(recent)} games")
+        lines = ["| Date | Opponent | Venue | Result | Score |", "|---|---|---|---|---|"]
+        for game in recent:
+            lines.append(f"| {game['date']} | {game['opponent']} | {game['venue']} | {game['result']} | {game['points']:.0f}-{game['points_allowed']:.0f} |")
+        st.markdown("\n".join(lines))
+
+
 def render_nfl_card(row, historical=False):
     away_team, home_team = split_game_name(row["Game"])
     card_anchor = f"nfl-{game_anchor(row['Game'])}"
@@ -4414,6 +4471,8 @@ def render_nfl_card(row, historical=False):
     """)
 
     with st.expander(f"\U0001f50d Analysis: {row['Game']}"):
+        if not historical:
+            render_nfl_pregame_comparison(row)
         discovery_labels = [
             row.get("Side Discovery Label"),
             row.get("Scoring Discovery Label"),
@@ -5168,6 +5227,7 @@ def nfl_slate_from_history(rows):
                 "Actual Winner": row.get("actual_winner"),
                 "Actual Total": row.get("actual_total"),
                 "Predicted Winner": row.get("predicted_winner"),
+                "Pregame Analysis": row.get("pregame_analysis"),
                 "Model Signal": row.get("model_signal") or "Pass",
                 "Edge Score": row.get("edge_score") or 0,
                 "Confidence": row.get("confidence") or "Pass",
