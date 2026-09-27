@@ -657,6 +657,9 @@ st.markdown("""
 .result-loss {
     background: #dc2626;
 }
+.result-tie {
+    background: #64748b;
+}
 
 .sport-picker {
     display: flex;
@@ -1227,7 +1230,7 @@ def render_last_five_results(row):
 
         for result in results:
             outcome = str(result.get("Result", "")).upper()
-            badge_class = "result-win" if outcome == "W" else "result-loss"
+            badge_class = "result-win" if outcome == "W" else "result-tie" if outcome == "T" else "result-loss"
             rows.append(
                 "<tr>"
                 f"<td>{escape(str(result.get('Date', '')))}</td>"
@@ -4354,22 +4357,23 @@ def render_nfl_pregame_comparison(row):
             reference = league.get(key)
             lines.append(f"| {label} | {cell(teams.get(away, {}), key, reference)} | {cell(teams.get(home, {}), key, reference)} |")
         st.markdown("\n".join(lines))
-    st.markdown("#### Last Five Games")
-    for team in (away, home):
+    st.markdown("### Last 5 Game Results")
+    recent_row = {}
+    for side, team in (("Away", away), ("Home", home)):
         recent = teams.get(team, {}).get("last_five", [])
-        st.markdown(f"**{team}**")
-        if not recent:
-            st.caption("No completed regular-season games before this snapshot.")
-            continue
-        wins = sum(game["result"] == "W" for game in recent)
-        losses = sum(game["result"] == "L" for game in recent)
-        ties = sum(game["result"] == "T" for game in recent)
-        summary = teams[team]["last_five_summary"]
-        st.caption(f"{wins}-{losses}-{ties} | {summary['points']:.1f} points/game | {summary['points_allowed']:.1f} allowed/game | {len(recent)} games")
-        lines = ["| Date | Opponent | Venue | Result | Score |", "|---|---|---|---|---|"]
+        results = []
         for game in recent:
-            lines.append(f"| {game['date']} | {game['opponent']} | {game['venue']} | {game['result']} | {game['points']:.0f}-{game['points_allowed']:.0f} |")
-        st.markdown("\n".join(lines))
+            venue = "@" if game["venue"] == "Away" else "vs (N)" if game["venue"] == "Neutral" else "vs"
+            results.append({
+                "Team": team, "Sort Date": game["date"],
+                "Date": pd.Timestamp(game["date"]).strftime("%m/%d"),
+                "Opponent": f"{venue} {game['opponent']}", "Result": game["result"],
+                "Score": f"{game['points']:.0f}-{game['points_allowed']:.0f}",
+            })
+        recent_row[f"{side} Last 5 Results"] = results
+        if not recent:
+            st.caption(f"{team}: no completed regular-season games before this snapshot.")
+    st.html(render_last_five_results(recent_row))
 
 
 def render_nfl_card(row, historical=False):

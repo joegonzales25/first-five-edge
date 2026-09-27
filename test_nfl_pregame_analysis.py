@@ -62,7 +62,10 @@ class PregameAnalysisTests(unittest.TestCase):
         analysis = build_analysis(games, stats, 2026, "IND", "KC", "2026-09-20T12:00Z")
         tree = ast.parse(Path(__file__).with_name("app.py").read_text(encoding="utf-8-sig"))
         function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "render_nfl_pregame_comparison")
-        source = "import streamlit as st\nimport json\nformat_snapshot_time = str\n" + ast.unparse(function)
+        shared = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "render_last_five_results")
+        source = ("import streamlit as st\nimport json\nimport pandas as pd\nfrom html import escape\n"
+                  "format_snapshot_time = str\nget_row_value = lambda row, key, default: row.get(key, default)\n"
+                  + ast.unparse(shared) + "\n" + ast.unparse(function))
         row = {"Away": "IND", "Home": "KC", "Snapshot Status": "Locked", "Pregame Analysis": json.dumps(analysis)}
         rendered = AppTest.from_string(source + "\nrender_nfl_pregame_comparison(" + repr(row) + ")").run()
         self.assertEqual(len(rendered.exception), 0)
@@ -73,7 +76,22 @@ class PregameAnalysisTests(unittest.TestCase):
         self.assertNotIn("| League |", text)
         self.assertNotIn("n=", text)
         self.assertNotIn("n =", "\n".join(item.value for item in rendered.caption))
-        self.assertIn("Last Five Games", text)
+        self.assertIn("Last 5 Game Results", text)
+        from unittest.mock import Mock
+        scope = {}
+        exec(source, scope)
+        scope["st"] = Mock()
+        scope["render_nfl_pregame_comparison"](row)
+        html = scope["st"].html.call_args.args[0]
+        self.assertEqual(html.count('class="last-five-table"'), 2)
+        self.assertIn("@ KC", html)
+        self.assertIn("vs IND", html)
+        self.assertIn("09/06", html)
+        self.assertIn("result-win", html)
+        self.assertIn("result-loss", html)
+        self.assertNotIn("<th>Venue</th>", html)
+        tie_html = scope["render_last_five_results"]({"Away Last 5 Results": [{"Result": "T"}]})
+        self.assertIn("result-tie", tie_html)
         self.assertIn("Frozen pregame analysis", "\n".join(item.value for item in rendered.caption))
         missing = AppTest.from_string(source + "\nrender_nfl_pregame_comparison({})").run()
         self.assertEqual(len(missing.exception), 0)
