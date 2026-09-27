@@ -8,7 +8,7 @@ import json
 import re
 import sqlite3
 from zoneinfo import ZoneInfo
-from mlb_agent import get_today_games, team_abbreviation, game_status_sort_value
+from mlb_agent import get_today_games, team_abbreviation
 from nfl_agent import (
     build_current_slate,
     build_historical_lab,
@@ -4340,14 +4340,14 @@ def render_nfl_pregame_comparison(row):
         if value is None:
             return "Unavailable"
         delta = f" ({value - reference:+.1f})" if reference is not None else ""
-        return f"{value:.1f}{delta}; n={summary.get(key + '_games', 0)}"
+        return f"{value:.1f}{delta}"
 
     for heading, metrics in (
         ("Offense", (("Points/game", "points"), ("Pass yards/game", "passing"), ("Rush yards/game", "rushing"))),
         ("Defense", (("Points allowed/game", "points_allowed"), ("Pass yards allowed/game", "passing_allowed"), ("Rush yards allowed/game", "rushing_allowed"))),
     ):
         st.markdown(f"#### {heading}")
-        st.caption("Difference from league average in parentheses; n = games with data." +
+        st.caption("Difference from league average in parentheses." +
                    (" Lower is better for defense." if heading == "Defense" else ""))
         lines = [f"| Metric | {away} | {home} |", "|---|---|---|"]
         for label, key in metrics:
@@ -5342,6 +5342,27 @@ def format_nfl_schedule_caption(schedule_rows):
     return f"Schedule as of: {format_snapshot_time(max(timestamps))}"
 
 
+def sort_nfl_game_cards(games, now=None):
+    if games.empty:
+        return games
+    now = pd.to_datetime(now, utc=True) if now is not None else pd.Timestamp.now(tz="UTC")
+    ordered = games.copy()
+    ordered["Sort Date"] = pd.to_datetime(ordered["Sort Date"], utc=True, errors="coerce")
+
+    def priority(row):
+        status = str(row.get("Status") or "").strip().lower()
+        if any(term in status for term in ("final", "game over", "completed", "cancel", "postpon")):
+            return 2
+        if any(term in status for term in ("in progress", "in_progress", "halftime", "half time", "delayed", "suspended", "live")):
+            return 1
+        # A lagging Scheduled status must not keep past-kickoff games on top.
+        kickoff = row["Sort Date"]
+        return 1 if pd.notna(kickoff) and kickoff <= now else 0
+
+    ordered["Status Sort"] = ordered.apply(priority, axis=1)
+    return ordered.sort_values(["Status Sort", "Sort Date", "Game"], na_position="last")
+
+
 def nfl_card_status(schedule, snapshot):
     schedule_status = schedule.get("status")
     snapshot_status = snapshot.get("Status")
@@ -6088,13 +6109,7 @@ def render_nfl_current(selected_filter_override=None):
         st.info("No NFL games match the selected filter.")
         return
 
-    filtered = filtered.assign(
-        **{"Status Sort": filtered["Status"].map(game_status_sort_value)}
-    ).sort_values(
-        ["Status Sort", "Sort Date", "Game"],
-        ascending=True,
-        na_position="last",
-    )
+    filtered = sort_nfl_game_cards(filtered)
     for _, row in filtered.iterrows():
         render_nfl_card(row)
 

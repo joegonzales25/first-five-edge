@@ -71,6 +71,8 @@ class PregameAnalysisTests(unittest.TestCase):
         self.assertIn("300.0 (+100.0)", text)
         self.assertEqual(text.count("| Metric | IND | KC |"), 2)
         self.assertNotIn("| League |", text)
+        self.assertNotIn("n=", text)
+        self.assertNotIn("n =", "\n".join(item.value for item in rendered.caption))
         self.assertIn("Last Five Games", text)
         self.assertIn("Frozen pregame analysis", "\n".join(item.value for item in rendered.caption))
         missing = AppTest.from_string(source + "\nrender_nfl_pregame_comparison({})").run()
