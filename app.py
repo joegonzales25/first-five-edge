@@ -4349,10 +4349,10 @@ def render_nfl_pregame_comparison(row):
         st.markdown(f"#### {heading}")
         st.caption("Difference from league average in parentheses; n = games with data." +
                    (" Lower is better for defense." if heading == "Defense" else ""))
-        lines = [f"| Metric | {away} | League | {home} |", "|---|---|---|---|"]
+        lines = [f"| Metric | {away} | {home} |", "|---|---|---|"]
         for label, key in metrics:
             reference = league.get(key)
-            lines.append(f"| {label} | {cell(teams.get(away, {}), key, reference)} | {cell(league, key)} | {cell(teams.get(home, {}), key, reference)} |")
+            lines.append(f"| {label} | {cell(teams.get(away, {}), key, reference)} | {cell(teams.get(home, {}), key, reference)} |")
         st.markdown("\n".join(lines))
     st.markdown("#### Last Five Games")
     for team in (away, home):

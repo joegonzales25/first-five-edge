@@ -69,6 +69,8 @@ class PregameAnalysisTests(unittest.TestCase):
         text = "\n".join(item.value for item in rendered.markdown)
         self.assertIn("Pass yards allowed/game", text)
         self.assertIn("300.0 (+100.0)", text)
+        self.assertEqual(text.count("| Metric | IND | KC |"), 2)
+        self.assertNotIn("| League |", text)
         self.assertIn("Last Five Games", text)
         self.assertIn("Frozen pregame analysis", "\n".join(item.value for item in rendered.caption))
         missing = AppTest.from_string(source + "\nrender_nfl_pregame_comparison({})").run()
