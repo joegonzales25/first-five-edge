@@ -55,6 +55,16 @@ def event(completed=True):
 
 
 class CfbDataTests(unittest.TestCase):
+    def test_preserves_top_25_ranks_and_ignores_unranked_sentinel(self):
+        payload = event()
+        competitors = payload["competitions"][0]["competitors"]
+        competitors[0]["curatedRank"] = {"current": 99}
+        competitors[1]["curatedRank"] = {"current": 25}
+        row = normalize_espn_games([payload], {"1": "SEC"}).iloc[0]
+        self.assertIsNone(row["away_rank"])
+        self.assertEqual(row["home_rank"], 25)
+        self.assertEqual(row["home_conference"], "SEC")
+
     def test_normalizes_espn_schedule_and_grading_fields(self):
         games = normalize_espn_games(
             [event()],

@@ -313,6 +313,15 @@ def espn_status(event: dict, competition: dict):
     )
 
 
+def espn_team_rank(competitor):
+    rank = (competitor.get("curatedRank") or {}).get("current")
+    try:
+        rank = int(rank)
+    except (TypeError, ValueError):
+        return None
+    return rank if 1 <= rank <= 25 else None
+
+
 def normalize_espn_games(
     events: list[dict],
     fbs_teams: dict[str, str] | None,
@@ -363,6 +372,8 @@ def normalize_espn_games(
                 "home_team_id": str(home_team.get("id") or ""),
                 "away_team": espn_team_name(away),
                 "home_team": espn_team_name(home),
+                "away_rank": espn_team_rank(away),
+                "home_rank": espn_team_rank(home),
                 "away_conference": fbs_teams.get(str(away_team.get("id")))
                 if fbs_teams
                 else None,
@@ -510,6 +521,8 @@ def apply_cfbd_enrichment(
     }
     enriched = games.copy()
     columns = [
+        "away_rank",
+        "home_rank",
         "away_conference",
         "home_conference",
         "away_classification",

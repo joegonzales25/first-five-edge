@@ -158,6 +158,16 @@ def init_db(connection):
         connection.execute(
             "ALTER TABLE cfb_model_history ADD COLUMN key_factors TEXT"
         )
+    for name, sql_type in {
+        "away_conference": "TEXT",
+        "home_conference": "TEXT",
+        "away_rank": "INTEGER",
+        "home_rank": "INTEGER",
+    }.items():
+        if name not in columns:
+            connection.execute(
+                f"ALTER TABLE cfb_model_history ADD COLUMN {name} {sql_type}"
+            )
     connection.commit()
 
 
@@ -239,6 +249,10 @@ def prediction_values(
         "game": row.get("Game"),
         "away_team": row.get("Away"),
         "home_team": row.get("Home"),
+        "away_conference": row.get("Away Conference"),
+        "home_conference": row.get("Home Conference"),
+        "away_rank": safe_int(row.get("Away Rank")),
+        "home_rank": safe_int(row.get("Home Rank")),
         "scheduled_kickoff": row.get("Scheduled Kickoff"),
         "market_version": market_version,
         "model_version": model_version,

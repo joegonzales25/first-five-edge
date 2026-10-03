@@ -8108,6 +8108,10 @@ def cfb_slate_from_history(rows):
                 "Game": base.get("game"),
                 "Away": base.get("away_team"),
                 "Home": base.get("home_team"),
+                "Away Conference": base.get("away_conference"),
+                "Home Conference": base.get("home_conference"),
+                "Away Rank": base.get("away_rank"),
+                "Home Rank": base.get("home_rank"),
                 "Away Score": base.get("away_score"),
                 "Home Score": base.get("home_score"),
                 "Away First Half": base.get("away_first_half"),
@@ -8411,6 +8415,19 @@ def render_cfb_performance_section():
             st.dataframe(pd.DataFrame(tables["market"]), hide_index=True)
 
 
+def filter_cfb_team_scope(games, selection):
+    if games.empty or selection == "All Teams":
+        return games
+    if selection == "Any Top 25 Team":
+        away_rank = pd.to_numeric(games["Away Rank"], errors="coerce")
+        home_rank = pd.to_numeric(games["Home Rank"], errors="coerce")
+        return games[away_rank.between(1, 25) | home_rank.between(1, 25)]
+    return games[
+        (games["Away Conference"] == selection)
+        | (games["Home Conference"] == selection)
+    ]
+
+
 def render_cfb_current():
     selected_view = selected_cfb_view("all")
     if selected_view == "perf":
@@ -8445,6 +8462,18 @@ def render_cfb_current():
 
     render_cfb_view_pills(selected_view)
     selected_tiers = render_secondary_filter_pills("CFB")
+    conferences = sorted({
+        str(value).strip()
+        for column in ["Away Conference", "Home Conference"]
+        for value in slate.get(column, pd.Series(dtype=object)).dropna()
+        if str(value).strip()
+    })
+    team_options = ["All Teams", "Any Top 25 Team", *conferences]
+    if st.session_state.get("cfb_team_scope", "All Teams") not in team_options:
+        st.session_state["cfb_team_scope"] = "All Teams"
+    team_scope = st.selectbox(
+        "Conference / Top 25", team_options, key="cfb_team_scope"
+    )
     base_filtered = filter_cfb_games(slate, selected_view)
     filtered = apply_secondary_filters(
         slate,
@@ -8453,6 +8482,7 @@ def render_cfb_current():
         selected_view,
         selected_tiers,
     )
+    filtered = filter_cfb_team_scope(filtered, team_scope)
     st.caption(f"{len(filtered)} of {len(slate)}")
     st.caption(format_snapshot_caption(history_rows))
     st.divider()
