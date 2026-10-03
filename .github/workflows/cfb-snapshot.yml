@@ -21,7 +21,6 @@ jobs:
       TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
       CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
       SNAPSHOT_SLATE_DATE: ${{ github.event.inputs.slate_date }}
-      CFB_STATS_CACHE: ${{ runner.temp }}/cfb-team-stats
 
     steps:
       - name: Check out repository
@@ -38,11 +37,13 @@ jobs:
       - name: Cache completed CFB boxscores
         uses: actions/cache@v4
         with:
-          path: ${{ env.CFB_STATS_CACHE }}
+          path: ${{ runner.temp }}/cfb-team-stats
           key: cfb-team-stats-v1-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: cfb-team-stats-v1-
 
       - name: Record CFB snapshot
+        env:
+          CFB_STATS_CACHE: ${{ runner.temp }}/cfb-team-stats
         run: |
           if [ -n "$SNAPSHOT_SLATE_DATE" ]; then
             python snapshot_cfb_slate.py --date "$SNAPSHOT_SLATE_DATE"
