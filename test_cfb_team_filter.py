@@ -9,6 +9,30 @@ from cfb_model_history import MARKETS, init_db, insert_prediction, prediction_va
 
 
 class CfbTeamFilterTests(unittest.TestCase):
+    def test_enriches_legacy_snapshot_by_game_id_without_overwriting_saved_data(self):
+        tree = ast.parse(Path("app.py").read_text(encoding="utf-8"))
+        function = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                        and node.name == "enrich_cfb_filter_metadata")
+        namespace = {"pd": pd}
+        exec(compile(ast.Module(body=[function], type_ignores=[]), "app.py", "exec"), namespace)
+        slate = pd.DataFrame({
+            "Game ID": ["1", "2"], "Away Conference": [None, "Saved Conference"],
+            "Home Conference": [None, None], "Away Rank": [None, 4],
+            "Home Rank": [None, None], "Side Pick": ["Alpha", "Beta"],
+        })
+        metadata = pd.DataFrame({
+            "game_id": ["2", "1"], "away_conference": ["SEC", "ACC"],
+            "home_conference": ["Big Ten", "SEC"], "away_rank": [10, 25],
+            "home_rank": [None, 1],
+        })
+        enriched = namespace["enrich_cfb_filter_metadata"](slate, metadata)
+        self.assertEqual(enriched.loc[0, "Away Conference"], "ACC")
+        self.assertEqual(enriched.loc[0, "Away Rank"], 25)
+        self.assertEqual(enriched.loc[1, "Away Conference"], "Saved Conference")
+        self.assertEqual(enriched.loc[1, "Away Rank"], 4)
+        self.assertEqual(enriched["Side Pick"].tolist(), ["Alpha", "Beta"])
+        self.assertTrue(pd.isna(slate.loc[0, "Away Conference"]))
+
     def test_filters_either_team_and_excludes_unknown_ranks(self):
         tree = ast.parse(Path("app.py").read_text(encoding="utf-8"))
         function = next(node for node in tree.body if isinstance(node, ast.FunctionDef)

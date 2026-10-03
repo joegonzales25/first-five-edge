@@ -75,6 +75,7 @@ from cfb_model_history import (
     load_cfb_performance_summary,
     load_cfb_performance_tables,
 )
+from cfb_data import fetch_espn_fbs_teams, fetch_espn_scoreboard, normalize_espn_games
 from mls_model_history import (
     load_mls_history,
     load_mls_performance_summary,
@@ -8415,6 +8416,33 @@ def render_cfb_performance_section():
             st.dataframe(pd.DataFrame(tables["market"]), hide_index=True)
 
 
+@st.cache_data(ttl=900)
+def load_cfb_filter_metadata(slate_date):
+    teams = fetch_espn_fbs_teams()
+    payload = fetch_espn_scoreboard(slate_date)
+    games = normalize_espn_games(payload.get("events") or [], teams)
+    return games, sorted({name for name in teams.values() if name})
+
+
+def enrich_cfb_filter_metadata(slate, metadata):
+    enriched = slate.copy()
+    if enriched.empty or metadata.empty:
+        return enriched
+    by_id = {str(row["game_id"]): row for _, row in metadata.iterrows()}
+    for index, game in enriched.iterrows():
+        source = by_id.get(str(game["Game ID"]))
+        if source is None:
+            continue
+        for display, field in {
+            "Away Conference": "away_conference", "Home Conference": "home_conference",
+            "Away Rank": "away_rank", "Home Rank": "home_rank",
+        }.items():
+            current = game.get(display)
+            if current is None or pd.isna(current) or current == "":
+                enriched.at[index, display] = source.get(field)
+    return enriched
+
+
 def filter_cfb_team_scope(games, selection):
     if games.empty or selection == "All Teams":
         return games
@@ -8462,12 +8490,20 @@ def render_cfb_current():
 
     render_cfb_view_pills(selected_view)
     selected_tiers = render_secondary_filter_pills("CFB")
+    available_conferences = []
+    metadata_columns = ["Away Conference", "Home Conference", "Away Rank", "Home Rank"]
+    if not slate.empty and slate[metadata_columns].isna().any().any():
+        try:
+            metadata, available_conferences = load_cfb_filter_metadata(selected_date)
+            slate = enrich_cfb_filter_metadata(slate, metadata)
+        except Exception:
+            st.caption("Conference and ranking details are temporarily unavailable for some games.")
     conferences = sorted({
         str(value).strip()
         for column in ["Away Conference", "Home Conference"]
         for value in slate.get(column, pd.Series(dtype=object)).dropna()
         if str(value).strip()
-    })
+    } | set(available_conferences))
     team_options = ["All Teams", "Any Top 25 Team", *conferences]
     if st.session_state.get("cfb_team_scope", "All Teams") not in team_options:
         st.session_state["cfb_team_scope"] = "All Teams"
