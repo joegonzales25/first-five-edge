@@ -1,4 +1,6 @@
 import json
+import math
+import numbers
 import os
 import sqlite3
 import tempfile
@@ -189,9 +191,30 @@ def safe_float(value):
     try:
         if value is None or pd.isna(value):
             return None
-        return float(value)
+        number = float(value)
+        return number if math.isfinite(number) else None
     except Exception:
         return None
+
+
+def db_value(value):
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, numbers.Real):
+        number = float(value)
+        if not math.isfinite(number):
+            return None
+        return int(value) if isinstance(value, numbers.Integral) else number
+    return value
+
+
+def db_values(values):
+    return [db_value(value) for value in values]
 
 
 def parse_kickoff(value):
@@ -322,7 +345,7 @@ def insert_prediction(connection, values):
         INSERT INTO cfb_model_history ({", ".join(columns)})
         VALUES ({placeholders})
         """,
-        [values[column] for column in columns],
+        db_values(values[column] for column in columns),
     )
 
 
@@ -345,7 +368,7 @@ def update_open_prediction(connection, row_id, values):
         "updated_at",
     ]
     for column in ("pregame_analysis", "away_conference", "home_conference", "away_rank", "home_rank"):
-        if values.get(column) is not None:
+        if db_value(values.get(column)) is not None:
             mutable.append(column)
     connection.execute(
         f"""
@@ -353,7 +376,7 @@ def update_open_prediction(connection, row_id, values):
         SET {", ".join(f"{column} = ?" for column in mutable)}
         WHERE id = ? AND snapshot_status = 'Pregame'
         """,
-        [values[column] for column in mutable] + [row_id],
+        db_values([values[column] for column in mutable] + [row_id]),
     )
 
 
@@ -380,7 +403,7 @@ def update_result(connection, row_id, values, should_lock):
             END
         WHERE id = ?
         """,
-        (
+        db_values((
             values["status"],
             values["away_score"],
             values["home_score"],
@@ -394,7 +417,7 @@ def update_result(connection, row_id, values, should_lock):
             values["updated_at"],
             should_lock,
             row_id,
-        ),
+        )),
     )
 
 

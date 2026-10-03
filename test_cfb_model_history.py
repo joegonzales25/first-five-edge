@@ -1,7 +1,9 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+import json
+import numpy as np
 
 import pandas as pd
 
@@ -13,6 +15,9 @@ from cfb_model_history import (
     load_pending_cfb_snapshots,
     prediction_values,
     reconcile_cfb_history,
+    update_open_prediction,
+    update_result,
+    safe_float,
 )
 
 
@@ -47,6 +52,36 @@ def snapshot_values(market, model_version, pick, baseline=52.0):
 
 
 class CfbModelHistoryTests(unittest.TestCase):
+    def test_nonfinite_and_pandas_missing_values_never_reach_driver(self):
+        values = snapshot_values("Full Game", "test", "Beta")
+        values.update({
+            "away_conference": float("nan"), "home_conference": pd.NA,
+            "pregame_analysis": float("nan"), "score": float("inf"),
+            "model_margin": float("-inf"), "projected_total": np.float64(52.5),
+            "season": np.int64(2026), "source_timestamp": pd.NaT,
+        })
+        connection = Mock()
+        insert_prediction(connection, values)
+        parameters = connection.execute.call_args.args[1]
+        encoded = json.dumps(parameters, allow_nan=False)
+        self.assertNotIn("NaN", encoded)
+        self.assertIn("52.5", encoded)
+        self.assertIn("2026", encoded)
+        update_open_prediction(connection, 1, values)
+        sql, parameters = connection.execute.call_args.args
+        json.dumps(parameters, allow_nan=False)
+        self.assertNotIn("pregame_analysis =", sql)
+        self.assertNotIn("away_conference =", sql)
+        self.assertNotIn("home_conference =", sql)
+        update_result(connection, 1, {
+            "status": pd.NA, "away_score": float("nan"), "home_score": None,
+            "away_first_half": None, "home_first_half": None,
+            "result": "Pending", "stored_outcome": "Pending", "updated_at": "now",
+            "graded_at": pd.NaT,
+        }, False)
+        json.dumps(connection.execute.call_args.args[1], allow_nan=False)
+        self.assertIsNone(safe_float(float("inf")))
+
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "cfb.sqlite3"
