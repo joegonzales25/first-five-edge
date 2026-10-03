@@ -8526,6 +8526,7 @@ def render_cfb_current():
         selected_tiers,
     )
     filtered = filter_cfb_team_scope(filtered, team_scope)
+    filtered = sort_nfl_game_cards(filtered)
     st.caption(f"{len(filtered)} of {len(slate)}")
     st.caption(format_snapshot_caption(history_rows))
     st.divider()
