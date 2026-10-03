@@ -163,6 +163,7 @@ def init_db(connection):
         "home_conference": "TEXT",
         "away_rank": "INTEGER",
         "home_rank": "INTEGER",
+        "pregame_analysis": "TEXT",
     }.items():
         if name not in columns:
             connection.execute(
@@ -253,6 +254,7 @@ def prediction_values(
         "home_conference": row.get("Home Conference"),
         "away_rank": safe_int(row.get("Away Rank")),
         "home_rank": safe_int(row.get("Home Rank")),
+        "pregame_analysis": row.get("Pregame Analysis"),
         "scheduled_kickoff": row.get("Scheduled Kickoff"),
         "market_version": market_version,
         "model_version": model_version,
@@ -342,6 +344,9 @@ def update_open_prediction(connection, row_id, values):
         "scheduled_kickoff",
         "updated_at",
     ]
+    for column in ("pregame_analysis", "away_conference", "home_conference", "away_rank", "home_rank"):
+        if values.get(column) is not None:
+            mutable.append(column)
     connection.execute(
         f"""
         UPDATE cfb_model_history

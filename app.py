@@ -4320,6 +4320,7 @@ def render_nfl_analysis_sections(row):
 
 
 def render_nfl_pregame_comparison(row):
+    is_cfb = row.get("Sport") == "CFB"
     raw = row.get("Pregame Analysis")
     try:
         analysis = json.loads(raw) if isinstance(raw, str) else raw
@@ -4333,9 +4334,10 @@ def render_nfl_pregame_comparison(row):
     teams, league = analysis["teams"], analysis["league"]
     st.caption(
         f"{analysis['season']} regular season | As of: {format_snapshot_time(analysis['as_of'])} | "
-        f"Results through: {analysis.get('through') or 'Unavailable'} | Source: nflverse"
+        f"Results through: {analysis.get('through') or 'Unavailable'} | Source: {analysis.get('source', 'nflverse')}"
     )
-    st.caption("Pregame context only; not additional model inputs. Passing yards exclude sack deductions.")
+    st.caption("Net passing yards include sack deductions." if is_cfb else
+               "Pregame context only; not additional model inputs. Passing yards exclude sack deductions.")
     if row.get("Snapshot Status") == "Locked":
         st.caption("Frozen pregame analysis")
 
@@ -4351,10 +4353,12 @@ def render_nfl_pregame_comparison(row):
         ("Defense", (("Points allowed/game", "points_allowed"), ("Pass yards allowed/game", "passing_allowed"), ("Rush yards allowed/game", "rushing_allowed"))),
     ):
         st.markdown(f"#### {heading}")
-        st.caption("Difference from league average in parentheses." +
+        st.caption(("Difference from FBS average in parentheses." if is_cfb else "Difference from league average in parentheses.") +
                    (" Lower is better for defense." if heading == "Defense" else ""))
         lines = [f"| Metric | {away} | {home} |", "|---|---|---|"]
         for label, key in metrics:
+            if is_cfb and key in {"passing", "passing_allowed"}:
+                label = "Net " + label.lower()
             reference = league.get(key)
             lines.append(f"| {label} | {cell(teams.get(away, {}), key, reference)} | {cell(teams.get(home, {}), key, reference)} |")
         st.markdown("\n".join(lines))
@@ -4912,15 +4916,17 @@ def render_wnba_card(row, historical=False):
     """)
 
     with st.expander(f"Analysis: {row['Game']}"):
-        discovery_labels = market_discovery_labels(row)
-        if discovery_labels:
-            st.markdown("### Discovery Signals")
-            for label in discovery_labels:
-                st.markdown(f"- {label}")
-
-        st.markdown("### Key Factors")
-        for factor in row["Key Factors List"]:
-            st.markdown(f"- {factor}")
+        if row.get("Sport") == "CFB":
+            render_nfl_pregame_comparison(row)
+        else:
+            discovery_labels = market_discovery_labels(row)
+            if discovery_labels:
+                st.markdown("### Discovery Signals")
+                for label in discovery_labels:
+                    st.markdown(f"- {label}")
+            st.markdown("### Key Factors")
+            for factor in row["Key Factors List"]:
+                st.markdown(f"- {factor}")
 
         st.markdown("### Model Detail")
         model_detail_rows = [
@@ -8113,6 +8119,7 @@ def cfb_slate_from_history(rows):
                 "Home Conference": base.get("home_conference"),
                 "Away Rank": base.get("away_rank"),
                 "Home Rank": base.get("home_rank"),
+                "Pregame Analysis": base.get("pregame_analysis"),
                 "Away Score": base.get("away_score"),
                 "Home Score": base.get("home_score"),
                 "Away First Half": base.get("away_first_half"),

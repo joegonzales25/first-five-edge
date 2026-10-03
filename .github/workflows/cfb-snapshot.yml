@@ -21,6 +21,7 @@ jobs:
       TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
       CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
       SNAPSHOT_SLATE_DATE: ${{ github.event.inputs.slate_date }}
+      CFB_STATS_CACHE: ${{ runner.temp }}/cfb-team-stats
 
     steps:
       - name: Check out repository
@@ -33,6 +34,13 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      - name: Cache completed CFB boxscores
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CFB_STATS_CACHE }}
+          key: cfb-team-stats-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: cfb-team-stats-v1-
 
       - name: Record CFB snapshot
         run: |

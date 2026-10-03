@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 
 from cfb_agent import build_current_slate
 from cfb_model_history import record_cfb_history
+from cfb_pregame_analysis import attach_pregame_analysis
 
 
 DEFAULT_TIMEZONE = "America/New_York"
@@ -42,6 +43,10 @@ def main():
     if slate is None or slate.empty:
         print(f"No CFB games found for {slate_date}; no snapshot required.")
         return 0
+    try:
+        slate = attach_pregame_analysis(slate)
+    except Exception as exc:
+        print(f"CFB pregame comparison unavailable: {exc}")
     counts = record_cfb_history(
         slate,
         slate_date,
