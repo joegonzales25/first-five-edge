@@ -4446,19 +4446,11 @@ def render_nfl_card(row, historical=False):
             &nbsp; - &nbsp; Total Error: <strong>{escape(str(row["Total Error"]))}</strong>
         </div>
         """
-    decision_state = row.get("Decision State")
-    decision_badge = (
-        f'<span class="badge badge-edge">{escape(str(decision_state))}</span>'
-        if decision_state
-        else ""
-    )
-
     st.html(f"""
     <div id="{card_anchor}" class="game-card">
         <span class="badge {nfl_signal_class(row)}">{escape(str(displayed_signal))}</span>
         <span class="badge badge-edge">Edge {escape(str(displayed_score))}</span>
         <span class="badge badge-edge">Confidence {escape(str(displayed_confidence))}</span>
-        {decision_badge}
 
         <div class="game-title">{escape(str(row["Game"]))}</div>
         <div class="muted">{escape(format_game_status_line(row))}</div>
@@ -4482,16 +4474,6 @@ def render_nfl_card(row, historical=False):
     with st.expander(f"\U0001f50d Analysis: {row['Game']}"):
         if not historical:
             render_nfl_pregame_comparison(row)
-        discovery_labels = [
-            row.get("Side Discovery Label"),
-            row.get("Scoring Discovery Label"),
-        ]
-        discovery_labels = [label for label in discovery_labels if label]
-        if discovery_labels:
-            st.markdown("### Discovery")
-            for label in discovery_labels:
-                st.markdown(f"- {label}")
-
         if historical:
             st.markdown("### Result Review")
             st.markdown(f"""
