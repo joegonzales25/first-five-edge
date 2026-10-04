@@ -614,9 +614,39 @@ environment setting.
 If coverage is incomplete, store `Awaiting features` and `Not Tracked`. Never
 copy the baseline decision into the challenger track.
 
-When no feature file is passed, the snapshot job reads the latest stored
-pregame feature snapshot for each game. Feature persistence and prediction
-history therefore remain separate even when one workflow performs both steps.
+When no feature file is passed, each NFL snapshot run first collects the free
+nflverse current-season play-by-play CSV, stores feature version `0.2.0-pbp`
+with source `nflverse-pbp-last5-v1`, then reads the latest stored features.
+Collection failure is logged without blocking baseline snapshots; stored
+features remain available. An explicit CSV overrides automatic collection.
+
+The collector targets unplayed games kicking off within the next 14 days.
+History is each team's last five completed regular-season games, with scores
+available and kickoff at least six hours before collection. Live games,
+postseason, kneels, spikes, and no-plays are excluded. At least two games must
+be represented on both offense and defense. Missing metrics stay missing.
+The stored `as_of` is collection time, not the provider's publication time.
+
+Automatic input definitions (rates are decimals, not percentages):
+
+- `net_epa_diff`: home minus away net EPA/play (offensive EPA minus EPA allowed).
+- `early_down_success_diff`: home minus away net early-down success rate;
+  success means positive EPA on first/second down, minus opponent success.
+- `qb_epa_diff`: home minus away team QB EPA/dropback, including sacks and
+  scrambles. This is recent team QB history, not confirmed-starter evaluation.
+- `sack_rate_diff`: half the difference between home pressure matchup
+  (home sacks forced plus away sacks allowed) and the reverse matchup.
+- `explosive_play_diff`: home minus away net explosive rate (produced minus
+  allowed), using passes of at least 20 yards or runs of at least 10 yards.
+
+EPA and explosive rates require 60 valid plays per offensive/defensive sample;
+early-down success requires 40, QB EPA and sack rates require 30 dropbacks.
+Home field and rest use existing baseline configuration values. DVOA and
+total-specific optional features are not fetched or fabricated, so scoring
+remains neutral without separately supplied scoring inputs. Weights and
+confidence thresholds are unchanged and not calibrated by this collector.
+Feature persistence and prediction history remain separate; existing locked
+prediction history must not be rewritten with later features.
 
 Keep collapsed-card decisions and badges on the baseline. A tracked challenger
 places its two strongest factors in the Side Edge Key Factors panel with a

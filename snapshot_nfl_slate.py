@@ -6,7 +6,8 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from nfl_agent import build_current_slate, load_nfl_schedule
-from nfl_challenger import attach_features, load_feature_file
+from nfl_challenger import CORE_FEATURES, attach_features, load_feature_file
+from nfl_challenger_features import collect_feature_frame, FEATURE_VERSION, FEATURE_SOURCE
 from nfl_model_history import record_nfl_history
 from nfl_first_half import load_history as load_half_history, attach_first_half
 from nfl_pregame_analysis import load_team_stats, attach_pregame_analysis
@@ -93,6 +94,15 @@ def main():
             feature_frame,
         )
     else:
+        try:
+            collected = collect_feature_frame(games)
+            counts = record_nfl_pregame_features(
+                collected, feature_version=FEATURE_VERSION, source=FEATURE_SOURCE,
+            )
+            complete = int(collected[list(CORE_FEATURES)].notna().all(axis=1).sum()) if not collected.empty else 0
+            print(f"NFL challenger feature collection: {counts}; complete core coverage {complete}/{len(collected)} games.")
+        except Exception as exc:
+            print(f"NFL challenger collection unavailable: {type(exc).__name__}; retaining stored features.")
         feature_frame = feature_rows_to_frame(
             load_latest_nfl_features(games["game_id"].astype(str).tolist())
         )

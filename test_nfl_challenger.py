@@ -119,6 +119,7 @@ class NflChallengerTests(unittest.TestCase):
                             "PRAGMA table_info(nfl_model_history)"
                         ).fetchall()
                     }
+                connection.close()
         self.assertIn("challenger_features", columns)
         self.assertIn("challenger_side_result", columns)
 
