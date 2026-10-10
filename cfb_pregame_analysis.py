@@ -11,7 +11,7 @@ import tempfile
 import pandas as pd
 import requests
 
-from cfb_data import fetch_espn_fbs_teams, normalize_espn_games
+from cfb_data import fetch_espn_fbs_teams, fetch_espn_team_schedule_events, normalize_espn_games
 
 SUMMARY_URL = "https://site.api.espn.com/apis/site/v2/sports/football/college-football/summary"
 METRICS = ("points", "passing", "rushing", "points_allowed", "passing_allowed", "rushing_allowed")
@@ -19,42 +19,7 @@ METRICS = ("points", "passing", "rushing", "points_allowed", "passing_allowed", 
 
 def load_analysis_season(season):
     teams = fetch_espn_fbs_teams()
-    if not teams:
-        raise ValueError("FBS team directory unavailable")
-
-    def schedule(team_id):
-        for attempt in range(3):
-            try:
-                response = requests.get(
-                    f"https://site.api.espn.com/apis/site/v2/sports/football/college-football/teams/{team_id}/schedule",
-                    params={"season": int(season), "seasontype": 2}, timeout=15,
-                )
-                response.raise_for_status()
-                break
-            except requests.RequestException:
-                if attempt == 2:
-                    raise
-        payload = response.json()
-        if number((payload.get("season") or {}).get("year")) != int(season):
-            raise ValueError("CFB schedule returned a different season")
-        if "events" not in payload:
-            raise ValueError("CFB team schedule is missing events")
-        return payload["events"]
-
-    events = {}
-    # Team schedules include games omitted by the general scoreboard endpoint.
-    with ThreadPoolExecutor(max_workers=6) as pool:
-        for schedule_events in pool.map(schedule, teams):
-            for event in schedule_events:
-                if not event.get("id"):
-                    raise ValueError("CFB schedule event is missing its id")
-                for competition in event.get("competitions") or []:
-                    for competitor in competition.get("competitors") or []:
-                        score = competitor.get("score")
-                        if isinstance(score, dict):
-                            competitor["score"] = score.get("value")
-                events[str(event["id"])] = event
-    return normalize_espn_games(list(events.values()), teams)
+    return normalize_espn_games(fetch_espn_team_schedule_events(season, teams), teams)
 
 
 def number(value):

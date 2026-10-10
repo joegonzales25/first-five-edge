@@ -1,4 +1,5 @@
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
 import pandas as pd
@@ -148,6 +149,59 @@ def fetch_espn_fbs_teams() -> dict[str, str]:
             if team_id:
                 teams[team_id] = conference
     return teams
+
+
+def fetch_espn_team_schedule_events(season: int, teams: dict[str, str]) -> list[dict]:
+    if not teams:
+        raise ValueError("FBS team directory unavailable")
+
+    def schedule(team_id):
+        for attempt in range(3):
+            try:
+                response = requests.get(
+                    f"https://site.api.espn.com/apis/site/v2/sports/football/college-football/teams/{team_id}/schedule",
+                    params={"season": int(season), "seasontype": 2}, timeout=15,
+                )
+                response.raise_for_status()
+                break
+            except requests.RequestException:
+                if attempt == 2:
+                    raise
+        payload = response.json()
+        if str((payload.get("season") or {}).get("year")) != str(int(season)):
+            raise ValueError("CFB schedule returned a different season")
+        if not isinstance(payload.get("events"), list):
+            raise ValueError("CFB team schedule is missing events")
+        return payload["events"]
+
+    events = {}
+    # The general scoreboard can omit games even with a large limit.
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        for schedule_events in pool.map(schedule, teams):
+            for event in schedule_events:
+                if not event.get("id"):
+                    raise ValueError("CFB schedule event is missing its id")
+                for competition in event.get("competitions") or []:
+                    for competitor in competition.get("competitors") or []:
+                        score = competitor.get("score")
+                        if isinstance(score, dict):
+                            competitor["score"] = score.get("value")
+                events[str(event["id"])] = event
+    return list(events.values())
+
+
+def fetch_complete_espn_season(start_date, end_date, teams):
+    season = season_for_date(start_date)
+    events = {}
+    for event in fetch_espn_team_schedule_events(season, teams):
+        kickoff = pd.to_datetime(event.get("date"), utc=True, errors="coerce")
+        if pd.notna(kickoff) and start_date <= kickoff.tz_convert("America/New_York").date() <= end_date:
+            events[str(event["id"])] = event
+    # Prefer fresh scoreboard status/linescores for overlapping games, and
+    # retain supported postseason events absent from regular team schedules.
+    for event in fetch_espn_season(start_date, end_date)["events"]:
+        events[str(event["id"])] = event
+    return {"events": list(events.values())}
 
 
 def normalize_classification(value):
@@ -485,7 +539,7 @@ def load_cfb_prior_season(season: int) -> pd.DataFrame:
     season_end = date(prior_season + 1, 1, 31)
     try:
         fbs_teams = fetch_espn_fbs_teams()
-        payload = fetch_espn_season(season_start, season_end)
+        payload = fetch_complete_espn_season(season_start, season_end, fbs_teams)
     except (requests.RequestException, ValueError):
         return pd.DataFrame()
     games = normalize_espn_games(payload.get("events", []), fbs_teams)
@@ -571,7 +625,7 @@ def load_cfb_season(
         fbs_teams = fetch_espn_fbs_teams()
     except (requests.RequestException, ValueError):
         fbs_teams = None
-    payload = fetch_espn_season(season_start, query_end)
+    payload = fetch_complete_espn_season(season_start, query_end, fbs_teams)
     games = normalize_espn_games(payload.get("events", []), fbs_teams)
     if games.empty:
         return games
