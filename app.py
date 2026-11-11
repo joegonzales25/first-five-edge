@@ -4916,12 +4916,6 @@ def render_wnba_card(row, historical=False):
     """)
 
     with st.expander(f"Analysis: {title}"):
-        if sport == "CBB":
-            st.markdown("### Last 5 Game Results")
-            for side in ("Away", "Home"):
-                if not row.get(f"{side} Last 5 Results"):
-                    st.caption(f"{row[side]}: no recent completed games available.")
-            st.html(render_last_five_results(row))
         if row.get("Sport") == "CFB":
             render_nfl_pregame_comparison(row)
         else:
@@ -4933,6 +4927,13 @@ def render_wnba_card(row, historical=False):
             st.markdown("### Key Factors")
             for factor in row["Key Factors List"]:
                 st.markdown(f"- {factor}")
+
+        if sport == "CBB":
+            st.markdown("### Last 5 Game Results")
+            for side in ("Away", "Home"):
+                if not row.get(f"{side} Last 5 Results"):
+                    st.caption(f"{row[side]}: no recent completed games available.")
+            st.html(render_last_five_results(row))
 
         st.markdown("### Model Detail")
         model_detail_rows = [
