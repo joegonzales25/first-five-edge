@@ -10,6 +10,41 @@ ESPN_CBB_SCOREBOARD_URL = (
 )
 
 
+def load_cbb_team_filter_metadata(slate_date):
+    response = requests.get(
+        "https://site.web.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/teams",
+        params={"groups": 50, "groupType": "conference", "enable": "groups", "limit": 1000},
+        timeout=30,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    sports = payload.get("sports") or []
+    leagues = (sports[0].get("leagues") or []) if sports else []
+    groups = (leagues[0].get("groups") or []) if leagues else []
+    conferences = {}
+    for group in groups:
+        name = group.get("name")
+        for team in group.get("teams") or []:
+            if team.get("id") and name:
+                conferences[str(team["id"])] = name
+    if not conferences:
+        raise ValueError("CBB conference directory unavailable")
+
+    rows = []
+    events = fetch_cbb_scoreboard(slate_date, slate_date).get("events") or []
+    for event in events:
+        competition = (event.get("competitions") or [{}])[0]
+        row = {"game_id": str(event.get("id") or "")}
+        for side in ("away", "home"):
+            competitor = competitor_by_side(competition, side)
+            team = competitor.get("team") or {}
+            row[f"{side}_conference"] = conferences.get(str(team.get("id")))
+            rank = pd.to_numeric((competitor.get("curatedRank") or {}).get("current"), errors="coerce")
+            row[f"{side}_rank"] = int(rank) if pd.notna(rank) and 1 <= rank <= 25 else None
+        rows.append(row)
+    return pd.DataFrame(rows), sorted(set(conferences.values()))
+
+
 def date_range_param(start_date: date, end_date: date) -> str:
     return f"{start_date:%Y%m%d}-{end_date:%Y%m%d}"
 

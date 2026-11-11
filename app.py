@@ -70,6 +70,7 @@ from cbb_model_history import (
     load_cbb_performance_tables,
     load_cbb_performance_summary,
 )
+from cbb_data import load_cbb_team_filter_metadata
 from cfb_model_history import (
     load_cfb_history,
     load_cfb_performance_summary,
@@ -7596,6 +7597,11 @@ def render_nba_page():
         render_nba_historical()
 
 
+@st.cache_data(ttl=900)
+def load_cbb_filter_metadata(slate_date):
+    return load_cbb_team_filter_metadata(slate_date)
+
+
 def render_cbb_current():
     selected_view = selected_cbb_view("all")
 
@@ -7639,6 +7645,26 @@ def render_cbb_current():
         st.error(f"Could not load CBB current slate: {slate_error}")
         return
 
+    available_conferences = []
+    for column in ["Away Conference", "Home Conference", "Away Rank", "Home Rank"]:
+        if column not in slate:
+            slate[column] = None
+    try:
+        metadata, available_conferences = load_cbb_filter_metadata(selected_date)
+        slate = enrich_cfb_filter_metadata(slate, metadata)
+    except Exception:
+        st.caption("Conference and ranking details are temporarily unavailable for some games.")
+    conferences = sorted({
+        str(value).strip()
+        for column in ["Away Conference", "Home Conference"]
+        for value in slate[column].dropna()
+        if str(value).strip()
+    } | set(available_conferences))
+    team_options = ["All Teams", "Any Top 25 Team", *conferences]
+    if st.session_state.get("cbb_team_scope", "All Teams") not in team_options:
+        st.session_state["cbb_team_scope"] = "All Teams"
+    team_scope = st.selectbox("Conference / Top 25", team_options, key="cbb_team_scope")
+
     if slate.empty:
         st.caption("0 of 0")
         st.caption(format_snapshot_caption(cbb_history_rows))
@@ -7654,6 +7680,8 @@ def render_cbb_current():
         selected_view,
         selected_tiers,
     )
+    filtered = filter_cfb_team_scope(filtered, team_scope)
+    filtered = sort_nfl_game_cards(filtered)
     display_count = (
         0 if selected_view in ["top", "first_half"] else len(filtered)
     )
