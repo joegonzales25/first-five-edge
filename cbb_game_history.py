@@ -48,7 +48,10 @@ def recent_team_results(events, team_id, team_name, kickoff, current_game_id):
         if len(scores) != 2 or scores[0] == scores[1]:
             continue
         name = opponent.get("team") or {}
-        label = name.get("abbreviation") or name.get("shortDisplayName") or name.get("displayName") or "Opponent"
+        label = (
+            name.get("location") or name.get("shortDisplayName")
+            or name.get("displayName") or name.get("abbreviation") or "Opponent"
+        )
         venue = "vs (N)" if contest.get("neutralSite") else "@" if own.get("homeAway") == "away" else "vs"
         results[event_id] = {
             "Team": team_name, "Sort Date": when.isoformat(),

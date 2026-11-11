@@ -1,3 +1,6 @@
+import ast
+from html import escape
+from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
 
@@ -40,6 +43,33 @@ class CbbGameHistoryTests(unittest.TestCase):
 
     def test_missing_scores_are_not_fabricated(self):
         self.assertEqual(recent_team_results([event("1", 1, None)], "1", "Team", "2026-11-10T23:00Z", "target"), [])
+
+    def test_opponent_uses_school_name_like_cfb_instead_of_abbreviation(self):
+        game = event("1", 1)
+        game["competitions"][0]["competitors"][1]["team"].update(
+            location="Bowling Green", shortDisplayName="Bowling Green",
+            displayName="Bowling Green Falcons", abbreviation="BGSU",
+        )
+        results = recent_team_results([game], "1", "Team", "2026-11-10T23:00Z", "target")
+        self.assertEqual(results[0]["Opponent"], "@ Bowling Green")
+
+    def test_shared_cfb_table_format_for_both_teams(self):
+        tree = ast.parse(Path("app.py").read_text(encoding="utf-8"))
+        function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "render_last_five_results")
+        namespace = {"escape": escape, "get_row_value": lambda row, key, default: row.get(key, default)}
+        exec(compile(ast.Module(body=[function], type_ignores=[]), "app.py", "exec"), namespace)
+        game = event("1", 1)
+        row = {
+            "Away Last 5 Results": recent_team_results([game], "1", "Away Team", "2026-11-10T23:00Z", "target"),
+            "Home Last 5 Results": recent_team_results([game], "2", "Home Team", "2026-11-10T23:00Z", "target"),
+        }
+        html = namespace["render_last_five_results"](row)
+        self.assertEqual(html.count('<table class="last-five-table">'), 2)
+        self.assertEqual(html.count('<th>Date</th><th>Opponent</th><th>Result</th><th>Score</th>'), 2)
+        self.assertIn('class="result-badge result-win">W', html)
+        self.assertIn('class="result-badge result-loss">L', html)
+        self.assertIn('80-70', html)
+        self.assertIn('70-80', html)
 
     def test_attach_uses_ending_year_and_keeps_picks_unchanged(self):
         slate = pd.DataFrame([{"Game ID": "target", "Sort Date": "2026-11-10T23:00Z",
