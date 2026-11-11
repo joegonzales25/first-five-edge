@@ -4804,8 +4804,24 @@ def market_discovery_labels(row):
     return labels
 
 
+def game_card_title(row):
+    title = str(row.get("Game") or "")
+    if row.get("Sport") != "CBB" or not row.get("Away") or not row.get("Home"):
+        return title
+
+    def team_label(side):
+        name = str(row[side])
+        rank = pd.to_numeric(row.get(f"{side} Rank"), errors="coerce")
+        if pd.notna(rank) and 1 <= rank <= 25 and float(rank).is_integer():
+            return f"#{int(rank)} {name}"
+        return name
+
+    return f"{team_label('Away')} @ {team_label('Home')}"
+
+
 def render_wnba_card(row, historical=False):
     sport = row.get("Sport")
+    title = game_card_title(row)
     if sport in ["NBA", "CFB"]:
         half_label = "First Half"
     elif sport == "NHL":
@@ -4880,7 +4896,7 @@ def render_wnba_card(row, historical=False):
         <span class="badge badge-edge">Edge {escape(str(row["Edge Score"]))}</span>
         <span class="badge badge-edge">Confidence {escape(str(row["Confidence"]))}</span>
 
-        <div class="game-title">{escape(str(row["Game"]))}</div>
+        <div class="game-title">{escape(title)}</div>
         <div class="muted">{lock_marker}{escape(str(game_time_display))} - {escape(str(row["Status"]))}</div>
 
         <div class="decision-stack">
@@ -4898,7 +4914,7 @@ def render_wnba_card(row, historical=False):
     </div>
     """)
 
-    with st.expander(f"Analysis: {row['Game']}"):
+    with st.expander(f"Analysis: {title}"):
         if row.get("Sport") == "CFB":
             render_nfl_pregame_comparison(row)
         else:
