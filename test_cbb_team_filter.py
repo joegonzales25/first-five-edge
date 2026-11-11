@@ -62,6 +62,8 @@ metadata = pd.DataFrame([
     {"game_id": "soon", "away_conference": "SEC", "home_conference": "Big Ten", "away_rank": None, "home_rank": 25},
 ])
 load_cbb_filter_metadata = lambda _: (metadata, ["ACC", "Big Ten", "SEC"])
+attach_cbb_game_history = lambda slate, metadata, loader: slate
+load_cbb_team_schedule = lambda *args: []
 '''
         if unavailable:
             source += "def load_cbb_filter_metadata(_):\n    raise ValueError('offline')\n"

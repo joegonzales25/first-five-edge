@@ -71,6 +71,7 @@ from cbb_model_history import (
     load_cbb_performance_summary,
 )
 from cbb_data import load_cbb_team_filter_metadata
+from cbb_game_history import attach_cbb_game_history, fetch_cbb_team_schedule
 from cfb_model_history import (
     load_cfb_history,
     load_cfb_performance_summary,
@@ -4915,6 +4916,12 @@ def render_wnba_card(row, historical=False):
     """)
 
     with st.expander(f"Analysis: {title}"):
+        if sport == "CBB":
+            st.markdown("### Last 5 Game Results")
+            for side in ("Away", "Home"):
+                if not row.get(f"{side} Last 5 Results"):
+                    st.caption(f"{row[side]}: no recent completed games available.")
+            st.html(render_last_five_results(row))
         if row.get("Sport") == "CFB":
             render_nfl_pregame_comparison(row)
         else:
@@ -7618,6 +7625,11 @@ def load_cbb_filter_metadata(slate_date):
     return load_cbb_team_filter_metadata(slate_date)
 
 
+@st.cache_data(ttl=900)
+def load_cbb_team_schedule(team_id, season):
+    return fetch_cbb_team_schedule(team_id, season)
+
+
 def render_cbb_current():
     selected_view = selected_cbb_view("all")
 
@@ -7668,6 +7680,7 @@ def render_cbb_current():
     try:
         metadata, available_conferences = load_cbb_filter_metadata(selected_date)
         slate = enrich_cfb_filter_metadata(slate, metadata)
+        slate = attach_cbb_game_history(slate, metadata, loader=load_cbb_team_schedule)
     except Exception:
         st.caption("Conference and ranking details are temporarily unavailable for some games.")
     conferences = sorted({

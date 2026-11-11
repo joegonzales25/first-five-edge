@@ -38,6 +38,7 @@ def load_cbb_team_filter_metadata(slate_date):
         for side in ("away", "home"):
             competitor = competitor_by_side(competition, side)
             team = competitor.get("team") or {}
+            row[f"{side}_team_id"] = str(team.get("id") or "")
             row[f"{side}_conference"] = conferences.get(str(team.get("id")))
             rank = pd.to_numeric((competitor.get("curatedRank") or {}).get("current"), errors="coerce")
             row[f"{side}_rank"] = int(rank) if pd.notna(rank) and 1 <= rank <= 25 else None
