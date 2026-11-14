@@ -1,3 +1,5 @@
+import math
+import numbers
 import os
 import sqlite3
 import tempfile
@@ -165,9 +167,30 @@ def safe_float(value):
     try:
         if pd.isna(value):
             return None
-        return float(value)
+        number = float(value)
+        return number if math.isfinite(number) else None
     except Exception:
         return None
+
+
+def db_value(value):
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, numbers.Real):
+        number = float(value)
+        if not math.isfinite(number):
+            return None
+        return int(value) if isinstance(value, numbers.Integral) else number
+    return value
+
+
+def db_values(values):
+    return [db_value(value) for value in values]
 
 
 def is_final(row):
@@ -276,7 +299,7 @@ def insert_prediction(connection, row_values):
         INSERT INTO cbb_model_history ({", ".join(columns)})
         VALUES ({placeholders})
         """,
-        [row_values[column] for column in columns],
+        db_values(row_values[column] for column in columns),
     )
 
 
@@ -308,7 +331,7 @@ def update_result(connection, game_id, market_version, model_version, values):
           AND market_version = ?
           AND model_version = ?
         """,
-        (
+        db_values((
             values["status"],
             values["away_score"],
             values["home_score"],
@@ -326,7 +349,7 @@ def update_result(connection, game_id, market_version, model_version, values):
             str(game_id),
             market_version,
             model_version,
-        ),
+        )),
     )
 
 
