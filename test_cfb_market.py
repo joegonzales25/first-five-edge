@@ -78,10 +78,16 @@ class CfbMarketTests(unittest.TestCase):
         source += "render_cfb_market_comparison(" + repr(game()) + ")\n"
         app = AppTest.from_string(source).run()
         self.assertEqual(len(app.exception), 0)
-        frame = app.dataframe[0].value
-        self.assertEqual(frame.iloc[0]["Model Read"], "LSU by 2")
-        self.assertEqual(frame.iloc[0]["Market Read"], "LSU -4.5")
-        self.assertEqual(frame.iloc[0]["Comparison"], "Texas +4.5")
+        self.assertEqual(len(app.dataframe), 0)
+        tables = [m.value for m in app.markdown if m.value.startswith("| Metric | Value |")]
+        self.assertEqual(len(tables), 2)
+        self.assertIn("| Model | LSU by 2 |", tables[0])
+        self.assertIn("| Market Line | LSU -4.5 |", tables[0])
+        self.assertIn("| Comparison | Texas +4.5 |", tables[0])
+        self.assertIn("| Projection Difference | 2.5 points |", tables[0])
+        self.assertIn("| American Odds | -105 |", tables[0])
+        self.assertIn("| Break-even Rate | 51.22% |", tables[0])
+        self.assertIn("| Comparison | Over 46.5 |", tables[1])
         self.assertTrue(any("Book update time unavailable" in c.value for c in app.caption))
 
     def test_grade_frozen_spread_total_push_and_hypothetical_returns(self):

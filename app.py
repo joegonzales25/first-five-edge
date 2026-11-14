@@ -8072,10 +8072,24 @@ def render_cfb_market_comparison(row):
     if context.get("prediction_as_of"):
         st.caption(f"Model as of: {format_snapshot_time(context['prediction_as_of'])}")
     st.caption("Projection comparison only | Not a calibrated betting edge")
-    frame = pd.DataFrame(comparisons)
-    st.dataframe(frame[["Market", "Book", "Model Read", "Market Read", "Comparison",
-                        "Projection Difference", "American Odds", "Break-even %"]],
-                 hide_index=True, use_container_width=True)
+    for comparison in comparisons:
+        st.markdown(f"#### {comparison['Market']}")
+        odds = comparison.get("American Odds")
+        break_even = comparison.get("Break-even %")
+        metrics = [
+            ("Book", comparison.get("Book")),
+            ("Model", comparison.get("Model Read")),
+            ("Market Line", comparison.get("Market Read")),
+            ("Comparison", comparison.get("Comparison")),
+            ("Projection Difference", f"{comparison['Projection Difference']:g} points"),
+            ("American Odds", f"{odds:+d}" if odds is not None else "N/A"),
+            ("Break-even Rate", f"{break_even:g}%" if break_even is not None else "N/A"),
+        ]
+        lines = ["| Metric | Value |", "|---|---|"]
+        for metric, value in metrics:
+            display = str(value if value is not None else "N/A").replace("|", "\\|").replace("\n", " ")
+            lines.append(f"| {metric} | {display} |")
+        st.markdown("\n".join(lines))
 
 
 def cfb_decision_display(pick, segment):
