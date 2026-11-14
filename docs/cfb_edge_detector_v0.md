@@ -494,3 +494,50 @@ Prior-season games never count toward the current-season history gate. Missing
 or insufficient prior history uses league-average defaults and adds an
 `Insufficient preseason history` downgrade. Existing thresholds and the
 availability-based Watch cap remain unchanged.
+
+### Market Forward Test
+
+The season's baseline is unchanged. Each snapshot run independently fetches
+ESPN summary `pickcenter` quotes for games whose scheduled kickoff is still
+in the future and whose feed status is pregame. No quotes are backfilled for
+started games or old snapshots. A quote failure does not block baseline writes.
+The page reads stored quotes only; it never obtains new prices on page load.
+
+Each context records source, named book/provider, collection time, spread,
+total, available American odds, and moneylines. Collection time is not a
+bookmaker publication time; the feed does not supply a reliable update time.
+Missing odds remain missing, never assumed to be -110. ESPN favorite flags
+determine home-spread orientation; an ambiguous spread is omitted.
+
+`market_context` is additive to `cfb_model_history`, refreshes only while a
+prediction is open, and freezes under existing kickoff locking. Each successful
+pregame observation also appends the quote and contemporaneous model margin
+and total to `cfb_market_observations`. Do not replace older observations or
+reinterpret postgame prices as pregame data. A feed outage retains the last
+saved context, whose capture time remains visible.
+The context also freezes the model projections paired with that quote, so a
+later feed outage cannot silently compare a newer baseline forecast to an
+older observation while claiming they were collected together.
+
+The fixed `projection-direction-v1` rule compares home-minus-away model margin
+plus the home spread: positive favors the home spread, negative the away
+spread. A model margin of LSU +2 versus LSU -4.5 therefore points toward
+Texas +4.5, a 2.5-point projection difference. Projected total minus market
+total determines Over/Under. Zero difference is not a selection. These are
+experimental comparisons for all covered games, not new Official decisions,
+confidence upgrades, calibrated probabilities, or recommended wagers.
+
+`Model vs Market` in the CFB expander shows named teams, book, captured lines,
+projection differences, available prices, and odds-implied break-even rates.
+`Market Forward Test` under Performance exports frozen comparisons for the
+selected model across all dates, independently of the baseline report filters.
+Spread Cover/Miss/Push and total results use final scores and frozen lines;
+baseline winner and scoring-environment grades remain untouched. Hypothetical
+units assume one unit risked per comparison at the captured odds (no fees,
+no staking optimization); missing odds have no unit return. Multiple books
+and markets are separate comparisons, not independent betting opportunities.
+Moneylines are archived, not selected or graded without win probabilities.
+
+This is forward collection for next year's tuning, not a historical backtest.
+There is no calibrated edge threshold or closing-line-value claim in this
+release: the final captured quote is not guaranteed to be the closing line.

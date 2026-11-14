@@ -78,6 +78,7 @@ from cfb_model_history import (
     load_cfb_performance_tables,
 )
 from cfb_data import fetch_espn_fbs_teams, fetch_espn_scoreboard, normalize_espn_games
+from cfb_market import decode_context, comparison_rows, forward_rows
 from mls_model_history import (
     load_mls_history,
     load_mls_performance_summary,
@@ -4917,6 +4918,7 @@ def render_wnba_card(row, historical=False):
 
     with st.expander(f"Analysis: {title}"):
         if row.get("Sport") == "CFB":
+            render_cfb_market_comparison(row)
             render_nfl_pregame_comparison(row)
         else:
             discovery_labels = market_discovery_labels(row)
@@ -8058,6 +8060,24 @@ def render_cbb_page():
         render_cbb_historical()
 
 
+def render_cfb_market_comparison(row):
+    st.markdown("### Model vs Market")
+    context = decode_context(row.get("Market Context"))
+    comparisons = comparison_rows(row, context)
+    if not comparisons:
+        st.caption("No pregame market quote captured.")
+        return
+    st.caption(f"{context.get('source', 'ESPN')} | Captured: {format_snapshot_time(context.get('captured_at'))}")
+    st.caption("Book update time unavailable")
+    if context.get("prediction_as_of"):
+        st.caption(f"Model as of: {format_snapshot_time(context['prediction_as_of'])}")
+    st.caption("Projection comparison only | Not a calibrated betting edge")
+    frame = pd.DataFrame(comparisons)
+    st.dataframe(frame[["Market", "Book", "Model Read", "Market Read", "Comparison",
+                        "Projection Difference", "American Odds", "Break-even %"]],
+                 hide_index=True, use_container_width=True)
+
+
 def cfb_decision_display(pick, segment):
     if pick in [None, "", "Pass"]:
         return "Pass"
@@ -8214,6 +8234,7 @@ def cfb_slate_from_history(rows):
                 "Model Margin": base.get("model_margin"),
                 "Projected Total": base.get("projected_total"),
                 "League Total Baseline": base.get("league_total_baseline"),
+                "Market Context": base.get("market_context"),
                 "Data Quality": base.get("data_quality"),
                 "Key Factors List": factors,
                 "Key Factors Summary": "; ".join(factors[:3]),
@@ -8380,6 +8401,15 @@ def render_cfb_performance_section():
         )
 
     source_rows = all_rows if model_filter == "All" else current_rows
+    with st.expander("Market Forward Test"):
+        observations = pd.DataFrame(forward_rows(source_rows))
+        st.caption("All dates for selected model | Locked pregame quotes | Hypothetical one-unit risk per comparison")
+        if observations.empty:
+            st.caption("No locked pregame market comparisons recorded yet.")
+        else:
+            st.dataframe(observations, hide_index=True, use_container_width=True)
+            st.download_button("Download Market Forward Test CSV", observations.to_csv(index=False),
+                               "cfb_market_forward_test.csv", "text/csv", key="cfb_market_forward_csv")
     filtered_rows = cfb_filtered_history(
         source_rows,
         market_filter,

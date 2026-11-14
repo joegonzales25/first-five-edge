@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 from cfb_agent import build_current_slate
 from cfb_model_history import record_cfb_history
 from cfb_pregame_analysis import attach_pregame_analysis
+from cfb_market import attach_market_context
 
 
 DEFAULT_TIMEZONE = "America/New_York"
@@ -47,6 +48,7 @@ def main():
         slate = attach_pregame_analysis(slate)
     except Exception as exc:
         print(f"CFB pregame comparison unavailable: {exc}")
+    slate = attach_market_context(slate)
     counts = record_cfb_history(
         slate,
         slate_date,

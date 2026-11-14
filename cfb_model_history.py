@@ -10,6 +10,7 @@ from pathlib import Path
 import pandas as pd
 
 from history_backend_config import resolve_history_backend
+from cfb_market import valid_context
 
 
 DB_PATH = Path(
@@ -166,11 +167,22 @@ def init_db(connection):
         "away_rank": "INTEGER",
         "home_rank": "INTEGER",
         "pregame_analysis": "TEXT",
+        "market_context": "TEXT",
     }.items():
         if name not in columns:
             connection.execute(
                 f"ALTER TABLE cfb_model_history ADD COLUMN {name} {sql_type}"
             )
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS cfb_market_observations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id TEXT NOT NULL, slate_date TEXT NOT NULL,
+            model_version TEXT NOT NULL, market_version TEXT NOT NULL,
+            captured_at TEXT NOT NULL, model_margin REAL, projected_total REAL,
+            market_context TEXT NOT NULL,
+            UNIQUE(game_id, model_version, market_version, captured_at)
+        )
+    """)
     connection.commit()
 
 
@@ -278,6 +290,11 @@ def prediction_values(
         "away_rank": safe_int(row.get("Away Rank")),
         "home_rank": safe_int(row.get("Home Rank")),
         "pregame_analysis": row.get("Pregame Analysis"),
+        "market_context": (
+            json.dumps(context, allow_nan=False)
+            if (context := valid_context(row.get("Market Context"), row.get("Scheduled Kickoff"), now_text))
+            else None
+        ),
         "scheduled_kickoff": row.get("Scheduled Kickoff"),
         "market_version": market_version,
         "model_version": model_version,
@@ -367,7 +384,7 @@ def update_open_prediction(connection, row_id, values):
         "scheduled_kickoff",
         "updated_at",
     ]
-    for column in ("pregame_analysis", "away_conference", "home_conference", "away_rank", "home_rank"):
+    for column in ("pregame_analysis", "market_context", "away_conference", "home_conference", "away_rank", "home_rank"):
         if db_value(values.get(column)) is not None:
             mutable.append(column)
     connection.execute(
@@ -446,6 +463,17 @@ def record_cfb_history(
             if not game_id:
                 continue
             open_snapshot = snapshot_is_open(row, now)
+            context = valid_context(row.get("Market Context"), row.get("Scheduled Kickoff"), now)
+            saved_full = existing_snapshot(connection, game_id, "Full Game", market_version, model_version)
+            if open_snapshot and context and (not saved_full or saved_full.get("snapshot_status") == "Pregame"):
+                connection.execute("""
+                    INSERT OR IGNORE INTO cfb_market_observations
+                    (game_id, slate_date, model_version, market_version, captured_at,
+                     model_margin, projected_total, market_context)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, db_values((str(game_id), str(slate_date), model_version, market_version,
+                                context["captured_at"], safe_float(row.get("Model Margin")),
+                                safe_float(row.get("Projected Total")), json.dumps(context, allow_nan=False))))
             for market, config in MARKETS.items():
                 existing = existing_snapshot(
                     connection,
