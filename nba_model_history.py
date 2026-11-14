@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 from history_backend_config import resolve_history_backend
+from market_forward import init_market_db, persist_market_row, reconcile_market_results
 
 
 DB_PATH = Path(
@@ -351,6 +352,7 @@ def record_nba_history(
     now = utc_now()
     with connect(db_path) as connection:
         init_db(connection)
+        init_market_db(connection)
         for _, row in slate.iterrows():
             game_id = row.get("Game ID") or row.get("game_id")
             if not game_id:
@@ -362,6 +364,10 @@ def record_nba_history(
                 market_version,
                 model_version,
             )
+
+            paired_prediction = existing or (prediction_values(row, slate_date, market_version, model_version, now)
+                                             if is_snapshot_eligible(row) else None)
+            persist_market_row(connection, "NBA", row, paired_prediction, model_version, market_version, now)
 
             if existing is None and is_snapshot_eligible(row):
                 insert_prediction(
@@ -390,6 +396,7 @@ def record_nba_history(
             )
             counts["updated"] += 1
 
+        reconcile_market_results(connection, "NBA", now)
         connection.commit()
 
     return counts

@@ -9,6 +9,8 @@ from nfl_agent import build_current_slate, load_nfl_schedule
 from nfl_challenger import CORE_FEATURES, attach_features, load_feature_file
 from nfl_challenger_features import collect_feature_frame, FEATURE_VERSION, FEATURE_SOURCE
 from nfl_model_history import record_nfl_history
+from cfb_market import attach_market_context
+from market_forward import reconcile_sport_markets
 from nfl_first_half import load_history as load_half_history, attach_first_half
 from nfl_pregame_analysis import load_team_stats, attach_pregame_analysis
 from nfl_schedule_store import (
@@ -115,6 +117,7 @@ def main():
         args.lookahead_days,
     )
     if not weeks:
+        reconcile_sport_markets("NFL")
         print(f"No NFL regular-season games near {target_date}.")
         return 0
 
@@ -141,6 +144,7 @@ def main():
             slate = attach_first_half(slate, half_history[season])
         if season in team_stats:
             slate = attach_pregame_analysis(slate, games, team_stats[season])
+        slate = attach_market_context(slate, sport="NFL")
         counts = record_nfl_history(
             slate,
             args.market_version,

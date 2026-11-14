@@ -79,6 +79,7 @@ from cfb_model_history import (
 )
 from cfb_data import fetch_espn_fbs_teams, fetch_espn_scoreboard, normalize_espn_games
 from cfb_market import decode_context, comparison_rows, forward_rows
+from market_forward import load_market_snapshots, market_report
 from mls_model_history import (
     load_mls_history,
     load_mls_performance_summary,
@@ -4475,6 +4476,7 @@ def render_nfl_card(row, historical=False):
     """)
 
     with st.expander(f"\U0001f50d Analysis: {row['Game']}"):
+        render_sport_market_comparison(row, "NFL")
         if not historical:
             render_nfl_pregame_comparison(row)
         if historical:
@@ -4917,6 +4919,8 @@ def render_wnba_card(row, historical=False):
     """)
 
     with st.expander(f"Analysis: {title}"):
+        if sport in {"NBA", "CBB"}:
+            render_sport_market_comparison(row, sport)
         if row.get("Sport") == "CFB":
             render_cfb_market_comparison(row)
             render_nfl_pregame_comparison(row)
@@ -5741,6 +5745,7 @@ def render_nfl_performance():
     st.markdown("### NFL Performance")
     model_version = MODEL_BASELINES["NFL"]
     market_version = MARKET_RELEASES["NFL"]
+    render_sport_market_forward_test("NFL")
     all_rows = safe_load_nfl_history()
     current_rows = [
         row
@@ -7315,6 +7320,7 @@ def render_nba_performance_section():
     st.markdown("### NBA Performance")
     model_version = MODEL_BASELINES["NBA"]
     market_version = MARKET_RELEASES["NBA"]
+    render_sport_market_forward_test("NBA")
     current_summary = load_nba_performance_summary(
         model_version=model_version,
         market_version=market_version,
@@ -7750,6 +7756,7 @@ def render_cbb_performance_section():
     st.markdown("### CBB Performance")
     model_version = MODEL_BASELINES["CBB"]
     market_version = MARKET_RELEASES["CBB"]
+    render_sport_market_forward_test("CBB")
     current_summary = load_cbb_performance_summary(
         model_version=model_version,
         market_version=market_version,
@@ -8060,8 +8067,45 @@ def render_cbb_page():
         render_cbb_historical()
 
 
-def render_cfb_market_comparison(row):
-    st.markdown("### Model vs Market")
+@st.cache_data(ttl=120)
+def load_sport_market_history(sport, model_version, market_version):
+    return load_market_snapshots(sport, model_version, market_version)
+
+
+def render_sport_market_comparison(row, sport):
+    try:
+        saved = load_sport_market_history(sport, MODEL_BASELINES[sport], MARKET_RELEASES[sport])
+    except Exception:
+        st.caption("Stored market comparisons temporarily unavailable.")
+        return
+    matches = [item for item in saved if str(item.get("game_id")) == str(row.get("Game ID"))]
+    if not matches:
+        st.markdown("### Model vs Market")
+        st.caption("No pregame market quote captured.")
+    for item in sorted(matches, key=lambda item: item.get("track", "")):
+        title = "Model vs Market" if sport != "NFL" else f"Model vs Market: {item['track']}"
+        render_cfb_market_comparison({**row, "Market Context": item.get("market_context")}, heading=title)
+
+
+def render_sport_market_forward_test(sport):
+    with st.expander("Market Forward Test"):
+        st.caption("Current baseline release | All dates | Locked quotes | Hypothetical one-unit risk per comparison")
+        try:
+            saved = load_sport_market_history(sport, MODEL_BASELINES[sport], MARKET_RELEASES[sport])
+            report = pd.DataFrame(market_report(saved))
+        except Exception:
+            st.caption("Stored market comparisons temporarily unavailable.")
+            return
+        if report.empty:
+            st.caption("No locked pregame market comparisons recorded yet.")
+            return
+        st.dataframe(report, hide_index=True, use_container_width=True)
+        st.download_button("Download Market Forward Test CSV", report.to_csv(index=False),
+                           f"{sport.lower()}_market_forward_test.csv", "text/csv", key=f"{sport.lower()}_market_forward_csv")
+
+
+def render_cfb_market_comparison(row, heading="Model vs Market"):
+    st.markdown(f"### {heading}")
     context = decode_context(row.get("Market Context"))
     comparisons = comparison_rows(row, context)
     if not comparisons:

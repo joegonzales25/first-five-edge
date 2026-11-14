@@ -4,6 +4,8 @@ from zoneinfo import ZoneInfo
 
 from cbb_agent import build_current_slate
 from cbb_model_history import record_cbb_history
+from cfb_market import attach_market_context
+from market_forward import reconcile_sport_markets
 
 
 DEFAULT_TIMEZONE = "America/New_York"
@@ -50,9 +52,11 @@ def main():
     slate, _ = build_current_slate(slate_date=slate_date)
 
     if slate is None or slate.empty:
+        reconcile_sport_markets("CBB")
         print(f"No CBB games found for {slate_date}.")
         return 0
 
+    slate = attach_market_context(slate, sport="CBB")
     counts = record_cbb_history(
         slate,
         slate_date,

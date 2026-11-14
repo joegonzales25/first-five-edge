@@ -10,6 +10,7 @@ from pathlib import Path
 import pandas as pd
 
 from history_backend_config import resolve_history_backend
+from market_forward import init_market_db, persist_market_row, reconcile_market_results
 
 
 DB_PATH = Path(
@@ -570,6 +571,7 @@ def record_nfl_history(
     now_text = now.isoformat(timespec="seconds")
     with connect(db_path) as connection:
         init_db(connection)
+        init_market_db(connection)
         for _, row in slate.iterrows():
             game_id = row.get("Game ID")
             if not game_id:
@@ -617,6 +619,7 @@ def record_nfl_history(
                     connection, game_id, market_version, model_version
                 )
 
+            persist_market_row(connection, "NFL", row, existing, model_version, market_version, now)
             should_lock = not is_open
             away_half = safe_int(row.get("Away First Half"))
             home_half = safe_int(row.get("Home First Half"))
@@ -647,6 +650,7 @@ def record_nfl_history(
                 should_lock,
             )
             counts["updated"] += 1
+        reconcile_market_results(connection, "NFL", now)
         connection.commit()
     return counts
 

@@ -541,3 +541,33 @@ Moneylines are archived, not selected or graded without win probabilities.
 This is forward collection for next year's tuning, not a historical backtest.
 There is no calibrated edge threshold or closing-line-value claim in this
 release: the final captured quote is not guaranteed to be the closing line.
+
+### Phase 1 Extension: NFL, NBA, CBB
+
+The same collection, Metric/Value display, and forward-only reporting now
+apply to full-game NFL, NBA, and CBB comparisons. Their existing baseline
+weights, picks, confidence, grading, and workflow schedules are unchanged.
+WNBA, NHL, MLB, MLS, and period-specific prices are deferred.
+
+These three sports use additive `market_forward_snapshots` and
+`market_forward_observations` tables alongside their existing history tables.
+The key includes sport, game, baseline release, market release, model track,
+and track version. Observations append; snapshots refresh only before start
+and cannot reopen after locking. Missing prices or old completed games never
+create retrospective comparisons. Pages only read stored data.
+
+NBA/CBB prices pair with the initial stored forecast, not a recalculated page
+forecast. NFL pairs with its stored pregame forecast and maintains separate
+Baseline and Challenger comparisons. Challenger spreads require tracked
+features; Challenger totals are disabled because the current automated inputs
+do not independently forecast scoring totals. NFL schedule IDs are resolved to
+ESPN IDs by Eastern date and home/away abbreviations, then the summary's event
+ID, start time, and pregame status are verified before a price is accepted.
+
+Result-only reconciliation settles saved comparisons from prior dates without
+replacing quotes or modifying baseline predictions. It uses the saved ESPN
+event ID and completed-game scores. Unavailable results stay pending. Even a
+snapshot run with no games can reconcile older comparisons. Performance
+exports cover all dates for the current baseline release and label the model
+track/version; they are independent of existing baseline report filters.
+The CBB workflow remains manual until separately approved for scheduling.

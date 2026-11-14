@@ -142,6 +142,7 @@ class ChallengerFeatureTests(unittest.TestCase):
         args = Namespace(date="2026-09-27", challenger_features=None,
                          lookback_days=3, lookahead_days=8)
         with patch.object(snapshot, "parse_args", return_value=args), \
+                patch.object(snapshot, "reconcile_sport_markets"), \
                 patch.object(snapshot, "load_nfl_schedule", return_value=games), \
                 patch.object(snapshot, "sync_nfl_schedule"), \
                 patch.object(snapshot, "collect_feature_frame", side_effect=ValueError("bad feed")), \

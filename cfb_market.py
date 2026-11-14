@@ -10,6 +10,10 @@ import requests
 
 VERSION = "projection-direction-v1"
 SUMMARY_URL = "https://site.api.espn.com/apis/site/v2/sports/football/college-football/summary"
+SPORT_PATHS = {
+    "CFB": "football/college-football", "NFL": "football/nfl",
+    "NBA": "basketball/nba", "CBB": "basketball/mens-college-basketball",
+}
 
 
 def number(value):
@@ -76,24 +80,51 @@ def valid_context(raw, kickoff, now):
     return context if pd.notna(captured) and pd.notna(kickoff) and captured <= now and captured < kickoff else {}
 
 
-def attach_market_context(slate, now=None):
+def attach_market_context(slate, now=None, sport="CFB"):
     result = slate.copy()
     result["Market Context"] = None
+    path = SPORT_PATHS[sport]
+    url = f"https://site.api.espn.com/apis/site/v2/sports/{path}/summary"
+    nfl_ids = {}
+    if sport == "NFL":
+        dates = set()
+        for _, row in result.iterrows():
+            kickoff = pd.to_datetime(row.get("Scheduled Kickoff", row.get("Sort Date")), utc=True, errors="coerce")
+            if pd.notna(kickoff) and kickoff > pd.to_datetime(now or datetime.now(timezone.utc), utc=True):
+                dates.add(kickoff.tz_convert("America/New_York").strftime("%Y%m%d"))
+        for day in sorted(dates):
+            try:
+                response = requests.get(f"https://site.api.espn.com/apis/site/v2/sports/{path}/scoreboard",
+                                        params={"dates": day, "limit": 1000}, timeout=15)
+                response.raise_for_status()
+                for event in response.json().get("events", []):
+                    contest = (event.get("competitions") or [{}])[0]
+                    teams = {c.get("homeAway"): (c.get("team") or {}).get("abbreviation") for c in contest.get("competitors", [])}
+                    aliases = {"LAR": "LA", "WSH": "WAS"}
+                    key = (day, aliases.get(teams.get("away"), teams.get("away")), aliases.get(teams.get("home"), teams.get("home")))
+                    nfl_ids[key] = str(event.get("id") or "")
+            except (requests.RequestException, ValueError):
+                print(f"NFL market event mapping unavailable for {day}.")
 
     def collect(item):
         index, row = item
         cutoff = pd.to_datetime(now or datetime.now(timezone.utc), utc=True)
-        kickoff = pd.to_datetime(row.get("Scheduled Kickoff"), utc=True, errors="coerce")
+        kickoff = pd.to_datetime(row.get("Scheduled Kickoff", row.get("Sort Date")), utc=True, errors="coerce")
         if pd.isna(kickoff) or cutoff >= kickoff or str(row.get("Status")).lower() not in {"scheduled", "pre-game", "preview"}:
             return index, None
         try:
-            response = requests.get(SUMMARY_URL, params={"event": str(row["Game ID"])}, timeout=15)
+            event_id = str(row["Game ID"])
+            if sport == "NFL":
+                event_id = nfl_ids.get((kickoff.tz_convert("America/New_York").strftime("%Y%m%d"), row.get("Away"), row.get("Home")))
+                if not event_id:
+                    return index, None
+            response = requests.get(url, params={"event": event_id}, timeout=15)
             response.raise_for_status()
             payload = response.json()
             header = payload.get("header") or {}
             contest = (header.get("competitions") or [{}])[0]
             state = ((contest.get("status") or {}).get("type") or {}).get("state")
-            if str(header.get("id")) != str(row["Game ID"]) or state != "pre":
+            if str(header.get("id")) != event_id or state != "pre":
                 return index, None
             source_kickoff = pd.to_datetime(contest.get("date") or header.get("date"), utc=True, errors="coerce")
             if pd.isna(source_kickoff) or source_kickoff != kickoff:
@@ -103,20 +134,20 @@ def attach_market_context(slate, now=None):
             if not quotes or captured >= kickoff:
                 return index, None
             return index, json.dumps({
-                "version": VERSION, "source": "ESPN summary", "captured_at": captured.isoformat(),
+                "version": VERSION, "source": "ESPN summary", "captured_at": captured.isoformat(), "event_id": event_id,
                 "prediction_as_of": row.get("Source Timestamp"),
                 "model_margin": number(row.get("Model Margin")),
                 "projected_total": number(row.get("Projected Total")),
                 "source_updated_at": None, "quotes": quotes,
             }, allow_nan=False)
         except (requests.RequestException, ValueError, TypeError):
-            print(f"CFB market quote unavailable for {row['Game ID']}; baseline unchanged.")
+            print(f"{sport} market quote unavailable for {row['Game ID']}; baseline unchanged.")
             return index, None
 
     with ThreadPoolExecutor(max_workers=6) as pool:
         for index, context in pool.map(collect, result.iterrows()):
             result.at[index, "Market Context"] = context
-    print(f"CFB pregame market coverage: {result['Market Context'].notna().sum()}/{len(result)} slate games.")
+    print(f"{sport} pregame market coverage: {result['Market Context'].notna().sum()}/{len(result)} slate games.")
     return result
 
 
