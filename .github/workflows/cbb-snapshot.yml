@@ -1,8 +1,8 @@
 name: CBB Slate Snapshot
 
 on:
-  # Schedule disabled until college basketball season tracking is ready.
-  # Keep workflow_dispatch enabled for manual test snapshots.
+  schedule:
+    - cron: "30 * * * *"
   workflow_dispatch:
     inputs:
       slate_date:
