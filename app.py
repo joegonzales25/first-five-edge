@@ -4810,7 +4810,7 @@ def market_discovery_labels(row):
 
 def game_card_title(row):
     title = str(row.get("Game") or "")
-    if row.get("Sport") != "CBB" or not row.get("Away") or not row.get("Home"):
+    if row.get("Sport") not in {"CBB", "CFB"} or not row.get("Away") or not row.get("Home"):
         return title
 
     def team_label(side):

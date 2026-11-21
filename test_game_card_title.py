@@ -32,8 +32,21 @@ class GameCardTitleTests(unittest.TestCase):
                 self.assertEqual(self.format_title(self.row(**{"Away Rank": rank})), "Away @ Home")
 
     def test_other_sports_and_missing_names_preserve_original(self):
-        self.assertEqual(self.format_title(self.row(Sport="CFB", **{"Away Rank": 2})), "Away @ Home")
+        self.assertEqual(self.format_title(self.row(Sport="NFL", **{"Away Rank": 2})), "Away @ Home")
         self.assertEqual(self.format_title({"Sport": "CBB", "Game": "Original"}), "Original")
+
+    def test_cfb_ranks_and_unranked_teams(self):
+        for ranks, expected in [
+            ({"Away Rank": 5, "Home Rank": 12}, "#5 Away @ #12 Home"),
+            ({"Away Rank": "25", "Home Rank": None}, "#25 Away @ Home"),
+            ({"Away Rank": float("nan"), "Home Rank": 1.0}, "Away @ #1 Home"),
+            ({"Away Rank": pd.NA, "Home Rank": 99}, "Away @ Home"),
+        ]:
+            with self.subTest(ranks=ranks):
+                row = self.row(Sport="CFB", **ranks)
+                self.assertEqual(self.format_title(row), expected)
+                self.assertEqual(row["Game"], "Away @ Home")
+        self.assertEqual(self.format_title({"Sport": "CFB", "Game": "Original"}), "Original")
 
 
 if __name__ == "__main__":
