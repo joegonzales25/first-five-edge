@@ -159,6 +159,46 @@ class MarketForwardTests(unittest.TestCase):
             comparison = next(r for r in self.records() if r["sport"] == sport)
             self.assertEqual(decode_context(comparison["market_context"])["model_margin"], 2)
 
+    def test_basketball_captures_late_quote_and_refreshes_until_locked(self):
+        for sport in ("NBA", "CBB"):
+            with self.subTest(sport=sport):
+                module = importlib.import_module(f"{sport.lower()}_model_history")
+                record = getattr(module, f"record_{sport.lower()}_history")
+                row = {**self.row, "Sort Date": self.row["Scheduled Kickoff"],
+                       "Model Signal": "LSU", "Side Edge": "LSU",
+                       "Predicted Winner": "LSU", "Confidence": "C"}
+                with patch.object(module, "connect", return_value=self.connection), \
+                        patch.object(module, "utc_now", return_value="2026-11-14T13:00:00Z"):
+                    record(pd.DataFrame([{**row, "Market Context": None}]),
+                           "2026-11-14", "market", "baseline")
+                self.assertFalse(any(r["sport"] == sport for r in self.records()))
+                for hour, spread in [(14, -3.5), (15, -4.5)]:
+                    stamp = f"2026-11-14T{hour}:00:00Z"
+                    updated = {**context(), "captured_at": stamp}
+                    updated["quotes"][0]["home_spread"] = spread
+                    changed = {**row, "Model Margin": 50, "Projected Total": 100,
+                               "Market Context": json.dumps(updated)}
+                    with patch.object(module, "connect", return_value=self.connection), \
+                            patch.object(module, "utc_now", return_value=stamp):
+                        record(pd.DataFrame([changed]), "2026-11-14", "market", "baseline")
+                    saved = next(r for r in self.records() if r["sport"] == sport)
+                    paired = decode_context(saved["market_context"])
+                    self.assertEqual(paired["model_margin"], 2)
+                    self.assertEqual(paired["projected_total"], 49)
+                    self.assertEqual(paired["prediction_as_of"], "2026-11-14T13:00:00Z")
+                    self.assertEqual(paired["quotes"][0]["home_spread"], spread)
+                with patch.object(module, "connect", return_value=self.connection), \
+                        patch.object(module, "utc_now", return_value="2026-11-15T04:00:00Z"):
+                    record(pd.DataFrame([{**row, "Status": "Final", "Home Score": 24,
+                                          "Away Score": 21}]), "2026-11-14", "market", "baseline")
+                saved = next(r for r in self.records() if r["sport"] == sport)
+                self.assertEqual(saved["snapshot_status"], "Locked")
+                self.assertEqual(decode_context(saved["market_context"]), paired)
+                count = self.connection.execute(
+                    "SELECT COUNT(*) FROM market_forward_observations WHERE sport=?", (sport,)
+                ).fetchone()[0]
+                self.assertEqual(count, 2)
+
     def test_nfl_panels_label_tracks_and_reuse_metric_value_tables(self):
         from streamlit.testing.v1 import AppTest
         tree = ast.parse(Path("app.py").read_text(encoding="utf-8"))

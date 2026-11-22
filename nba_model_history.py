@@ -258,7 +258,7 @@ def existing_snapshot(connection, game_id, market_version, model_version):
     return fetch_one(
         connection,
         """
-        SELECT id
+        SELECT *
         FROM nba_model_history
         WHERE game_id = ?
           AND market_version = ?
