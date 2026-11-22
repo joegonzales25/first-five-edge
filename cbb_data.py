@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 import requests
@@ -53,11 +54,16 @@ def date_range_param(start_date: date, end_date: date) -> str:
 def fetch_cbb_dates_param(dates_param: str, limit: int) -> dict:
     response = requests.get(
         ESPN_CBB_SCOREBOARD_URL,
-        params={"dates": dates_param, "limit": limit},
+        params={"dates": dates_param, "groups": 50, "limit": limit},
         timeout=20,
     )
     response.raise_for_status()
-    return response.json()
+    payload = response.json()
+    if not isinstance(payload.get("events"), list):
+        raise ValueError("ESPN CBB response is missing its events list")
+    if len(payload["events"]) >= limit:
+        raise ValueError("ESPN CBB daily scoreboard reached its game limit")
+    return payload
 
 
 def fetch_cbb_scoreboard(start_date: date, end_date: date, limit: int = 1000) -> dict:
@@ -67,15 +73,22 @@ def fetch_cbb_scoreboard(start_date: date, end_date: date, limit: int = 1000) ->
     if start_date == end_date:
         return fetch_cbb_dates_param(f"{start_date:%Y%m%d}", limit)
 
-    # ESPN's CBB endpoint rejects hyphenated date ranges. Calendar-year
-    # requests provide season history without issuing one request per day.
+    # Calendar-year responses truncate Division I history; ranges are rejected.
+    # Fetch bounded daily scoreboards instead of silently using partial history.
+    days = [start_date + timedelta(days=offset)
+            for offset in range((end_date - start_date).days + 1)]
+
+    def fetch_day(day):
+        return fetch_cbb_dates_param(f"{day:%Y%m%d}", limit)
+
     events_by_id = {}
-    for year in range(start_date.year, end_date.year + 1):
-        payload = fetch_cbb_dates_param(str(year), limit)
-        for event in payload.get("events", []):
-            event_id = event.get("id")
-            if event_id:
-                events_by_id[event_id] = event
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        for payload in pool.map(fetch_day, days):
+            for event in payload["events"]:
+                event_id = event.get("id")
+                if not event_id:
+                    raise ValueError("ESPN CBB event is missing its id")
+                events_by_id[str(event_id)] = event
 
     return {"events": list(events_by_id.values())}
 
