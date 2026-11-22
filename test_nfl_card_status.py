@@ -20,6 +20,30 @@ sort_cards = namespace["sort_nfl_game_cards"]
 
 
 class NflCardStatusTests(unittest.TestCase):
+    def test_nba_current_uses_shared_sort_before_rendering(self):
+        render = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                      and node.name == "render_nba_current")
+        sorting = next(node for node in render.body if isinstance(node, ast.Assign)
+                       and isinstance(node.value, ast.Call)
+                       and isinstance(node.value.func, ast.Name)
+                       and node.value.func.id == "sort_nfl_game_cards")
+        cards = next(node for node in render.body if isinstance(node, ast.For)
+                     and any(isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+                             and call.func.id == "render_wnba_card" for call in ast.walk(node)))
+        self.assertLess(sorting.lineno, cards.lineno)
+        self.assertEqual(ast.unparse(sorting), "filtered = sort_nfl_game_cards(filtered)")
+
+    def test_nba_tipoff_order_groups_upcoming_live_and_finished(self):
+        games = pd.DataFrame([
+            {"Game": "LAL @ BOS", "Status": "Final", "Sort Date": "2026-11-22T18:00Z"},
+            {"Game": "CHI @ NY", "Status": "Halftime", "Sort Date": "2026-11-22T20:00Z"},
+            {"Game": "DEN @ SAC", "Status": "Scheduled", "Sort Date": "2026-11-23T03:00Z"},
+            {"Game": "MIA @ ORL", "Status": "Scheduled", "Sort Date": "2026-11-23T00:00Z"},
+            {"Game": "ATL @ CLE", "Status": "Scheduled", "Sort Date": "2026-11-22T21:00Z"},
+        ])
+        self.assertEqual(sort_cards(games, now="2026-11-22T22:00Z").Game.tolist(),
+                         ["MIA @ ORL", "DEN @ SAC", "CHI @ NY", "ATL @ CLE", "LAL @ BOS"])
+
     def test_upcoming_before_live_and_stale_scheduled_games(self):
         games = pd.DataFrame([
             {"Game": "Final", "Status": "Final", "Sort Date": "2026-09-24T17:00Z"},

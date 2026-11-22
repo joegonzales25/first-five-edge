@@ -7312,6 +7312,7 @@ def render_nba_current():
         st.info("No NBA games match the selected view.")
         return
 
+    filtered = sort_nfl_game_cards(filtered)
     for _, row in filtered.iterrows():
         render_wnba_card(row)
 
