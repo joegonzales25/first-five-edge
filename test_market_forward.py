@@ -1,4 +1,5 @@
 import ast
+from datetime import datetime
 import importlib
 import json
 from pathlib import Path
@@ -198,6 +199,19 @@ class MarketForwardTests(unittest.TestCase):
                     "SELECT COUNT(*) FROM market_forward_observations WHERE sport=?", (sport,)
                 ).fetchone()[0]
                 self.assertEqual(count, 2)
+
+    def test_quote_captured_in_same_second_as_history_write_is_saved(self):
+        for sport in ("NBA", "CBB"):
+            with self.subTest(sport=sport):
+                module = importlib.import_module(f"{sport.lower()}_model_history")
+                capture = {**context(), "captured_at": "2026-11-14T13:00:00.800000Z"}
+                row = {**self.row, "Market Context": json.dumps(capture)}
+                with patch.object(module, "connect", return_value=self.connection), \
+                        patch.object(module, "datetime") as clock:
+                    clock.now.return_value = datetime.fromisoformat("2026-11-14T13:00:00.900000+00:00")
+                    getattr(module, f"record_{sport.lower()}_history")(
+                        pd.DataFrame([row]), "2026-11-14", "market", "baseline")
+                self.assertTrue(any(r["sport"] == sport for r in self.records()))
 
     def test_nfl_panels_label_tracks_and_reuse_metric_value_tables(self):
         from streamlit.testing.v1 import AppTest

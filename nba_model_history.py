@@ -145,7 +145,7 @@ def init_db(connection):
 
 
 def utc_now():
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds")
 
 
 def safe_int(value):
