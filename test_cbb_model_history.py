@@ -1,6 +1,7 @@
 import json
 import sqlite3
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -8,6 +9,7 @@ import pandas as pd
 from cbb_model_history import (
     db_values, init_db, insert_prediction, prediction_values,
     result_values, safe_float, update_result,
+    record_cbb_history,
 )
 
 
@@ -23,6 +25,75 @@ class StrictConnection:
 
 
 class CbbHistoryTests(unittest.TestCase):
+    def frozen_prediction(self, **changes):
+        return {"home_team": "Home", "away_team": "Away", "side_edge": "Home Edge",
+                "predicted_winner": "Home", "scoring_edge": "High Scoring Environment",
+                "model_margin": 8, "projected_total": 155, "league_total_baseline": 150,
+                **changes}
+
+    def test_grading_uses_stored_forecast_not_rebuilt_labels_or_totals(self):
+        row = {"Status": "Final", "Away Score": 70, "Home Score": 82,
+               "Actual Winner": "Away", "Actual Total": 999,
+               "Side Result": "Missed", "Scoring Result": "Missed",
+               "Model Margin": -20, "Projected Total": 200}
+        values = result_values(row, "now", self.frozen_prediction())
+        self.assertEqual(values["actual_winner"], "Home")
+        self.assertEqual(values["actual_total"], 152)
+        self.assertEqual(values["side_result"], "Correct")
+        self.assertEqual(values["scoring_result"], "Correct")
+        self.assertEqual(values["margin_error"], 4)
+        self.assertEqual(values["total_error"], 3)
+
+    def test_no_signals_pending_and_baseline_equality_keep_existing_rules(self):
+        final = {"Status": "Final", "Away Score": 70, "Home Score": 80}
+        for scoring in ("High Scoring Environment", "Low Scoring Environment"):
+            values = result_values(final, "now", self.frozen_prediction(scoring_edge=scoring))
+            self.assertEqual(values["scoring_result"], "Missed")
+        values = result_values(final, "now", self.frozen_prediction(
+            side_edge="Pass", scoring_edge="Neutral Scoring Environment"))
+        self.assertEqual(values["side_result"], "No Signal")
+        self.assertEqual(values["scoring_result"], "No Signal")
+        for row in ({"Status": "Scheduled"}, {**final, "Status": "In Progress"},
+                    {"Status": "Final", "Away Score": None, "Home Score": 80}):
+            values = result_values(row, "now", self.frozen_prediction())
+            self.assertEqual(values["side_result"], "Pending")
+            self.assertEqual(values["scoring_result"], "Pending")
+
+    def test_missing_stored_forecasts_do_not_use_new_projection(self):
+        row = {"Status": "Final", "Away Score": 70, "Home Score": 80,
+               "Model Margin": 100, "Projected Total": 200}
+        values = result_values(row, "now", self.frozen_prediction(
+            model_margin=None, projected_total=None, league_total_baseline=None,
+            predicted_winner=None))
+        self.assertEqual(values["side_result"], "Pending")
+        self.assertEqual(values["scoring_result"], "Pending")
+        self.assertIsNone(values["margin_error"])
+        self.assertIsNone(values["total_error"])
+
+    def test_record_history_grades_original_pick_and_preserves_forecast(self):
+        with sqlite3.connect(":memory:") as connection:
+            connection.row_factory = sqlite3.Row
+            row = {"Game ID": "1", "Game": "Away @ Home", "Away": "Away", "Home": "Home",
+                   "Status": "Scheduled", "Model Margin": 8, "Projected Total": 155,
+                   "League Total Baseline": 150, "Predicted Winner": "Home",
+                   "Side Edge": "Home Edge", "Scoring Edge": "High Scoring Environment"}
+            with patch("cbb_model_history.connect", return_value=connection), \
+                    patch("cbb_model_history.reconcile_market_results"):
+                record_cbb_history(pd.DataFrame([row]), "2026-11-24", "m", "v")
+                changed = {**row, "Status": "Final", "Home Score": 82, "Away Score": 70,
+                           "Model Margin": -20, "Projected Total": 200,
+                           "Predicted Winner": "Away", "Side Result": "Missed",
+                           "Scoring Result": "Missed"}
+                record_cbb_history(pd.DataFrame([changed]), "2026-11-24", "m", "v")
+            saved = dict(connection.execute("SELECT * FROM cbb_model_history").fetchone())
+            self.assertEqual(saved["predicted_winner"], "Home")
+            self.assertEqual(saved["model_margin"], 8)
+            self.assertEqual(saved["projected_total"], 155)
+            self.assertEqual(saved["side_result"], "Correct")
+            self.assertEqual(saved["scoring_result"], "Correct")
+            self.assertEqual(saved["margin_error"], 4)
+            self.assertEqual(saved["total_error"], 3)
+
     def test_missing_and_nonfinite_database_values(self):
         values = db_values([np.nan, pd.NA, pd.NaT, np.inf, -np.inf,
                             np.int64(3), np.float64(2.5), "Pending", None])

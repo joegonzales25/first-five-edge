@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from cbb_agent import scoring_result_for_game, side_result_for_game
 from history_backend_config import resolve_history_backend
 from market_forward import init_market_db, persist_market_row, reconcile_market_results
 
@@ -243,7 +244,7 @@ def prediction_values(row, slate_date, market_version, model_version, now):
     }
 
 
-def result_values(row, now):
+def result_values(row, now, prediction=None):
     away_score = safe_int(row.get("Away Score"))
     home_score = safe_int(row.get("Home Score"))
     actual_total = safe_float(row.get("Actual Total"))
@@ -253,6 +254,33 @@ def result_values(row, now):
     actual_margin = None
     if away_score is not None and home_score is not None:
         actual_margin = home_score - away_score
+
+    actual_winner = row.get("Actual Winner")
+    side_result = row.get("Side Result")
+    scoring_result = row.get("Scoring Result")
+    if prediction is not None:
+        # Grade the frozen forecast using observed scores, not rebuilt model labels.
+        model_margin = safe_float(prediction.get("model_margin"))
+        projected_total = safe_float(prediction.get("projected_total"))
+        baseline = safe_float(prediction.get("league_total_baseline"))
+        actual_total = away_score + home_score if actual_margin is not None else None
+        actual_winner = None
+        if actual_margin is not None and actual_margin != 0:
+            actual_winner = prediction.get("home_team" if actual_margin > 0 else "away_team")
+        completed = is_final(row)
+        side = prediction.get("side_edge")
+        winner = prediction.get("predicted_winner")
+        scoring = prediction.get("scoring_edge")
+        side_result = side_result_for_game(side, winner, actual_winner, completed)
+        if side not in (None, "", "Pass") and not winner:
+            side_result = "Pending"
+        elif side in (None, ""):
+            side_result = "No Signal"
+        scoring_result = scoring_result_for_game(
+            scoring, actual_total, baseline, completed and baseline is not None,
+        )
+        if scoring in (None, ""):
+            scoring_result = "No Signal"
 
     margin_error = None
     if model_margin is not None and actual_margin is not None:
@@ -266,10 +294,10 @@ def result_values(row, now):
         "status": row.get("Status"),
         "away_score": away_score,
         "home_score": home_score,
-        "actual_winner": row.get("Actual Winner"),
+        "actual_winner": actual_winner,
         "actual_total": actual_total,
-        "side_result": row.get("Side Result"),
-        "scoring_result": row.get("Scoring Result"),
+        "side_result": side_result,
+        "scoring_result": scoring_result,
         "margin_error": margin_error,
         "total_error": total_error,
         "updated_at": now,
@@ -415,7 +443,7 @@ def record_cbb_history(
                 game_id,
                 market_version,
                 model_version,
-                result_values(row, now),
+                result_values(row, now, prediction=existing),
             )
             counts["updated"] += 1
 
