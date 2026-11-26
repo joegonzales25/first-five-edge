@@ -89,9 +89,14 @@ def load_market_snapshots(sport, model_version, market_version):
     connection = module.connect()
     try:
         try:
-            return module.fetch_rows(connection, """SELECT * FROM market_forward_snapshots
-                WHERE sport=? AND model_version=? AND market_version=? ORDER BY slate_date DESC, game, track""",
-                (sport, model_version, market_version))
+            conditions, params = ["sport=?"], [sport]
+            for column, value in [("model_version", model_version), ("market_version", market_version)]:
+                if value is not None:
+                    conditions.append(f"{column}=?")
+                    params.append(value)
+            return module.fetch_rows(connection,
+                f"SELECT * FROM market_forward_snapshots WHERE {' AND '.join(conditions)} ORDER BY slate_date DESC, game, track",
+                params)
         except Exception as exc:
             if "no such table" in str(exc).lower():
                 return []

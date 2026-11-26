@@ -80,6 +80,10 @@ from cfb_model_history import (
 from cfb_data import fetch_espn_fbs_teams, fetch_espn_scoreboard, normalize_espn_games
 from cfb_market import decode_context, comparison_rows, forward_rows
 from market_forward import load_market_snapshots, market_report
+from performance_reporting import (
+    DIFFERENCE_BANDS, filter_market_report, market_summary, difference_summary,
+    paired_market_summary, model_result_summary, paired_model_summary, nfl_report_projection_error,
+)
 from mls_model_history import (
     load_mls_history,
     load_mls_performance_summary,
@@ -5743,9 +5747,105 @@ def nfl_track_pick(row, market, segment, model_track):
 
 def render_nfl_performance():
     st.markdown("### NFL Performance")
+    report_view = st.segmented_control(
+        "Report", ["Model Results", "Model vs Market"], default="Model Results",
+        key="nfl_performance_report_view",
+    )
+    if report_view == "Model vs Market":
+        render_nfl_market_performance()
+        return
+    render_nfl_model_performance()
+
+
+def render_nfl_market_performance():
+    try:
+        saved = load_sport_market_history("NFL", None, None)
+        report = pd.DataFrame(market_report(saved))
+        history = safe_load_nfl_history()
+    except Exception:
+        st.error("Stored market comparisons temporarily unavailable.")
+        return
+    controls = st.columns(3)
+    track = controls[0].selectbox("Model Track", ["Both", "Baseline", "Challenger"], key="nfl_market_track")
+    market = controls[1].selectbox("Market", ["All", "Spread", "Total"], key="nfl_market_type")
+    today = datetime.now(ZoneInfo(FALLBACK_TIMEZONE)).date()
+    selected_dates = controls[2].date_input("Date Range", value=(today - timedelta(days=29), today),
+                                          key="nfl_market_dates")
+    if len(selected_dates) != 2:
+        st.info("Select a start and end date.")
+        return
+    start, end = selected_dates
+    controls = st.columns(3)
+    result = controls[0].selectbox("Result", ["All", "Cover", "Miss", "Push", "Pending", "No Difference"], key="nfl_market_result")
+    band = controls[1].selectbox("Projection Difference", list(DIFFERENCE_BANDS), key="nfl_market_difference")
+    versions = sorted({str(r.get("model_version")) for r in saved if r.get("model_version")})
+    release = controls[2].selectbox("Baseline Release", ["All", *versions],
+                                    index=versions.index(MODEL_BASELINES["NFL"]) + 1 if MODEL_BASELINES["NFL"] in versions else 0,
+                                    key="nfl_market_release")
+    version = None if release == "All" else release
+    scoped = filter_market_report(report, start, end, version=version)
+    selected = filter_market_report(scoped, track=track, market=market, result=result, band=band)
+    st.caption(f"{len(selected)} comparisons | {start:%m/%d/%Y} - {end:%m/%d/%Y} | {track} | {market} | {result} | {band} | Baseline release: {release}")
+    captures = [decode_context(r.get("market_context")).get("captured_at") for r in saved
+                if start.isoformat() <= str(r.get("slate_date")) <= end.isoformat()
+                and (version is None or r.get("model_version") == version)]
+    st.caption(f"Snapshot as of: {format_snapshot_time(max(c for c in captures if c))}" if any(captures) else "Snapshot as of: N/A")
+    st.caption("One unit risk per priced comparison | Returns exclude missing odds | Pushes excluded from win rate | Projection differences are not calibrated probabilities")
+    if track in {"Both", "Challenger"}:
+        st.caption("Challenger totals: not independently modeled; no total comparisons tracked.")
+    if selected.empty:
+        st.info("No locked market comparisons match the selected filters.")
+    else:
+        st.markdown("#### Market Results")
+        st.dataframe(market_summary(selected), hide_index=True, width="stretch")
+        st.markdown("#### Projection Difference")
+        st.dataframe(difference_summary(selected), hide_index=True, width="stretch")
+        st.markdown("#### Detailed Results")
+        st.dataframe(selected, hide_index=True, width="stretch")
+        exported = selected.assign(**{"Report Start": start.isoformat(), "Report End": end.isoformat(),
+                                      "Track Filter": track, "Market Filter": market,
+                                      "Result Filter": result, "Difference Filter": band, "Release Filter": release})
+        st.download_button("Download Filtered Market CSV", exported.to_csv(index=False),
+                           "nfl_market_filtered.csv", "text/csv", key="nfl_market_filtered_csv")
+    # Match both tracks before track/result/difference filters can bias pairing.
+    if market in {"All", "Spread"}:
+        with st.expander("Baseline vs Challenger - Matched Spreads"):
+            st.caption(f"{start:%m/%d/%Y} - {end:%m/%d/%Y} | Release: {release} | All results and differences | Identical book, line, capture time and rule; settled on both tracks")
+            paired = paired_market_summary(scoped)
+            if paired.empty:
+                st.info("No matched settled spread comparisons in this date range.")
+            else:
+                st.dataframe(paired, hide_index=True, width="stretch")
+                st.download_button("Download Matched Spreads CSV", paired.assign(**{"Report Start": start.isoformat(), "Report End": end.isoformat()}).to_csv(index=False),
+                                   "nfl_market_matched.csv", "text/csv", key="nfl_market_matched_csv")
+    with st.expander("Capture Coverage"):
+        predictions = {(str(r.get("game_id")), r.get("model_version"), r.get("market_version")) for r in history
+                       if r.get("snapshot_status") == "Locked"
+                       and start.isoformat() <= str(r.get("slate_date")) <= end.isoformat()
+                       and (version is None or r.get("model_version") == version)}
+        coverage = []
+        for name in ["Spread", "Total"]:
+            captured = set()
+            for r in saved:
+                key = (str(r.get("game_id")), r.get("model_version"), r.get("market_version"))
+                if r.get("track") != "Baseline" or key not in predictions:
+                    continue
+                field = "home_spread" if name == "Spread" else "total"
+                if any(q.get(field) is not None for q in decode_context(r.get("market_context")).get("quotes", [])):
+                    captured.add(key)
+            coverage.append({"Market": name, "Locked Predictions": len(predictions),
+                             "With Quote": len(captured), "Without Quote": len(predictions - captured)})
+        st.caption("Date and release scope only | Locked baseline predictions | Missing captures are not backfilled")
+        st.dataframe(pd.DataFrame(coverage), hide_index=True, width="stretch")
+    with st.expander("Original Market Forward Test Export"):
+        st.caption("All dates and releases | Unfiltered locked comparisons")
+        st.download_button("Download Original Market CSV", report.to_csv(index=False),
+                           "nfl_market_forward_test.csv", "text/csv", key="nfl_market_original_csv")
+
+
+def render_nfl_model_performance():
     model_version = MODEL_BASELINES["NFL"]
     market_version = MARKET_RELEASES["NFL"]
-    render_sport_market_forward_test("NFL")
     all_rows = safe_load_nfl_history()
     current_rows = [
         row
@@ -5774,7 +5874,7 @@ def render_nfl_performance():
     with columns[1]:
         window_filter = st.selectbox(
             "Day(s)",
-            ["Today", "Yesterday", "Last 7", "Last 30", "All"],
+            ["Today", "Yesterday", "Last 7", "Last 30", "All", "Custom"], index=3,
             key="nfl_performance_days",
         )
     with columns[2]:
@@ -5793,7 +5893,8 @@ def render_nfl_performance():
     with columns[1]:
         track_filter = st.selectbox(
             "Model Track",
-            ["Baseline", "Challenger", "All"],
+            ["Baseline", "Challenger", "All"], index=2,
+            format_func=lambda value: "Both" if value == "All" else value,
             key="nfl_performance_track",
         )
     with columns[2]:
@@ -5814,7 +5915,15 @@ def render_nfl_performance():
     }
 
 
-    start_date, end_date = date_rules[window_filter]
+    if window_filter == "Custom":
+        chosen_dates = st.date_input("Date Range", value=(today - timedelta(days=29), today),
+                                     key="nfl_model_dates")
+        if len(chosen_dates) != 2:
+            st.info("Select a start and end date.")
+            return
+        start_date, end_date = chosen_dates
+    else:
+        start_date, end_date = date_rules[window_filter]
     filtered = []
     for row in selected:
         try:
@@ -5856,7 +5965,7 @@ def render_nfl_performance():
                     )
                     if (
                         confidence_filter != "All"
-                        and row_confidence != confidence_filter
+                        and market == "Side" and row_confidence != confidence_filter
                     ):
                         continue
                     result = nfl_track_result(
@@ -5876,8 +5985,9 @@ def render_nfl_performance():
                             "Pick": nfl_track_pick(
                                 row, market, segment, model_track
                             ),
-                            "Confidence": row_confidence,
-                            "Side Confidence": row_confidence,
+                            "Confidence": row_confidence if market == "Side" else "Uncalibrated",
+                            "Side Confidence": row_confidence if market == "Side" else None,
+                            "Evaluation Basis": {"Side": "Outright winner", "Scoring": "Internal scoring baseline", "First Half": "Halftime leader"}[market],
                             "First Half Version": row.get("first_half_version") if market == "First Half" else None,
                             "First Half Margin": row.get("first_half_margin") if market == "First Half" else None,
                             "Scoring Confidence": "Uncalibrated",
@@ -5907,7 +6017,7 @@ def render_nfl_performance():
                                 row.get("edge_score")
                                 if model_track == "Baseline"
                                 else row.get("challenger_model_margin")
-                            ),
+                            ) if market == "Side" else None,
                             "Result": result,
                             "Status": row.get("status"),
                             "Model": (
@@ -5916,6 +6026,9 @@ def render_nfl_performance():
                                 else row.get("challenger_model_version")
                             ),
                             "Market Version": row.get("market_version"),
+                            "Baseline Version": row.get("model_version"),
+                            "Margin Error": nfl_report_projection_error(row, model_track, "Side") if market == "Side" else None,
+                            "Total Error": nfl_report_projection_error(row, model_track, "Scoring") if market == "Scoring" else None,
                         }
                     )
                 if not market_rows:
@@ -5933,7 +6046,7 @@ def render_nfl_performance():
                         "hits": hits,
                         "misses": misses,
                         "pushes": pushes,
-                        "pending": len(market_rows) - hits - misses - pushes,
+                        "pending": sum(result == "Pending" for _, result in market_rows),
                     }
                 )
 
@@ -5962,6 +6075,23 @@ def render_nfl_performance():
             key="nfl_history_download",
         )
 
+    if details:
+        st.caption("Outright winner / internal scoring baseline / halftime leader | No sportsbook spreads or totals | Confidence filter applies to Side only")
+        st.dataframe(model_result_summary(pd.DataFrame(details)), hide_index=True, width="stretch")
+        with st.expander("Baseline vs Challenger - Matched Model Results"):
+            st.caption("Active filters | Games with settled decisions on both tracks only")
+            paired = paired_model_summary(pd.DataFrame(details))
+            if paired.empty:
+                st.info("No matched model decisions under the active filters. Select Model Track: All for both tracks.")
+            else:
+                st.dataframe(paired, hide_index=True, width="stretch")
+        exported = pd.DataFrame(details).assign(**{"Report Window": window_filter, "Signal Filter": market_filter,
+                                                  "Segment Filter": segment_filter, "Track Filter": track_filter,
+                                                  "Side Confidence Filter": confidence_filter, "Model Filter": model_filter,
+                                                  "Report Start": start_date.isoformat() if start_date else "All",
+                                                  "Report End": end_date.isoformat() if end_date else "All"})
+        st.download_button("Download Filtered Model CSV", exported.to_csv(index=False),
+                           "nfl_model_filtered.csv", "text/csv", key="nfl_model_filtered_csv")
     if not summaries:
         st.info("No NFL tracked results match the selected filters.")
         return
