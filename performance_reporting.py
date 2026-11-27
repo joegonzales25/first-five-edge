@@ -161,6 +161,35 @@ def model_result_summary(details):
     return pd.DataFrame(rows)
 
 
+def cbb_report_details(rows, signal="All", confidence="All"):
+    details = []
+    for row in rows:
+        if row.get("snapshot_status") == "Not Tracked":
+            continue
+        for name in (["Side", "Scoring"] if signal == "All" else [signal]):
+            side = name == "Side"
+            pick = row.get("predicted_winner" if side else "scoring_edge")
+            edge = row.get("side_edge" if side else "scoring_edge")
+            if edge in (None, "", "Pass", "Neutral Scoring Environment", "Not Tracked"):
+                continue
+            if side and confidence != "All" and row.get("confidence") != confidence:
+                continue
+            result = row.get("side_result" if side else "scoring_result") or "Pending"
+            details.append({
+                "Slate": row.get("slate_date"), "Signal": name, "Model Track": "Baseline",
+                "Game": row.get("game"), "Pick": pick,
+                "Confidence": row.get("confidence") if side else "Uncalibrated",
+                "Side Confidence": row.get("confidence") if side else None,
+                "Score": row.get("edge_score") if side else row.get("projected_total"),
+                "Result": result, "Status": row.get("status"), "Model": row.get("model_version"),
+                "Baseline Version": row.get("model_version"), "Market Version": row.get("market_version"),
+                "Evaluation Basis": "Outright winner" if side else "Internal scoring baseline",
+                "Margin Error": row.get("margin_error") if side and str(row.get("status")).lower() == "final" else None,
+                "Total Error": row.get("total_error") if not side and str(row.get("status")).lower() == "final" else None,
+            })
+    return pd.DataFrame(details)
+
+
 def paired_model_summary(details):
     if details.empty:
         return pd.DataFrame()
@@ -222,6 +251,8 @@ def performance_cards_html(frame, kind):
                                & (frame["Signal"] == row["Signal"])]
             segments = []
             for segment in ["Official", "Lean", "Watch"]:
+                if "Segment" not in subset:
+                    break
                 results = subset.loc[subset["Segment"] == segment, "Result"]
                 if results.empty:
                     continue
@@ -231,11 +262,12 @@ def performance_cards_html(frame, kind):
                                 f'<td>{percentage(accuracy)}</td><td>{int(results.eq("Pending").sum())}</td></tr>')
             notes = [f'{row[field]} {label}' for field, label in [("Pending", "pending"), ("No Signal", "no signal")] if row[field]]
             note_html = f'<p class="nfl-report-note">{" | ".join(notes)}</p>' if notes else ""
+            segment_html = ('<table class="nfl-report-segments"><thead><tr><th>Segment</th><th>W-L-P</th><th>Accuracy</th><th>Pending</th></tr></thead>'
+                            f'<tbody>{"".join(segments)}</tbody></table>') if segments else ""
             body = (f'<div class="nfl-report-value">{percentage(row["Accuracy %"])}<span> Accuracy</span></div>'
                     f'<p>{row["Correct"]} Correct | {row["Missed"]} Missed | {row["Push"]} Push</p>'
                     f'{note_html}'
-                    '<table class="nfl-report-segments"><thead><tr><th>Segment</th><th>W-L-P</th><th>Accuracy</th><th>Pending</th></tr></thead>'
-                    f'<tbody>{"".join(segments)}</tbody></table>')
+                    f'{segment_html}')
         if kind == "market":
             cards.append(body)
         else:

@@ -84,6 +84,7 @@ from performance_reporting import (
     DIFFERENCE_BANDS, filter_market_report, market_summary, difference_summary,
     paired_market_summary, model_result_summary, paired_model_summary, nfl_report_projection_error,
     performance_cards_html,
+    cbb_report_details,
 )
 from mls_model_history import (
     load_mls_history,
@@ -5759,20 +5760,25 @@ def render_nfl_performance():
 
 
 def render_nfl_market_performance():
+    render_market_performance("NFL")
+
+
+def render_market_performance(sport):
+    prefix = sport.lower()
     try:
-        saved = load_sport_market_history("NFL", None, None)
+        saved = load_sport_market_history(sport, None, None)
         report = pd.DataFrame(market_report(saved))
-        history = safe_load_nfl_history()
+        history = safe_load_nfl_history() if sport == "NFL" else load_cbb_history()
     except Exception:
         st.error("Stored market comparisons temporarily unavailable.")
         return
-    controls = st.columns(3)
-    track = controls[0].selectbox("Model Track", ["Both", "Baseline", "Challenger"], key="nfl_market_track")
-    market = controls[1].selectbox("Market", ["All", "Spread", "Total"], key="nfl_market_type")
+    controls = st.columns(3 if sport == "NFL" else 2)
+    track = controls[0].selectbox("Model Track", ["Both", "Baseline", "Challenger"], key=f"{prefix}_market_track") if sport == "NFL" else "Baseline"
+    market = controls[1 if sport == "NFL" else 0].selectbox("Market", ["All", "Spread", "Total"], key=f"{prefix}_market_type")
     today = datetime.now(ZoneInfo(FALLBACK_TIMEZONE)).date()
-    window_filter = controls[2].selectbox(
+    window_filter = controls[2 if sport == "NFL" else 1].selectbox(
         "Day(s)", ["Today", "Yesterday", "Last 7", "Last 30", "All", "Custom"],
-        index=3, key="nfl_market_days",
+        index=3, key=f"{prefix}_market_days",
     )
     date_rules = {
         "Today": (today, today),
@@ -5783,7 +5789,7 @@ def render_nfl_market_performance():
     }
     if window_filter == "Custom":
         selected_dates = st.date_input("Date Range", value=(today - timedelta(days=29), today),
-                                       key="nfl_market_dates")
+                                       key=f"{prefix}_market_dates")
         if len(selected_dates) != 2:
             st.info("Select a start and end date.")
             return
@@ -5800,12 +5806,12 @@ def render_nfl_market_performance():
         return (start is None or day.date() >= start) and (end is None or day.date() <= end)
 
     controls = st.columns(3)
-    result = controls[0].selectbox("Result", ["All", "Cover", "Miss", "Push", "Pending", "No Difference"], key="nfl_market_result")
-    band = controls[1].selectbox("Projection Difference", list(DIFFERENCE_BANDS), key="nfl_market_difference")
+    result = controls[0].selectbox("Result", ["All", "Cover", "Miss", "Push", "Pending", "No Difference"], key=f"{prefix}_market_result")
+    band = controls[1].selectbox("Projection Difference", list(DIFFERENCE_BANDS), key=f"{prefix}_market_difference")
     versions = sorted({str(r.get("model_version")) for r in saved if r.get("model_version")})
     release = controls[2].selectbox("Baseline Release", ["All", *versions],
-                                    index=versions.index(MODEL_BASELINES["NFL"]) + 1 if MODEL_BASELINES["NFL"] in versions else 0,
-                                    key="nfl_market_release")
+                                    index=versions.index(MODEL_BASELINES[sport]) + 1 if MODEL_BASELINES[sport] in versions else 0,
+                                    key=f"{prefix}_market_release")
     version = None if release == "All" else release
     scoped = filter_market_report(report, start, end, version=version)
     selected = filter_market_report(scoped, track=track, market=market, result=result, band=band)
@@ -5815,7 +5821,7 @@ def render_nfl_market_performance():
                 and (version is None or r.get("model_version") == version)]
     st.caption(f"Snapshot as of: {format_snapshot_time(max(c for c in captures if c))}" if any(captures) else "Snapshot as of: N/A")
     st.caption("One unit risk per priced comparison | Returns exclude missing odds | Pushes excluded from win rate | Projection differences are not calibrated probabilities")
-    if track in {"Both", "Challenger"}:
+    if sport == "NFL" and track in {"Both", "Challenger"}:
         st.caption("Challenger totals: not independently modeled; no total comparisons tracked.")
     if selected.empty:
         st.info("No locked market comparisons match the selected filters.")
@@ -5829,7 +5835,7 @@ def render_nfl_market_performance():
             st.dataframe(difference_summary(selected), hide_index=True, width="stretch")
     # Match both tracks before track/result/difference filters can bias pairing.
     paired = pd.DataFrame()
-    if market in {"All", "Spread"}:
+    if sport == "NFL" and market in {"All", "Spread"}:
         with st.expander("Baseline vs Challenger - Matched Spreads", expanded=False):
             st.caption(f"{window_filter}: {range_label} | Release: {release} | All results and differences | Identical book, line, capture time and rule; settled on both tracks")
             paired = paired_market_summary(scoped)
@@ -5862,13 +5868,13 @@ def render_nfl_market_performance():
                                           "Track Filter": track, "Market Filter": market,
                                           "Result Filter": result, "Difference Filter": band, "Release Filter": release})
             st.download_button("Download Filtered Market CSV", exported.to_csv(index=False),
-                               "nfl_market_filtered.csv", "text/csv", key="nfl_market_filtered_csv")
+                               f"{prefix}_market_filtered.csv", "text/csv", key=f"{prefix}_market_filtered_csv")
         if not paired.empty:
             st.download_button("Download Matched Spreads CSV", paired.assign(**{"Report Start": start_text, "Report End": end_text, "Report Window": window_filter}).to_csv(index=False),
-                               "nfl_market_matched.csv", "text/csv", key="nfl_market_matched_csv")
+                               f"{prefix}_market_matched.csv", "text/csv", key=f"{prefix}_market_matched_csv")
         st.caption("All dates and releases | Unfiltered locked comparisons")
         st.download_button("Download Original Market CSV", report.to_csv(index=False),
-                           "nfl_market_forward_test.csv", "text/csv", key="nfl_market_original_csv")
+                           f"{prefix}_market_forward_test.csv", "text/csv", key=f"{prefix}_market_original_csv")
 
 
 def render_nfl_model_performance():
@@ -7863,9 +7869,19 @@ def render_cbb_current():
 
 def render_cbb_performance_section():
     st.markdown("### CBB Performance")
+    report_view = st.segmented_control(
+        "Report", ["Model Results", "Model vs Market"], default="Model Results",
+        key="cbb_performance_report_view",
+    )
+    if report_view == "Model vs Market":
+        render_market_performance("CBB")
+        return
+    render_cbb_model_performance()
+
+
+def render_cbb_model_performance():
     model_version = MODEL_BASELINES["CBB"]
     market_version = MARKET_RELEASES["CBB"]
-    render_sport_market_forward_test("CBB")
     current_summary = load_cbb_performance_summary(
         model_version=model_version,
         market_version=market_version,
@@ -7878,8 +7894,8 @@ def render_cbb_performance_section():
     )
     all_rows = load_cbb_history()
 
-    if current_summary["snapshots"] == 0:
-        st.info("No CBB performance snapshots recorded yet. Manual CBB snapshots can be run from GitHub Actions once season tracking is ready.")
+    if not all_rows:
+        st.info("No CBB performance snapshots recorded yet. Hourly snapshots record eligible pregame predictions.")
         return
 
     model_filter_options = [f"Current {model_version}", "All"]
@@ -7893,12 +7909,12 @@ def render_cbb_performance_section():
     with filter_cols[1]:
         window_filter = st.selectbox(
             "Day(s)",
-            ["Today", "Yesterday", "Last 7", "Last 30", "All"],
+            ["Today", "Yesterday", "Last 7", "Last 30", "All", "Custom"], index=3,
             key="cbb_performance_window_filter",
         )
     with filter_cols[2]:
         confidence_filter = st.selectbox(
-            "Confidence",
+            "Side Confidence",
             ["All", "A", "B", "C", "Pass"],
             key="cbb_performance_confidence_filter",
         )
@@ -7915,163 +7931,43 @@ def render_cbb_performance_section():
         if selected_model_filter == "All"
         else f"Current {model_version}"
     )
-    history_today = latest_wnba_history_date(selected_rows) or datetime.now().date()
-
-    day_filters = {
-        "Today": {"exact_date": history_today, "label": f"Today ({history_today})"},
-        "Yesterday": {
-            "exact_date": history_today - timedelta(days=1),
-            "label": f"Yesterday ({history_today - timedelta(days=1)})",
-        },
-        "Last 7": 7,
-        "Last 30": 30,
-        "All": {"days": None, "exact_date": None, "label": "All history"},
-    }[window_filter]
-    if isinstance(day_filters, dict):
-        days = day_filters.get("days")
-        exact_date = day_filters.get("exact_date")
-        day_label = day_filters["label"]
+    today = datetime.now(ZoneInfo(FALLBACK_TIMEZONE)).date()
+    date_rules = {
+        "Today": (today, today),
+        "Yesterday": (today - timedelta(days=1), today - timedelta(days=1)),
+        "Last 7": (today - timedelta(days=6), today),
+        "Last 30": (today - timedelta(days=29), today),
+        "All": (None, None),
+    }
+    if window_filter == "Custom":
+        selected_dates = st.date_input("Date Range", value=(today - timedelta(days=29), today),
+                                       key="cbb_model_dates")
+        if len(selected_dates) != 2:
+            st.info("Select a start and end date.")
+            return
+        start, end = selected_dates
     else:
-        days = day_filters
-        exact_date = None
-        day_label = f"{window_filter} days"
-
-    if days is not None:
-        filtered_rows = [
-            row
-            for row in selected_rows
-            if wnba_history_row_matches_filters(
-                row,
-                market_filter,
-                days=days,
-                confidence=confidence_filter,
-                exact_date=None,
-                anchor_date=history_today,
-            )
-        ]
-    else:
-        filtered_rows = [
-            row
-            for row in selected_rows
-            if wnba_history_row_matches_filters(
-                row,
-                market_filter,
-                days=None,
-                confidence=confidence_filter,
-                exact_date=exact_date,
-            )
-        ]
-
-    summary_rows = summarize_wnba_performance_rows(filtered_rows, market_filter)
-    detail_rows = wnba_detail_rows(filtered_rows, market_filter)
-
-    with st.expander("CBB Performance History Diagnostics"):
-        diag_cols = st.columns(4)
-        with diag_cols[0]:
-            st.metric("Snapshots", current_summary["snapshots"])
-        with diag_cols[1]:
-            st.metric("Completed", current_summary["completed"])
-        with diag_cols[2]:
-            st.metric("Side Signals", current_summary["side_signal_games"])
-        with diag_cols[3]:
-            st.metric("Scoring Notes", current_summary["scoring_signal_games"])
-
-        st.caption(
-            "Snapshot rule: CBB predictions are stored only for pregame snapshots; "
-            "final rows update result fields only when a matching snapshot exists."
-        )
-        st.caption(f"Storage: {storage_backend}")
-        st.code(storage_path, language="text")
-        st.caption(
-            f"Current market version: {market_version} | Current model baseline: {model_version}"
-        )
-
-        export_label = (
-            "all_models"
-            if selected_model_filter == "All"
-            else str(model_version).replace(".", "_")
-        )
-        st.download_button(
-            f"Download CBB Performance History CSV ({len(selected_rows)} rows)",
-            data=wnba_rows_to_csv(selected_rows),
-            file_name=f"cbb_model_history_{export_label}.csv",
-            mime="text/csv",
-            key="cbb_history_download",
-        )
-
-    if not summary_rows:
+        start, end = date_rules[window_filter]
+    filtered_rows = []
+    for row in selected_rows:
+        day = pd.to_datetime(row.get("slate_date"), errors="coerce")
+        if pd.isna(day) or (start and day.date() < start) or (end and day.date() > end):
+            continue
+        filtered_rows.append(row)
+    detail_df = cbb_report_details(filtered_rows, market_filter, confidence_filter)
+    st.caption(f"{len(detail_df)} decisions | {window_filter} | {model_label} | {market_filter}")
+    st.caption(format_snapshot_caption(filtered_rows))
+    st.caption("Outright winner / internal scoring baseline | No sportsbook spreads or totals | Side Confidence applies to Side only")
+    if detail_df.empty:
         st.info("No CBB tracked results match the selected filters.")
-        return
-
-    result_cards = []
-    for row in summary_rows:
-        completed = (row.get("hits") or 0) + (row.get("misses") or 0)
-        pending = row.get("pending") or 0
-        record = f"{row.get('hits') or 0}-{row.get('misses') or 0}"
-        result_cards.append(
-            '<div class="performance-card">'
-            f'<div class="performance-market">{escape(row["market"])}</div>'
-            f'<div class="performance-hit-rate">{performance_hit_rate(row)}</div>'
-            f'<div class="performance-record">{escape(record)} record</div>'
-            f'<div class="performance-meta">{completed} completed - {pending} pending</div>'
-            '</div>'
-        )
-
-    filter_text = f"{model_label} - {day_label}"
-    if market_filter != "All":
-        filter_text += f" - {market_filter}"
-    if confidence_filter != "All":
-        filter_text += f" - {confidence_filter} confidence"
-
-    st.html(
-        '<div class="model-favorite top-looks">'
-        '<div class="model-label">CBB MODEL PERFORMANCE</div>'
-        f'<div class="top-look-meta">{escape(filter_text)}</div>'
-        '<div class="performance-results">'
-        f'{"".join(result_cards)}'
-        '</div>'
-        '</div>'
-    )
-
-    if not detail_rows:
-        st.info("No detailed CBB rows match the selected filters.")
-        return
-
-    detail_df = pd.DataFrame(detail_rows)
-    detail_df = detail_df.rename(
-        columns={
-            "slate_date": "Slate",
-            "market": "Signal",
-            "game": "Game",
-            "pick": "Pick",
-            "confidence": "Confidence",
-            "score": "Score",
-            "result": "Result",
-            "status": "Status",
-            "model_version": "Model",
-            "market_version": "Market Version",
-        }
-    )
-    st.dataframe(
-        detail_df[
-            [
-                "Slate",
-                "Signal",
-                "Game",
-                "Pick",
-                "Confidence",
-                "Score",
-                "Result",
-                "Status",
-                "Model",
-                "Market Version",
-            ]
-        ],
-        hide_index=True,
-        use_container_width=True,
-    )
-
-    with st.expander("CBB Performance Splits"):
+    else:
+        st.html(performance_cards_html(detail_df, "model"))
+        with st.expander("Combined Summary", expanded=False):
+            st.dataframe(model_result_summary(detail_df), hide_index=True, width="stretch")
+        with st.expander("Detailed Results", expanded=False):
+            st.dataframe(detail_df, hide_index=True, width="stretch")
+    with st.expander("CBB Performance Splits", expanded=False):
+        st.caption(f"All dates | Current baseline {model_version} | Market {market_version}")
         tables = load_cbb_performance_tables(
             model_version=model_version,
             market_version=market_version,
@@ -8085,6 +7981,29 @@ def render_cbb_performance_section():
                     st.caption("No split rows yet.")
                 else:
                     st.dataframe(split_df, width="stretch", hide_index=True)
+
+    with st.expander("CBB Performance History Diagnostics", expanded=False):
+        columns = st.columns(4)
+        for column, label, key in zip(columns, ["Snapshots", "Completed", "Side Signals", "Scoring Notes"],
+                                      ["snapshots", "completed", "side_signal_games", "scoring_signal_games"]):
+            column.metric(label, current_summary[key])
+        st.caption("Only stored pregame predictions are tracked. Results use the frozen forecast; no retrospective quotes are added.")
+        st.caption(f"Storage: {storage_backend}")
+        st.code(storage_path, language="text")
+        st.caption(f"Current market version: {market_version} | Current model baseline: {model_version}")
+    with st.expander("Exports", expanded=False):
+        if not detail_df.empty:
+            exported = detail_df.assign(**{"Report Window": window_filter, "Signal Filter": market_filter,
+                                           "Side Confidence Filter": confidence_filter, "Model Filter": selected_model_filter,
+                                           "Report Start": start.isoformat() if start else "All",
+                                           "Report End": end.isoformat() if end else "All"})
+            st.download_button("Download Filtered Model CSV", exported.to_csv(index=False),
+                               "cbb_model_filtered.csv", "text/csv", key="cbb_model_filtered_csv")
+        st.caption("Original history export | Selected model release | All dates and signals")
+        export_label = "all_models" if selected_model_filter == "All" else str(model_version).replace(".", "_")
+        st.download_button(f"Download CBB Performance History CSV ({len(selected_rows)} rows)",
+                           data=wnba_rows_to_csv(selected_rows), file_name=f"cbb_model_history_{export_label}.csv",
+                           mime="text/csv", key="cbb_history_download")
 
 
 def render_cbb_historical():

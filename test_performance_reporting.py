@@ -29,7 +29,7 @@ def market_row(track="Baseline", **changes):
 class ReportingTests(unittest.TestCase):
     def test_nfl_details_and_exports_follow_primary_results(self):
         tree = ast.parse(Path("app.py").read_text(encoding="utf-8"))
-        for name in ["render_nfl_market_performance", "render_nfl_model_performance"]:
+        for name in ["render_market_performance", "render_nfl_model_performance", "render_cbb_model_performance"]:
             with self.subTest(view=name):
                 function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name)
                 expanders = [n for n in ast.walk(function) if isinstance(n, ast.With)
@@ -192,8 +192,8 @@ class ReportingTests(unittest.TestCase):
     def test_market_gui_controls_and_filtered_download(self):
         from streamlit.testing.v1 import AppTest
         tree = ast.parse(Path("app.py").read_text(encoding="utf-8"))
-        function = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
-                        and n.name == "render_nfl_market_performance")
+        functions = [n for n in tree.body if isinstance(n, ast.FunctionDef)
+                     and n.name in {"render_nfl_market_performance", "render_market_performance"}]
         source = '''import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
@@ -207,7 +207,7 @@ safe_load_nfl_history=lambda:[]
 load_sport_market_history=lambda *args:[]
 '''
         source += "market_report=lambda _:" + repr([market_row(), market_row("Challenger"), market_row(Slate="2000-01-01")]) + "\n"
-        source += ast.unparse(function) + "\nrender_nfl_market_performance()"
+        source += "\n".join(ast.unparse(n) for n in functions) + "\nrender_nfl_market_performance()"
         app = AppTest.from_string(source).run()
         self.assertEqual(len(app.exception), 0)
         self.assertEqual(app.selectbox[0].value, "Both")
