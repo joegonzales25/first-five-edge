@@ -85,6 +85,7 @@ from performance_reporting import (
     paired_market_summary, model_result_summary, paired_model_summary, nfl_report_projection_error,
     performance_cards_html,
     cbb_report_details,
+    cfb_report_details, cfb_market_report_data,
 )
 from mls_model_history import (
     load_mls_history,
@@ -5766,9 +5767,14 @@ def render_nfl_market_performance():
 def render_market_performance(sport):
     prefix = sport.lower()
     try:
-        saved = load_sport_market_history(sport, None, None)
-        report = pd.DataFrame(market_report(saved))
-        history = safe_load_nfl_history() if sport == "NFL" else load_cbb_history()
+        if sport == "CFB":
+            history = load_cfb_history()
+            saved, report_rows = cfb_market_report_data(history)
+            report = pd.DataFrame(report_rows)
+        else:
+            saved = load_sport_market_history(sport, None, None)
+            report = pd.DataFrame(market_report(saved))
+            history = safe_load_nfl_history() if sport == "NFL" else load_cbb_history()
     except Exception:
         st.error("Stored market comparisons temporarily unavailable.")
         return
@@ -5854,6 +5860,8 @@ def render_market_performance(sport):
             for r in saved:
                 key = (str(r.get("game_id")), r.get("model_version"), r.get("market_version"))
                 if r.get("track") != "Baseline" or key not in predictions:
+                    continue
+                if r.get("quote_market") not in (None, name):
                     continue
                 field = "home_spread" if name == "Spread" else "total"
                 if any(q.get(field) is not None for q in decode_context(r.get("market_context")).get("quotes", [])):
@@ -8365,15 +8373,17 @@ def cfb_filtered_history(
     tier_filter,
     confidence_filter,
     outcome_filter,
+    date_range=None,
 ):
     today = datetime.now(ZoneInfo("America/New_York")).date()
-    day_rule = {
+    day_rules = {
         "Today": (today, today),
         "Yesterday": (today - timedelta(days=1), today - timedelta(days=1)),
         "Last 7": (today - timedelta(days=6), today),
         "Last 30": (today - timedelta(days=29), today),
         "All": (None, None),
-    }[window_filter]
+    }
+    day_rule = date_range if date_range is not None else day_rules[window_filter]
     filtered = []
     for row in rows:
         if row.get("snapshot_status") != "Locked":
@@ -8424,6 +8434,17 @@ def cfb_performance_groups(rows):
 
 def render_cfb_performance_section():
     st.markdown("### CFB Performance")
+    report_view = st.segmented_control(
+        "Report", ["Model Results", "Model vs Market"], default="Model Results",
+        key="cfb_performance_report_view",
+    )
+    if report_view == "Model vs Market":
+        render_market_performance("CFB")
+        return
+    render_cfb_model_performance()
+
+
+def render_cfb_model_performance():
     model_version = MODEL_BASELINES["CFB"]
     market_version = MARKET_RELEASES["CFB"]
     try:
@@ -8440,10 +8461,9 @@ def render_cfb_performance_section():
         st.error(f"Could not load CFB performance history: {exc}")
         return
 
-    if current_summary["snapshots"] == 0:
+    if not all_rows:
         st.info(
-            "No CFB snapshots recorded yet. Run the manual CFB workflow to "
-            "record the first ESPN-backed slate."
+            "No CFB snapshots recorded yet. Hourly snapshots record eligible pregame predictions."
         )
         return
 
@@ -8457,7 +8477,7 @@ def render_cfb_performance_section():
     with columns[1]:
         window_filter = st.selectbox(
             "Day(s)",
-            ["Today", "Yesterday", "Last 7", "Last 30", "All"],
+            ["Today", "Yesterday", "Last 7", "Last 30", "All", "Custom"], index=3,
             key="cfb_performance_window_filter",
         )
     with columns[2]:
@@ -8487,15 +8507,15 @@ def render_cfb_performance_section():
         )
 
     source_rows = all_rows if model_filter == "All" else current_rows
-    with st.expander("Market Forward Test"):
-        observations = pd.DataFrame(forward_rows(source_rows))
-        st.caption("All dates for selected model | Locked pregame quotes | Hypothetical one-unit risk per comparison")
-        if observations.empty:
-            st.caption("No locked pregame market comparisons recorded yet.")
-        else:
-            st.dataframe(observations, hide_index=True, use_container_width=True)
-            st.download_button("Download Market Forward Test CSV", observations.to_csv(index=False),
-                               "cfb_market_forward_test.csv", "text/csv", key="cfb_market_forward_csv")
+    date_range = None
+    if window_filter == "Custom":
+        today = datetime.now(ZoneInfo(FALLBACK_TIMEZONE)).date()
+        selected_dates = st.date_input("Date Range", value=(today - timedelta(days=29), today),
+                                       key="cfb_model_dates")
+        if len(selected_dates) != 2:
+            st.info("Select a start and end date.")
+            return
+        date_range = selected_dates
     filtered_rows = cfb_filtered_history(
         source_rows,
         market_filter,
@@ -8503,61 +8523,23 @@ def render_cfb_performance_section():
         tier_filter,
         confidence_filter,
         outcome_filter,
+        date_range=date_range,
     )
-    summaries = cfb_performance_groups(filtered_rows)
-    if summaries:
-        cards = []
-        for row in summaries:
-            completed = row["hits"] + row["misses"] + row["pushes"]
-            record = f"{row['hits']}-{row['misses']}"
-            if row["pushes"]:
-                record += f"-{row['pushes']}"
-            cards.append(
-                '<div class="performance-card">'
-                f'<div class="performance-market">{escape(row["market"])}</div>'
-                f'<div class="performance-hit-rate">{performance_hit_rate(row)}</div>'
-                f'<div class="performance-record">{escape(record)} record</div>'
-                f'<div class="performance-meta">{completed} completed - {row["pending"]} pending</div>'
-                "</div>"
-            )
-        st.html(
-            '<div class="model-favorite top-looks">'
-            '<div class="model-label">CFB MODEL PERFORMANCE</div>'
-            f'<div class="top-look-meta">{escape(model_filter)} - {escape(window_filter)}</div>'
-            f'<div class="performance-results">{"".join(cards)}</div>'
-            "</div>"
-        )
+    details = cfb_report_details(filtered_rows)
+    st.caption(f"{len(details)} decisions | {model_filter} | {window_filter} | {market_filter} | {tier_filter} | {confidence_filter} | {outcome_filter}")
+    st.caption(format_snapshot_caption(filtered_rows))
+    st.caption("Outright winner / internal scoring baseline / halftime leader | No sportsbook spreads or totals")
+    if not details.empty:
+        st.html(performance_cards_html(details, "model"))
+        with st.expander("Combined Summary", expanded=False):
+            st.dataframe(model_result_summary(details), hide_index=True, width="stretch")
+        with st.expander("Detailed Results", expanded=False):
+            st.dataframe(details, hide_index=True, width="stretch")
     else:
         st.info("No locked CFB decisions match the selected report filters.")
 
     export_df = pd.DataFrame(filtered_rows)
-    st.download_button(
-        f"Download CFB Performance CSV ({len(filtered_rows)} rows)",
-        data=export_df.to_csv(index=False) if not export_df.empty else "",
-        file_name="cfb_performance_filtered.csv",
-        mime="text/csv",
-        key="cfb_performance_download",
-        disabled=export_df.empty,
-    )
-    if not export_df.empty:
-        display_columns = [
-            "slate_date",
-            "market",
-            "game",
-            "pick",
-            "decision_tier",
-            "confidence",
-            "result",
-            "status",
-            "locked_at",
-        ]
-        st.dataframe(
-            export_df[display_columns],
-            hide_index=True,
-            use_container_width=True,
-        )
-
-    with st.expander("CFB Performance Diagnostics"):
+    with st.expander("CFB Performance Diagnostics", expanded=False):
         metrics = st.columns(4)
         metrics[0].metric("Snapshots", current_summary["snapshots"])
         metrics[1].metric("Graded", current_summary["completed"])
@@ -8568,6 +8550,7 @@ def render_cfb_performance_section():
         )
         st.caption(f"Storage: {current_summary['storage_backend']}")
         st.code(current_summary["db_path"], language="text")
+        st.caption(f"All dates | Current baseline {model_version} | Market {market_version}")
         tables = load_cfb_performance_tables(
             model_version=model_version,
             market_version=market_version,
@@ -8577,6 +8560,26 @@ def render_cfb_performance_section():
             st.dataframe(pd.DataFrame(tables["tier"]), hide_index=True)
         with market_tab:
             st.dataframe(pd.DataFrame(tables["market"]), hide_index=True)
+    with st.expander("Exports", expanded=False):
+        if not details.empty:
+            exported = details.assign(**{"Report Window": window_filter, "Signal Filter": market_filter,
+                                          "Decision Filter": tier_filter, "Confidence Filter": confidence_filter,
+                                          "Outcome Filter": outcome_filter, "Model Filter": model_filter})
+            if date_range is not None:
+                exported = exported.assign(**{"Report Start": date_range[0].isoformat(), "Report End": date_range[1].isoformat()})
+            st.download_button("Download Filtered Model CSV", exported.to_csv(index=False),
+                               "cfb_model_filtered.csv", "text/csv", key="cfb_model_filtered_csv")
+        st.download_button(
+            f"Download CFB Performance CSV ({len(filtered_rows)} rows)",
+            data=export_df.to_csv(index=False) if not export_df.empty else "",
+            file_name="cfb_performance_filtered.csv", mime="text/csv",
+            key="cfb_performance_download", disabled=export_df.empty,
+        )
+        observations = pd.DataFrame(forward_rows(source_rows))
+        st.caption("Original market export | Selected model | All dates | Locked pregame quotes")
+        st.download_button("Download Market Forward Test CSV", observations.to_csv(index=False),
+                           "cfb_market_forward_test.csv", "text/csv", key="cfb_market_forward_csv",
+                           disabled=observations.empty)
 
 
 @st.cache_data(ttl=900)

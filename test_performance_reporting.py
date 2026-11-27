@@ -29,7 +29,7 @@ def market_row(track="Baseline", **changes):
 class ReportingTests(unittest.TestCase):
     def test_nfl_details_and_exports_follow_primary_results(self):
         tree = ast.parse(Path("app.py").read_text(encoding="utf-8"))
-        for name in ["render_market_performance", "render_nfl_model_performance", "render_cbb_model_performance"]:
+        for name in ["render_market_performance", "render_nfl_model_performance", "render_cbb_model_performance", "render_cfb_model_performance"]:
             with self.subTest(view=name):
                 function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name)
                 expanders = [n for n in ast.walk(function) if isinstance(n, ast.With)

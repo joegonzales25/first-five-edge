@@ -1,7 +1,8 @@
 """Read-only summaries for stored model and market results."""
 
 import pandas as pd
-from cfb_market import number
+from cfb_market import number, forward_rows, decode_context, valid_context
+from datetime import datetime, timezone
 from html import escape
 
 
@@ -188,6 +189,43 @@ def cbb_report_details(rows, signal="All", confidence="All"):
                 "Total Error": row.get("total_error") if not side and str(row.get("status")).lower() == "final" else None,
             })
     return pd.DataFrame(details)
+
+
+def cfb_report_details(rows):
+    signals = {"Full Game": "Side", "Scoring Environment": "Scoring", "First Half": "First Half"}
+    details = []
+    for row in rows:
+        signal = signals.get(row.get("market"))
+        if not signal or row.get("snapshot_status") != "Locked" or row.get("decision_tier") not in {"Official", "Lean", "Watch"}:
+            continue
+        details.append({
+            "Slate": row.get("slate_date"), "Signal": signal, "Stored Market": row.get("market"),
+            "Model Track": "Baseline", "Segment": row.get("decision_tier"), "Game": row.get("game"),
+            "Pick": row.get("pick"), "Confidence": row.get("confidence"), "Score": row.get("score"),
+            "Result": row.get("result") or "Pending", "Status": row.get("status"),
+            "Locked At": row.get("locked_at"),
+            "Model": row.get("model_version"), "Baseline Version": row.get("model_version"),
+            "Market Version": row.get("market_version"),
+            "Evaluation Basis": {"Side": "Outright winner", "Scoring": "Internal scoring baseline", "First Half": "Halftime leader"}[signal],
+            "Margin Error": nfl_report_projection_error(row, "Baseline", "Side") if signal == "Side" else None,
+            "Total Error": nfl_report_projection_error(row, "Baseline", "Scoring") if signal == "Scoring" else None,
+        })
+    return pd.DataFrame(details)
+
+
+def cfb_market_report_data(history):
+    """Adapt CFB's per-signal history for the shared read-only market report."""
+    report = [{"Sport": "CFB", "Model Track": "Baseline", "Baseline Version": r["Model"], **r}
+              for r in forward_rows(history)]
+    snapshots = []
+    for row in history:
+        if row.get("market") not in {"Full Game", "Scoring Environment"}:
+            continue
+        if not valid_context(row.get("market_context"), row.get("scheduled_kickoff"), datetime.now(timezone.utc)):
+            continue
+        snapshots.append({**row, "track": "Baseline", "track_version": row.get("model_version"),
+                          "quote_market": "Spread" if row["market"] == "Full Game" else "Total"})
+    return snapshots, report
 
 
 def paired_model_summary(details):
