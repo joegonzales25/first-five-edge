@@ -243,7 +243,8 @@ def performance_cards_html(frame, kind):
                     f'{note_html}'
                     '<table class="nfl-report-segments"><thead><tr><th>Segment</th><th>W-L-P</th><th>Accuracy</th><th>Pending</th></tr></thead>'
                     f'<tbody>{"".join(segments)}</tbody></table>')
-        cards.append(f'<article class="nfl-report-card {track_class}"><h4>{escape(title)}</h4>{version_label}{body}</article>')
+        report_class = " market" if kind == "market" else ""
+        cards.append(f'<article class="nfl-report-card {track_class}{report_class}"><h4>{escape(title)}</h4>{version_label}{body}</article>')
     return '''<style>
 .nfl-report-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:16px 0 24px;letter-spacing:0}
 .nfl-report-card{min-width:0;padding:20px;background:#14212d;color:#f5f7fa;border:1px solid #46525e;border-top:4px solid #35b58b;border-radius:8px;overflow-wrap:anywhere}
@@ -252,7 +253,8 @@ def performance_cards_html(frame, kind):
 .nfl-report-card p{font-size:14px;line-height:1.5;margin:10px 0}
 .nfl-report-value{font-size:30px;font-weight:700;line-height:1.3}.nfl-report-value span{font-size:15px;font-weight:400}
 .nfl-report-card .nfl-report-note{color:#c2ccd5;font-size:12px}
-.nfl-report-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:16px 0}
+.nfl-report-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:16px 0}
+.nfl-report-card.market .nfl-report-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
 .nfl-report-metrics dt{font-size:12px;color:#c2ccd5}.nfl-report-metrics dd{font-size:16px;font-weight:600;margin:4px 0 0}
 .nfl-report-card .nfl-report-segments{width:100%;table-layout:fixed;border-collapse:collapse;margin-top:16px;font-size:12px;background:transparent}
 .nfl-report-segments th,.nfl-report-segments td{text-align:right;padding:8px 3px;border-bottom:1px solid #46525e;color:#f5f7fa}
