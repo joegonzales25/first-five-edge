@@ -5770,12 +5770,35 @@ def render_nfl_market_performance():
     track = controls[0].selectbox("Model Track", ["Both", "Baseline", "Challenger"], key="nfl_market_track")
     market = controls[1].selectbox("Market", ["All", "Spread", "Total"], key="nfl_market_type")
     today = datetime.now(ZoneInfo(FALLBACK_TIMEZONE)).date()
-    selected_dates = controls[2].date_input("Date Range", value=(today - timedelta(days=29), today),
-                                          key="nfl_market_dates")
-    if len(selected_dates) != 2:
-        st.info("Select a start and end date.")
-        return
-    start, end = selected_dates
+    window_filter = controls[2].selectbox(
+        "Day(s)", ["Today", "Yesterday", "Last 7", "Last 30", "All", "Custom"],
+        index=3, key="nfl_market_days",
+    )
+    date_rules = {
+        "Today": (today, today),
+        "Yesterday": (today - timedelta(days=1), today - timedelta(days=1)),
+        "Last 7": (today - timedelta(days=6), today),
+        "Last 30": (today - timedelta(days=29), today),
+        "All": (None, None),
+    }
+    if window_filter == "Custom":
+        selected_dates = st.date_input("Date Range", value=(today - timedelta(days=29), today),
+                                       key="nfl_market_dates")
+        if len(selected_dates) != 2:
+            st.info("Select a start and end date.")
+            return
+        start, end = selected_dates
+    else:
+        start, end = date_rules[window_filter]
+    range_label = f"{start:%m/%d/%Y} - {end:%m/%d/%Y}" if start else "All dates"
+    start_text, end_text = start.isoformat() if start else "All", end.isoformat() if end else "All"
+
+    def in_date_range(value):
+        day = pd.to_datetime(value, errors="coerce")
+        if pd.isna(day):
+            return False
+        return (start is None or day.date() >= start) and (end is None or day.date() <= end)
+
     controls = st.columns(3)
     result = controls[0].selectbox("Result", ["All", "Cover", "Miss", "Push", "Pending", "No Difference"], key="nfl_market_result")
     band = controls[1].selectbox("Projection Difference", list(DIFFERENCE_BANDS), key="nfl_market_difference")
@@ -5786,9 +5809,9 @@ def render_nfl_market_performance():
     version = None if release == "All" else release
     scoped = filter_market_report(report, start, end, version=version)
     selected = filter_market_report(scoped, track=track, market=market, result=result, band=band)
-    st.caption(f"{len(selected)} comparisons | {start:%m/%d/%Y} - {end:%m/%d/%Y} | {track} | {market} | {result} | {band} | Baseline release: {release}")
+    st.caption(f"{len(selected)} comparisons | {window_filter}: {range_label} | {track} | {market} | {result} | {band} | Baseline release: {release}")
     captures = [decode_context(r.get("market_context")).get("captured_at") for r in saved
-                if start.isoformat() <= str(r.get("slate_date")) <= end.isoformat()
+                if in_date_range(r.get("slate_date"))
                 and (version is None or r.get("model_version") == version)]
     st.caption(f"Snapshot as of: {format_snapshot_time(max(c for c in captures if c))}" if any(captures) else "Snapshot as of: N/A")
     st.caption("One unit risk per priced comparison | Returns exclude missing odds | Pushes excluded from win rate | Projection differences are not calibrated probabilities")
@@ -5808,7 +5831,7 @@ def render_nfl_market_performance():
     paired = pd.DataFrame()
     if market in {"All", "Spread"}:
         with st.expander("Baseline vs Challenger - Matched Spreads", expanded=False):
-            st.caption(f"{start:%m/%d/%Y} - {end:%m/%d/%Y} | Release: {release} | All results and differences | Identical book, line, capture time and rule; settled on both tracks")
+            st.caption(f"{window_filter}: {range_label} | Release: {release} | All results and differences | Identical book, line, capture time and rule; settled on both tracks")
             paired = paired_market_summary(scoped)
             if paired.empty:
                 st.info("No matched settled spread comparisons in this date range.")
@@ -5817,7 +5840,7 @@ def render_nfl_market_performance():
     with st.expander("Capture Coverage", expanded=False):
         predictions = {(str(r.get("game_id")), r.get("model_version"), r.get("market_version")) for r in history
                        if r.get("snapshot_status") == "Locked"
-                       and start.isoformat() <= str(r.get("slate_date")) <= end.isoformat()
+                       and in_date_range(r.get("slate_date"))
                        and (version is None or r.get("model_version") == version)}
         coverage = []
         for name in ["Spread", "Total"]:
@@ -5835,13 +5858,13 @@ def render_nfl_market_performance():
         st.dataframe(pd.DataFrame(coverage), hide_index=True, width="stretch")
     with st.expander("Exports", expanded=False):
         if not selected.empty:
-            exported = selected.assign(**{"Report Start": start.isoformat(), "Report End": end.isoformat(),
+            exported = selected.assign(**{"Report Start": start_text, "Report End": end_text, "Report Window": window_filter,
                                           "Track Filter": track, "Market Filter": market,
                                           "Result Filter": result, "Difference Filter": band, "Release Filter": release})
             st.download_button("Download Filtered Market CSV", exported.to_csv(index=False),
                                "nfl_market_filtered.csv", "text/csv", key="nfl_market_filtered_csv")
         if not paired.empty:
-            st.download_button("Download Matched Spreads CSV", paired.assign(**{"Report Start": start.isoformat(), "Report End": end.isoformat()}).to_csv(index=False),
+            st.download_button("Download Matched Spreads CSV", paired.assign(**{"Report Start": start_text, "Report End": end_text, "Report Window": window_filter}).to_csv(index=False),
                                "nfl_market_matched.csv", "text/csv", key="nfl_market_matched_csv")
         st.caption("All dates and releases | Unfiltered locked comparisons")
         st.download_button("Download Original Market CSV", report.to_csv(index=False),

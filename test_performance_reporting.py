@@ -196,12 +196,29 @@ format_snapshot_time=str
 safe_load_nfl_history=lambda:[]
 load_sport_market_history=lambda *args:[]
 '''
-        source += "market_report=lambda _:" + repr([market_row(), market_row("Challenger")]) + "\n"
+        source += "market_report=lambda _:" + repr([market_row(), market_row("Challenger"), market_row(Slate="2000-01-01")]) + "\n"
         source += ast.unparse(function) + "\nrender_nfl_market_performance()"
         app = AppTest.from_string(source).run()
         self.assertEqual(len(app.exception), 0)
         self.assertEqual(app.selectbox[0].value, "Both")
+        self.assertEqual(app.selectbox[2].value, "Last 30")
+        self.assertEqual(app.selectbox[2].options, ["Today", "Yesterday", "Last 7", "Last 30", "All", "Custom"])
+        self.assertEqual(len(app.date_input), 0)
         self.assertTrue(any("Net Units" in d.value.columns for d in app.dataframe))
+        app.selectbox[2].select("Yesterday").run()
+        self.assertEqual(len(app.exception), 0)
+        self.assertTrue(any("No locked market comparisons" in i.value for i in app.info))
+        app.selectbox[2].select("All").run()
+        self.assertEqual(len(app.exception), 0)
+        detail = next(d.value for d in app.dataframe if "Model Track" in d.value.columns)
+        self.assertEqual(len(detail), 3)
+        self.assertEqual(len(app.date_input), 0)
+        app.selectbox[2].select("Custom").run()
+        self.assertEqual(len(app.exception), 0)
+        self.assertEqual(len(app.date_input), 1)
+        app.selectbox[2].select("Today").run()
+        self.assertEqual(len(app.exception), 0)
+        self.assertEqual(len(app.date_input), 0)
         app.selectbox[0].select("Challenger").run()
         self.assertEqual(len(app.exception), 0)
         detail = next(d.value for d in app.dataframe if "Model Track" in d.value.columns)
