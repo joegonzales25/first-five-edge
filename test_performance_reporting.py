@@ -12,6 +12,7 @@ from performance_reporting import (
     filter_market_report, market_statistics, market_summary, paired_market_summary,
     difference_summary, nfl_report_projection_error,
     model_result_summary, paired_model_summary,
+    performance_cards_html,
 )
 
 
@@ -37,7 +38,7 @@ class ReportingTests(unittest.TestCase):
                              and n.items[0].context_expr.func.attr == "expander"]
                 primary = next(n for n in ast.walk(function) if isinstance(n, ast.Call)
                                and isinstance(n.func, ast.Attribute)
-                               and n.func.attr == ("html" if name.endswith("model_performance") else "dataframe"))
+                               and n.func.attr == "html")
                 for expander in expanders:
                     self.assertGreater(expander.lineno, primary.lineno)
                     call = expander.items[0].context_expr
@@ -48,6 +49,9 @@ class ReportingTests(unittest.TestCase):
                     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "download_button":
                         self.assertGreater(node.lineno, exports.lineno)
                         self.assertLessEqual(node.end_lineno, exports.end_lineno)
+                    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "dataframe":
+                        self.assertTrue(any(expander.lineno < node.lineno <= expander.end_lineno
+                                            for expander in expanders))
 
     def test_returns_exclude_missing_odds_and_pending_not_push_risk(self):
         frame = pd.DataFrame([
@@ -68,6 +72,34 @@ class ReportingTests(unittest.TestCase):
         no_odds = market_statistics(frame.iloc[[3]])
         self.assertIsNone(no_odds["Net Units"])
         self.assertIsNone(no_odds["Return %"])
+
+    def test_model_cards_combine_segments_and_order_tracks(self):
+        row = {"Slate": "2026-11-25", "Game": "A @ H", "Model Track": "Baseline",
+               "Model": "1", "Baseline Version": "1", "Market Version": "2", "Signal": "Side",
+               "Segment": "Official", "Result": "Correct", "Margin Error": 2, "Total Error": None}
+        frame = pd.DataFrame([row, {**row, "Segment": "Lean", "Result": "Missed"},
+                              {**row, "Segment": "Watch", "Result": "Pending"},
+                              {**row, "Model Track": "Challenger", "Model": "test"}])
+        html = performance_cards_html(frame, "model")
+        self.assertEqual(html.count("<article"), 2)
+        self.assertIn("50.0%", html)
+        self.assertIn("1 pending", html)
+        self.assertIn("Official", html)
+        self.assertIn("Lean", html)
+        self.assertIn("Watch", html)
+        self.assertLess(html.index("Baseline | Full-Game Winner"), html.index("Challenger | Full-Game Winner"))
+        self.assertIn("@media(max-width:700px)", html)
+        self.assertEqual(performance_cards_html(frame.iloc[:0], "model"), "")
+
+    def test_market_cards_show_returns_and_pending_without_invented_results(self):
+        frame = pd.DataFrame([market_row(Result="Pending", **{"Hypothetical Units": None}),
+                              market_row("Challenger", Result="Cover", **{"American Odds": None, "Hypothetical Units": None})])
+        html = performance_cards_html(frame, "market")
+        self.assertEqual(html.count("<article"), 2)
+        self.assertIn("N/A<span> Units", html)
+        self.assertIn("1 pending", html)
+        self.assertIn("1 missing odds", html)
+        self.assertIn("Priced Results", html)
 
     def test_filters_and_bands_do_not_mutate_original(self):
         frame = pd.DataFrame([market_row(), market_row("Challenger"),

@@ -83,6 +83,7 @@ from market_forward import load_market_snapshots, market_report
 from performance_reporting import (
     DIFFERENCE_BANDS, filter_market_report, market_summary, difference_summary,
     paired_market_summary, model_result_summary, paired_model_summary, nfl_report_projection_error,
+    performance_cards_html,
 )
 from mls_model_history import (
     load_mls_history,
@@ -5796,8 +5797,9 @@ def render_nfl_market_performance():
     if selected.empty:
         st.info("No locked market comparisons match the selected filters.")
     else:
-        st.markdown("#### Market Results")
-        st.dataframe(market_summary(selected), hide_index=True, width="stretch")
+        st.html(performance_cards_html(selected, "market"))
+        with st.expander("Combined Summary", expanded=False):
+            st.dataframe(market_summary(selected), hide_index=True, width="stretch")
         with st.expander("Detailed Results", expanded=False):
             st.dataframe(selected, hide_index=True, width="stretch")
         with st.expander("Projection Difference", expanded=False):
@@ -5954,12 +5956,10 @@ def render_nfl_model_performance():
         if track_filter == "All"
         else [track_filter]
     )
-    summaries = []
     details = []
     for model_track in model_tracks:
         for segment in segments:
             for market in markets:
-                market_rows = []
                 for row in filtered:
                     row_confidence = (
                         row.get("confidence")
@@ -5976,7 +5976,6 @@ def render_nfl_model_performance():
                     )
                     if result is None:
                         continue
-                    market_rows.append((row, result))
                     details.append(
                         {
                             "Slate": row.get("slate_date"),
@@ -6034,54 +6033,16 @@ def render_nfl_model_performance():
                             "Total Error": nfl_report_projection_error(row, model_track, "Scoring") if market == "Scoring" else None,
                         }
                     )
-                if not market_rows:
-                    continue
-                hits = sum(result == "Correct" for _, result in market_rows)
-                misses = sum(result == "Missed" for _, result in market_rows)
-                pushes = sum(result == "Push" for _, result in market_rows)
-                summaries.append(
-                    {
-                        "market": (
-                            f"{model_track} {segment} {market}"
-                            if track_filter == "All" or segment_filter == "All"
-                            else market
-                        ),
-                        "hits": hits,
-                        "misses": misses,
-                        "pushes": pushes,
-                        "pending": sum(result == "Pending" for _, result in market_rows),
-                    }
-                )
 
     if details:
         st.caption("Outright winner / internal scoring baseline / halftime leader | No sportsbook spreads or totals | Confidence filter applies to Side only")
-        st.dataframe(model_result_summary(pd.DataFrame(details)), hide_index=True, width="stretch")
-    if not summaries:
+        st.html(performance_cards_html(pd.DataFrame(details), "model"))
+    if not details:
         st.info("No NFL tracked results match the selected filters.")
 
-    cards = []
-    for row in summaries:
-        completed = row["hits"] + row["misses"] + row["pushes"]
-        record = f"{row['hits']}-{row['misses']}"
-        if row["pushes"]:
-            record += f"-{row['pushes']}"
-        cards.append(
-            '<div class="performance-card">'
-            f'<div class="performance-market">{escape(row["market"])}</div>'
-            f'<div class="performance-hit-rate">{performance_hit_rate(row)}</div>'
-            f'<div class="performance-record">{record} record</div>'
-            f'<div class="performance-meta">{completed} completed - {row["pending"]} pending</div>'
-            '</div>'
-        )
-    if cards:
-        st.html(
-            '<div class="model-favorite top-looks">'
-            '<div class="model-label">NFL MODEL PERFORMANCE</div>'
-            f'<div class="top-look-meta">{escape(window_filter)} - monitored test</div>'
-            f'<div class="performance-results">{"".join(cards)}</div>'
-            '</div>'
-        )
     if details:
+        with st.expander("Combined Summary", expanded=False):
+            st.dataframe(model_result_summary(pd.DataFrame(details)), hide_index=True, width="stretch")
         with st.expander("Detailed Results", expanded=False):
             st.dataframe(pd.DataFrame(details), width="stretch", hide_index=True)
         with st.expander("Baseline vs Challenger - Matched Model Results", expanded=False):

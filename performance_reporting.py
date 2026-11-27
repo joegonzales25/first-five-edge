@@ -2,6 +2,7 @@
 
 import pandas as pd
 from cfb_market import number
+from html import escape
 
 
 DIFFERENCE_BANDS = {
@@ -185,3 +186,83 @@ def paired_model_summary(details):
                              "Push": int(result.eq("Push").sum()),
                              "Accuracy %": round(100 * wins / (wins + losses), 2) if wins + losses else None})
     return pd.DataFrame(rows)
+
+
+def performance_cards_html(frame, kind):
+    """Render the existing summaries without changing counts or selection scope."""
+    summary = market_summary(frame) if kind == "market" else model_result_summary(frame)
+    if summary.empty:
+        return ""
+    label_column = "Market" if kind == "market" else "Signal"
+    labels = {"Side": "Full-Game Winner", "Scoring": "Scoring vs Internal Baseline",
+              "First Half": "Halftime Leader", "Spread": "Spread", "Total": "Total"}
+    order = {name: i for i, name in enumerate(labels)}
+    records = sorted(summary.to_dict("records"), key=lambda r: (
+        order.get(r[label_column], 99), 0 if r["Track"] == "Baseline" else 1,
+        str(r["Model"]), str(r["Baseline Version"]), str(r["Market Version"])))
+
+    def percentage(value):
+        return f"{value:.1f}%" if pd.notna(value) else "N/A"
+
+    def units(value):
+        return f"{value:+.2f}" if pd.notna(value) else "N/A"
+
+    cards = []
+    for row in records:
+        title = f"{row['Track']} | {labels.get(row[label_column], row[label_column])}"
+        track_class = "baseline" if row["Track"] == "Baseline" else "challenger"
+        versions = summary.loc[(summary["Track"] == row["Track"]) & (summary[label_column] == row[label_column])]
+        version_label = (f'<p class="nfl-report-note">Model {escape(str(row["Model"]))} | Baseline {escape(str(row["Baseline Version"]))} | Market {escape(str(row["Market Version"]))}</p>'
+                         if len(versions) > 1 else "")
+        if kind == "market":
+            headline = units(row["Net Units"])
+            tone = "gain" if pd.notna(row["Net Units"]) and row["Net Units"] > 0 else "loss" if pd.notna(row["Net Units"]) and row["Net Units"] < 0 else ""
+            notes = [f'{row["Settled"]} settled']
+            notes.extend(f'{row[field]} {label}' for field, label in
+                         [("Pending", "pending"), ("Missing Odds", "missing odds"), ("No Difference", "no difference")]
+                         if row[field])
+            body = (f'<div class="nfl-report-value {tone}">{headline}<span> Units</span></div>'
+                    f'<p>{escape(row["Record"])} <span class="nfl-report-note">Win-Loss-Push</span></p>'
+                    '<dl class="nfl-report-metrics">'
+                    f'<div><dt>Win Rate</dt><dd>{percentage(row["Win Rate %"])}</dd></div>'
+                    f'<div><dt>Return</dt><dd>{percentage(row["Return %"])}</dd></div>'
+                    f'<div><dt>Priced Results</dt><dd>{row["Priced Settled"]}</dd></div></dl>'
+                    f'<p class="nfl-report-note">{" | ".join(notes)}</p>')
+        else:
+            subset = frame.loc[(frame["Model Track"] == row["Track"]) & (frame["Model"] == row["Model"])
+                               & (frame["Baseline Version"] == row["Baseline Version"])
+                               & (frame["Market Version"] == row["Market Version"])
+                               & (frame["Signal"] == row["Signal"])]
+            segments = []
+            for segment in ["Official", "Lean", "Watch"]:
+                results = subset.loc[subset["Segment"] == segment, "Result"]
+                if results.empty:
+                    continue
+                correct, missed, pushes = (int(results.eq(v).sum()) for v in ["Correct", "Missed", "Push"])
+                accuracy = 100 * correct / (correct + missed) if correct + missed else None
+                segments.append(f'<tr><th scope="row">{segment}</th><td>{correct}-{missed}-{pushes}</td>'
+                                f'<td>{percentage(accuracy)}</td><td>{int(results.eq("Pending").sum())}</td></tr>')
+            notes = [f'{row[field]} {label}' for field, label in [("Pending", "pending"), ("No Signal", "no signal")] if row[field]]
+            note_html = f'<p class="nfl-report-note">{" | ".join(notes)}</p>' if notes else ""
+            body = (f'<div class="nfl-report-value">{percentage(row["Accuracy %"])}<span> Accuracy</span></div>'
+                    f'<p>{row["Correct"]} Correct | {row["Missed"]} Missed | {row["Push"]} Push</p>'
+                    f'{note_html}'
+                    '<table class="nfl-report-segments"><thead><tr><th>Segment</th><th>W-L-P</th><th>Accuracy</th><th>Pending</th></tr></thead>'
+                    f'<tbody>{"".join(segments)}</tbody></table>')
+        cards.append(f'<article class="nfl-report-card {track_class}"><h4>{escape(title)}</h4>{version_label}{body}</article>')
+    return '''<style>
+.nfl-report-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:16px 0 24px;letter-spacing:0}
+.nfl-report-card{min-width:0;padding:20px;background:#14212d;color:#f5f7fa;border:1px solid #46525e;border-top:4px solid #35b58b;border-radius:8px;overflow-wrap:anywhere}
+.nfl-report-card.challenger{border-top-color:#35bad2}
+.nfl-report-card h4{font-size:18px;line-height:1.4;margin:0 0 16px;color:#f5f7fa;letter-spacing:0}
+.nfl-report-card p{font-size:14px;line-height:1.5;margin:10px 0}
+.nfl-report-value{font-size:30px;font-weight:700;line-height:1.3}.nfl-report-value span{font-size:15px;font-weight:400}
+.nfl-report-value.gain{color:#72e0ac}.nfl-report-value.loss{color:#ffaaa7}
+.nfl-report-card .nfl-report-note{color:#c2ccd5;font-size:12px}
+.nfl-report-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:16px 0}
+.nfl-report-metrics dt{font-size:12px;color:#c2ccd5}.nfl-report-metrics dd{font-size:16px;font-weight:600;margin:4px 0 0}
+.nfl-report-card .nfl-report-segments{width:100%;table-layout:fixed;border-collapse:collapse;margin-top:16px;font-size:12px;background:transparent}
+.nfl-report-segments th,.nfl-report-segments td{text-align:right;padding:8px 3px;border-bottom:1px solid #46525e;color:#f5f7fa}
+.nfl-report-segments th:first-child{text-align:left}.nfl-report-segments thead th{font-weight:400;color:#c2ccd5}
+@media(max-width:700px){.nfl-report-grid{grid-template-columns:minmax(0,1fr)}.nfl-report-card{padding:16px}}
+</style><div class="nfl-report-grid">''' + "".join(cards) + "</div>"
