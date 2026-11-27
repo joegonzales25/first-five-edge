@@ -26,6 +26,29 @@ def market_row(track="Baseline", **changes):
 
 
 class ReportingTests(unittest.TestCase):
+    def test_nfl_details_and_exports_follow_primary_results(self):
+        tree = ast.parse(Path("app.py").read_text(encoding="utf-8"))
+        for name in ["render_nfl_market_performance", "render_nfl_model_performance"]:
+            with self.subTest(view=name):
+                function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name)
+                expanders = [n for n in ast.walk(function) if isinstance(n, ast.With)
+                             and isinstance(n.items[0].context_expr, ast.Call)
+                             and isinstance(n.items[0].context_expr.func, ast.Attribute)
+                             and n.items[0].context_expr.func.attr == "expander"]
+                primary = next(n for n in ast.walk(function) if isinstance(n, ast.Call)
+                               and isinstance(n.func, ast.Attribute)
+                               and n.func.attr == ("html" if name.endswith("model_performance") else "dataframe"))
+                for expander in expanders:
+                    self.assertGreater(expander.lineno, primary.lineno)
+                    call = expander.items[0].context_expr
+                    self.assertTrue(any(k.arg == "expanded" and k.value.value is False for k in call.keywords))
+                exports = next(n for n in expanders if n.items[0].context_expr.args[0].value == "Exports")
+                self.assertEqual(exports.lineno, max(n.lineno for n in expanders))
+                for node in ast.walk(function):
+                    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "download_button":
+                        self.assertGreater(node.lineno, exports.lineno)
+                        self.assertLessEqual(node.end_lineno, exports.end_lineno)
+
     def test_returns_exclude_missing_odds_and_pending_not_push_risk(self):
         frame = pd.DataFrame([
             market_row(), market_row(Result="Miss", **{"Hypothetical Units": -1}),

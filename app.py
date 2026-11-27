@@ -5798,27 +5798,21 @@ def render_nfl_market_performance():
     else:
         st.markdown("#### Market Results")
         st.dataframe(market_summary(selected), hide_index=True, width="stretch")
-        st.markdown("#### Projection Difference")
-        st.dataframe(difference_summary(selected), hide_index=True, width="stretch")
-        st.markdown("#### Detailed Results")
-        st.dataframe(selected, hide_index=True, width="stretch")
-        exported = selected.assign(**{"Report Start": start.isoformat(), "Report End": end.isoformat(),
-                                      "Track Filter": track, "Market Filter": market,
-                                      "Result Filter": result, "Difference Filter": band, "Release Filter": release})
-        st.download_button("Download Filtered Market CSV", exported.to_csv(index=False),
-                           "nfl_market_filtered.csv", "text/csv", key="nfl_market_filtered_csv")
+        with st.expander("Detailed Results", expanded=False):
+            st.dataframe(selected, hide_index=True, width="stretch")
+        with st.expander("Projection Difference", expanded=False):
+            st.dataframe(difference_summary(selected), hide_index=True, width="stretch")
     # Match both tracks before track/result/difference filters can bias pairing.
+    paired = pd.DataFrame()
     if market in {"All", "Spread"}:
-        with st.expander("Baseline vs Challenger - Matched Spreads"):
+        with st.expander("Baseline vs Challenger - Matched Spreads", expanded=False):
             st.caption(f"{start:%m/%d/%Y} - {end:%m/%d/%Y} | Release: {release} | All results and differences | Identical book, line, capture time and rule; settled on both tracks")
             paired = paired_market_summary(scoped)
             if paired.empty:
                 st.info("No matched settled spread comparisons in this date range.")
             else:
                 st.dataframe(paired, hide_index=True, width="stretch")
-                st.download_button("Download Matched Spreads CSV", paired.assign(**{"Report Start": start.isoformat(), "Report End": end.isoformat()}).to_csv(index=False),
-                                   "nfl_market_matched.csv", "text/csv", key="nfl_market_matched_csv")
-    with st.expander("Capture Coverage"):
+    with st.expander("Capture Coverage", expanded=False):
         predictions = {(str(r.get("game_id")), r.get("model_version"), r.get("market_version")) for r in history
                        if r.get("snapshot_status") == "Locked"
                        and start.isoformat() <= str(r.get("slate_date")) <= end.isoformat()
@@ -5837,7 +5831,16 @@ def render_nfl_market_performance():
                              "With Quote": len(captured), "Without Quote": len(predictions - captured)})
         st.caption("Date and release scope only | Locked baseline predictions | Missing captures are not backfilled")
         st.dataframe(pd.DataFrame(coverage), hide_index=True, width="stretch")
-    with st.expander("Original Market Forward Test Export"):
+    with st.expander("Exports", expanded=False):
+        if not selected.empty:
+            exported = selected.assign(**{"Report Start": start.isoformat(), "Report End": end.isoformat(),
+                                          "Track Filter": track, "Market Filter": market,
+                                          "Result Filter": result, "Difference Filter": band, "Release Filter": release})
+            st.download_button("Download Filtered Market CSV", exported.to_csv(index=False),
+                               "nfl_market_filtered.csv", "text/csv", key="nfl_market_filtered_csv")
+        if not paired.empty:
+            st.download_button("Download Matched Spreads CSV", paired.assign(**{"Report Start": start.isoformat(), "Report End": end.isoformat()}).to_csv(index=False),
+                               "nfl_market_matched.csv", "text/csv", key="nfl_market_matched_csv")
         st.caption("All dates and releases | Unfiltered locked comparisons")
         st.download_button("Download Original Market CSV", report.to_csv(index=False),
                            "nfl_market_forward_test.csv", "text/csv", key="nfl_market_original_csv")
@@ -6050,51 +6053,11 @@ def render_nfl_model_performance():
                     }
                 )
 
-    with st.expander("NFL Performance History Diagnostics"):
-        metrics = st.columns(4)
-        metrics[0].metric("Snapshots", current_summary["snapshots"])
-        metrics[1].metric("Completed", current_summary["completed"])
-        metrics[2].metric(
-            "Side Decisions",
-            current_summary["side_signal_games"],
-        )
-        metrics[3].metric(
-            "Scoring Decisions",
-            current_summary["scoring_signal_games"],
-        )
-        st.caption(
-            "Only stored pregame Official, Lean, and Watch decisions are "
-            "graded. Not Tracked games are excluded."
-        )
-        st.caption(f"Storage: {current_summary['storage_backend']}")
-        st.download_button(
-            f"Download NFL Performance History CSV ({len(details)} rows)",
-            data=pd.DataFrame(details).to_csv(index=False),
-            file_name="nfl_model_history.csv",
-            mime="text/csv",
-            key="nfl_history_download",
-        )
-
     if details:
         st.caption("Outright winner / internal scoring baseline / halftime leader | No sportsbook spreads or totals | Confidence filter applies to Side only")
         st.dataframe(model_result_summary(pd.DataFrame(details)), hide_index=True, width="stretch")
-        with st.expander("Baseline vs Challenger - Matched Model Results"):
-            st.caption("Active filters | Games with settled decisions on both tracks only")
-            paired = paired_model_summary(pd.DataFrame(details))
-            if paired.empty:
-                st.info("No matched model decisions under the active filters. Select Model Track: All for both tracks.")
-            else:
-                st.dataframe(paired, hide_index=True, width="stretch")
-        exported = pd.DataFrame(details).assign(**{"Report Window": window_filter, "Signal Filter": market_filter,
-                                                  "Segment Filter": segment_filter, "Track Filter": track_filter,
-                                                  "Side Confidence Filter": confidence_filter, "Model Filter": model_filter,
-                                                  "Report Start": start_date.isoformat() if start_date else "All",
-                                                  "Report End": end_date.isoformat() if end_date else "All"})
-        st.download_button("Download Filtered Model CSV", exported.to_csv(index=False),
-                           "nfl_model_filtered.csv", "text/csv", key="nfl_model_filtered_csv")
     if not summaries:
         st.info("No NFL tracked results match the selected filters.")
-        return
 
     cards = []
     for row in summaries:
@@ -6110,15 +6073,46 @@ def render_nfl_model_performance():
             f'<div class="performance-meta">{completed} completed - {row["pending"]} pending</div>'
             '</div>'
         )
-    st.html(
-        '<div class="model-favorite top-looks">'
-        '<div class="model-label">NFL MODEL PERFORMANCE</div>'
-        f'<div class="top-look-meta">{escape(window_filter)} - monitored test</div>'
-        f'<div class="performance-results">{"".join(cards)}</div>'
-        '</div>'
-    )
+    if cards:
+        st.html(
+            '<div class="model-favorite top-looks">'
+            '<div class="model-label">NFL MODEL PERFORMANCE</div>'
+            f'<div class="top-look-meta">{escape(window_filter)} - monitored test</div>'
+            f'<div class="performance-results">{"".join(cards)}</div>'
+            '</div>'
+        )
     if details:
-        st.dataframe(pd.DataFrame(details), width="stretch", hide_index=True)
+        with st.expander("Detailed Results", expanded=False):
+            st.dataframe(pd.DataFrame(details), width="stretch", hide_index=True)
+        with st.expander("Baseline vs Challenger - Matched Model Results", expanded=False):
+            st.caption("Active filters | Games with settled decisions on both tracks only")
+            paired = paired_model_summary(pd.DataFrame(details))
+            if paired.empty:
+                st.info("No matched model decisions under the active filters. Select Model Track: Both for both tracks.")
+            else:
+                st.dataframe(paired, hide_index=True, width="stretch")
+    with st.expander("NFL Performance History Diagnostics", expanded=False):
+        metrics = st.columns(4)
+        metrics[0].metric("Snapshots", current_summary["snapshots"])
+        metrics[1].metric("Completed", current_summary["completed"])
+        metrics[2].metric("Side Decisions", current_summary["side_signal_games"])
+        metrics[3].metric("Scoring Decisions", current_summary["scoring_signal_games"])
+        st.caption("Only stored pregame Official, Lean, and Watch decisions are graded. Not Tracked games are excluded.")
+        st.caption(f"Storage: {current_summary['storage_backend']}")
+    with st.expander("Exports", expanded=False):
+        if details:
+            exported = pd.DataFrame(details).assign(**{"Report Window": window_filter, "Signal Filter": market_filter,
+                                                      "Segment Filter": segment_filter, "Track Filter": track_filter,
+                                                      "Side Confidence Filter": confidence_filter, "Model Filter": model_filter,
+                                                      "Report Start": start_date.isoformat() if start_date else "All",
+                                                      "Report End": end_date.isoformat() if end_date else "All"})
+            st.download_button("Download Filtered Model CSV", exported.to_csv(index=False),
+                               "nfl_model_filtered.csv", "text/csv", key="nfl_model_filtered_csv")
+        st.download_button(
+            f"Download NFL Performance History CSV ({len(details)} rows)",
+            data=pd.DataFrame(details).to_csv(index=False), file_name="nfl_model_history.csv",
+            mime="text/csv", key="nfl_history_download",
+        )
 
 
 def render_nfl_current(selected_filter_override=None):
