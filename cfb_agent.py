@@ -8,6 +8,7 @@ from cfb_data import load_cfb_prior_season, load_cfb_season
 
 
 EASTERN = ZoneInfo("America/New_York")
+MODEL_VERSION = "0.3.0-test"
 DEFAULT_RATING = 1500.0
 DEFAULT_TOTAL = 52.0
 HOME_FIELD_POINTS = 2.5
@@ -349,10 +350,9 @@ def build_current_slate(
             scoring_segment = cap_segment(scoring_segment, "Watch")
             first_half_segment = cap_segment(first_half_segment, "Watch")
 
-        # Availability is an approved hard gate and is not in the v0 feed yet.
-        downgrade_reasons.append("Availability feed incomplete")
-        side_segment = cap_segment(side_segment, "Watch")
-        scoring_segment = cap_segment(scoring_segment, "Watch")
+        # Availability remains a recorded warning, not a full-game tier cap.
+        downgrade_reasons.append("Availability unverified")
+        # The early-game signal is not an independently calibrated model.
         first_half_segment = cap_segment(first_half_segment, "Watch")
 
         side_pick = predicted_winner if side_segment != "Pass" else "Pass"
@@ -491,7 +491,7 @@ def build_current_slate(
                 "Home Prior Influence": home_state.prior_influence(),
                 "Neutral Site": neutral,
                 "FBS vs FCS": fbs_vs_fcs,
-                "Availability Status": "Incomplete",
+                "Availability Status": "Unverified",
                 "Data Quality": "Limited" if downgrade_reasons else "Complete",
                 "Downgrade Reasons": downgrade_reasons,
                 "Source": (

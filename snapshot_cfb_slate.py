@@ -2,7 +2,7 @@ import argparse
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from cfb_agent import build_current_slate
+from cfb_agent import MODEL_VERSION, build_current_slate
 from cfb_model_history import record_cfb_history
 from cfb_pregame_analysis import attach_pregame_analysis
 from cfb_market import attach_market_context
@@ -10,7 +10,7 @@ from cfb_market import attach_market_context
 
 DEFAULT_TIMEZONE = "America/New_York"
 DEFAULT_MARKET_VERSION = "0.1.0-test"
-DEFAULT_MODEL_VERSION = "0.2.0-test"
+DEFAULT_MODEL_VERSION = MODEL_VERSION
 
 
 def parse_args():

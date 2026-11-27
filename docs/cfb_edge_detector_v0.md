@@ -5,7 +5,7 @@
 ```text
 Experimental v0 implemented; shadow validation pending
 Market release: 0.1.0-test
-Model baseline: 0.2.0-test
+Model baseline: 0.3.0-test
 Scheduled snapshots: hourly with 14-day reconciliation
 ```
 
@@ -469,10 +469,9 @@ when present. The Streamlit page does not contact ESPN or CFBD and does not
 create snapshots.
 
 The initial rating and scoring thresholds are provisional development bands,
-not production-calibrated thresholds. The source does not yet include the
-approved material-availability feed, so every non-Pass decision is currently
-capped at Watch. This prevents the experimental implementation from producing
-an Official decision before that hard gate is satisfied.
+not production-calibrated thresholds. In 0.2.0-test, the missing material-
+availability feed capped every non-Pass decision at Watch. The 0.3.0-test
+monitored policy below supersedes that blanket cap.
 
 The hourly workflow records the current ET slate and reconciles pending stored
 snapshots over a 14-day lookback. Manual runs support a specific slate date.
@@ -495,9 +494,34 @@ or insufficient prior history uses league-average defaults and adds an
 `Insufficient preseason history` downgrade. Existing thresholds and the
 availability-based Watch cap remain unchanged.
 
+### 0.3.0-test Monitored Tier Policy
+
+Availability is still unverified and remains a visible, stored data-quality
+warning. It no longer caps full-game sides or scoring environments by itself.
+Projection formulas, inputs, confidence mapping, and tier thresholds are unchanged:
+
+- Full-game sides: Official at a projected winning margin of at least 10 points;
+  Lean at 7; Watch at 4; otherwise Pass. Official confidence is A from 14 points
+  and B below that; Lean is B; Watch is C. These are model categories, not
+  calibrated probabilities or advantages against a sportsbook spread.
+- Scoring: Lean from a 7-point absolute deviation from the internal scoring
+  baseline, Watch from 4 points, otherwise Pass. No Official scoring tier is
+  introduced.
+- First Half remains capped at Watch because it is not independently calibrated.
+- FBS-FCS matchups, insufficient preseason history (fewer than six usable prior
+  games), and fewer than three current-season games for either team retain the
+  Watch cap for all signals. Pass is never upgraded by a cap.
+
+The snapshot job and GUI share the 0.3.0-test model version. Market release and
+market-comparison rules are unchanged. New eligible pregame records use the new
+model key; existing 0.2.0-test picks and tiers are not rewritten or retrospectively
+promoted. Started games without a new-version pregame snapshot stay untracked
+under the new version. Reports retain distinct version groups, with older
+records available through the All-model/release selectors.
+
 ### Market Forward Test
 
-The season's baseline is unchanged. Each snapshot run independently fetches
+Market capture itself does not change the baseline. Each snapshot run independently fetches
 ESPN summary `pickcenter` quotes for games whose scheduled kickoff is still
 in the future and whose feed status is pregame. No quotes are backfilled for
 started games or old snapshots. A quote failure does not block baseline writes.

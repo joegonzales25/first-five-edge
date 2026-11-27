@@ -78,6 +78,7 @@ from cfb_model_history import (
     load_cfb_performance_tables,
 )
 from cfb_data import fetch_espn_fbs_teams, fetch_espn_scoreboard, normalize_espn_games
+from cfb_agent import MODEL_VERSION as CFB_MODEL_VERSION
 from cfb_market import decode_context, comparison_rows, forward_rows
 from market_forward import load_market_snapshots, market_report
 from performance_reporting import (
@@ -118,7 +119,7 @@ MODEL_BASELINES = {
     "NBA": "0.1.0-test",
     "NHL": "0.1.0-test",
     "CBB": "0.1.0-test",
-    "CFB": "0.2.0-test",
+    "CFB": CFB_MODEL_VERSION,
     "MLS": "0.1.0-test",
 }
 SPORT_CONFIG = {
@@ -4830,6 +4831,16 @@ def game_card_title(row):
     return f"{team_label('Away')} @ {team_label('Home')}"
 
 
+def cfb_availability_notice(row):
+    if row.get("Sport") != "CFB":
+        return ""
+    reasons = str(row.get("Downgrade Reasons", "")).lower()
+    status = str(row.get("Availability Status", "")).lower()
+    if "availability" in reasons or status in {"unverified", "incomplete"}:
+        return '<div class="muted">Availability unverified</div>'
+    return ""
+
+
 def render_wnba_card(row, historical=False):
     sport = row.get("Sport")
     title = game_card_title(row)
@@ -4909,6 +4920,7 @@ def render_wnba_card(row, historical=False):
 
         <div class="game-title">{escape(title)}</div>
         <div class="muted">{lock_marker}{escape(str(game_time_display))} - {escape(str(row["Status"]))}</div>
+        {cfb_availability_notice(row)}
 
         <div class="decision-stack">
             <div class="decision-line decision-first">{escape(side_label)}: {escape(str(row["Side Edge"]))}{side_result}</div>
@@ -8330,6 +8342,7 @@ def cfb_slate_from_history(rows):
                 "League Total Baseline": base.get("league_total_baseline"),
                 "Market Context": base.get("market_context"),
                 "Data Quality": base.get("data_quality"),
+                "Downgrade Reasons": base.get("downgrade_reasons"),
                 "Key Factors List": factors,
                 "Key Factors Summary": "; ".join(factors[:3]),
                 "Agent Notes": "; ".join(factors),
@@ -8746,9 +8759,11 @@ def render_cfb_model_info_sidebar():
             f"""
 **Official Scope**: Full Game team edge
 
-**Discovery**: Scoring Environment and First Half Lean/Watch
+**Discovery**: Scoring Environment Lean/Watch; First Half Watch-only
 
-**Availability Gate**: Initial v0 decisions are capped until a reliable feed is integrated
+**Availability**: Unverified; recorded as a data-quality warning, not a full-game tier cap
+
+**Safeguards**: FBS-FCS, insufficient preseason history, and fewer than three current-season games remain Watch-capped
 
 **Preseason Bootstrap**: Prior-season ESPN results, regressed and decayed through six current-season games
 
