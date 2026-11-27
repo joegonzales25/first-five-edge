@@ -204,9 +204,6 @@ def performance_cards_html(frame, kind):
     def percentage(value):
         return f"{value:.1f}%" if pd.notna(value) else "N/A"
 
-    def units(value):
-        return f"{value:+.2f}" if pd.notna(value) else "N/A"
-
     cards = []
     for row in records:
         title = f"{row['Track']} | {labels.get(row[label_column], row[label_column])}"
@@ -215,17 +212,14 @@ def performance_cards_html(frame, kind):
         version_label = (f'<p class="nfl-report-note">Model {escape(str(row["Model"]))} | Baseline {escape(str(row["Baseline Version"]))} | Market {escape(str(row["Market Version"]))}</p>'
                          if len(versions) > 1 else "")
         if kind == "market":
-            headline = units(row["Net Units"])
-            tone = "gain" if pd.notna(row["Net Units"]) and row["Net Units"] > 0 else "loss" if pd.notna(row["Net Units"]) and row["Net Units"] < 0 else ""
             notes = [f'{row["Settled"]} settled']
             notes.extend(f'{row[field]} {label}' for field, label in
                          [("Pending", "pending"), ("Missing Odds", "missing odds"), ("No Difference", "no difference")]
                          if row[field])
-            body = (f'<div class="nfl-report-value {tone}">{headline}<span> Units</span></div>'
-                    f'<p>{escape(row["Record"])} <span class="nfl-report-note">Win-Loss-Push</span></p>'
+            body = (f'<div class="nfl-report-value">{escape(row["Record"])}</div>'
+                    '<p class="nfl-report-note">Win-Loss-Push</p>'
                     '<dl class="nfl-report-metrics">'
                     f'<div><dt>Win Rate</dt><dd>{percentage(row["Win Rate %"])}</dd></div>'
-                    f'<div><dt>Return</dt><dd>{percentage(row["Return %"])}</dd></div>'
                     f'<div><dt>Priced Results</dt><dd>{row["Priced Settled"]}</dd></div></dl>'
                     f'<p class="nfl-report-note">{" | ".join(notes)}</p>')
         else:
@@ -257,9 +251,8 @@ def performance_cards_html(frame, kind):
 .nfl-report-card h4{font-size:18px;line-height:1.4;margin:0 0 16px;color:#f5f7fa;letter-spacing:0}
 .nfl-report-card p{font-size:14px;line-height:1.5;margin:10px 0}
 .nfl-report-value{font-size:30px;font-weight:700;line-height:1.3}.nfl-report-value span{font-size:15px;font-weight:400}
-.nfl-report-value.gain{color:#72e0ac}.nfl-report-value.loss{color:#ffaaa7}
 .nfl-report-card .nfl-report-note{color:#c2ccd5;font-size:12px}
-.nfl-report-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:16px 0}
+.nfl-report-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:16px 0}
 .nfl-report-metrics dt{font-size:12px;color:#c2ccd5}.nfl-report-metrics dd{font-size:16px;font-weight:600;margin:4px 0 0}
 .nfl-report-card .nfl-report-segments{width:100%;table-layout:fixed;border-collapse:collapse;margin-top:16px;font-size:12px;background:transparent}
 .nfl-report-segments th,.nfl-report-segments td{text-align:right;padding:8px 3px;border-bottom:1px solid #46525e;color:#f5f7fa}

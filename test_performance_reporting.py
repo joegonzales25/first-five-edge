@@ -91,15 +91,20 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("@media(max-width:700px)", html)
         self.assertEqual(performance_cards_html(frame.iloc[:0], "model"), "")
 
-    def test_market_cards_show_returns_and_pending_without_invented_results(self):
+    def test_market_cards_highlight_record_and_hide_financial_values(self):
         frame = pd.DataFrame([market_row(Result="Pending", **{"Hypothetical Units": None}),
                               market_row("Challenger", Result="Cover", **{"American Odds": None, "Hypothetical Units": None})])
         html = performance_cards_html(frame, "market")
         self.assertEqual(html.count("<article"), 2)
-        self.assertIn("N/A<span> Units", html)
+        self.assertIn('<div class="nfl-report-value">0-0-0</div>', html)
+        self.assertIn('<div class="nfl-report-value">1-0-0</div>', html)
+        self.assertNotIn("Units", html)
+        self.assertNotIn("<dt>Return</dt>", html)
         self.assertIn("1 pending", html)
         self.assertIn("1 missing odds", html)
         self.assertIn("Priced Results", html)
+        self.assertIn("Net Units", market_summary(frame).columns)
+        self.assertIn("Return %", market_summary(frame).columns)
 
     def test_filters_and_bands_do_not_mutate_original(self):
         frame = pd.DataFrame([market_row(), market_row("Challenger"),
