@@ -455,7 +455,7 @@ def record_cfb_history(
         return counts
 
     now = datetime.now(timezone.utc)
-    now_text = now.isoformat(timespec="seconds")
+    now_text = now.isoformat(timespec="microseconds")
     with connect(db_path) as connection:
         init_db(connection)
         for _, row in slate.iterrows():
@@ -514,6 +514,12 @@ def record_cfb_history(
                 update_result(connection, existing["id"], result, True)
                 counts["locked_or_graded"] += 1
         connection.commit()
+        stored_quotes = fetch_one(connection, """
+            SELECT COUNT(*) AS count FROM cfb_model_history
+            WHERE slate_date=? AND model_version=? AND market_version=?
+              AND market='Full Game' AND market_context IS NOT NULL
+        """, (str(slate_date), model_version, market_version))
+        print(f"CFB stored game-card market coverage: {stored_quotes['count']}/{len(slate)} slate games.")
     return counts
 
 

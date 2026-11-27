@@ -31,6 +31,32 @@ def game():
 
 
 class CfbMarketTests(unittest.TestCase):
+    def test_same_second_quote_is_saved_on_game_card_not_only_observation_log(self):
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        quote_context = {**context(), "captured_at": "2026-11-14T13:00:00.800000Z"}
+        row = {**game(), "Market Context": json.dumps(quote_context), "Side Pick": "LSU",
+               "Side Tracking Segment": "Official", "Side Confidence": "B"}
+        try:
+            with patch("cfb_model_history.connect", return_value=connection), \
+                    patch("cfb_model_history.datetime") as clock:
+                clock.now.return_value = datetime(2026, 11, 14, 13, 0, 0, 900000, tzinfo=timezone.utc)
+                record_cfb_history(pd.DataFrame([row]), "2026-11-14", "market", "baseline")
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM cfb_market_observations").fetchone()[0], 1)
+            saved = connection.execute("SELECT market_context FROM cfb_model_history WHERE market='Full Game'").fetchone()[0]
+            self.assertIsNotNone(saved)
+            self.assertEqual(json.loads(saved), quote_context)
+            refreshed = {**quote_context, "captured_at": "2026-11-14T13:01:00.800000Z"}
+            with patch("cfb_model_history.connect", return_value=connection), \
+                    patch("cfb_model_history.datetime") as clock:
+                clock.now.return_value = datetime(2026, 11, 14, 13, 1, 0, 900000, tzinfo=timezone.utc)
+                record_cfb_history(pd.DataFrame([{**row, "Market Context": json.dumps(refreshed)}]),
+                                   "2026-11-14", "market", "baseline")
+            saved = connection.execute("SELECT market_context FROM cfb_model_history WHERE market='Full Game'").fetchone()[0]
+            self.assertEqual(json.loads(saved), refreshed)
+        finally:
+            connection.close()
+
     def test_home_favorite_away_favorite_pickem_and_ambiguous(self):
         self.assertEqual(normalize_quotes({"pickcenter": [quote()]})[0]["home_spread"], -4.5)
         item = quote()
