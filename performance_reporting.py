@@ -212,16 +212,9 @@ def performance_cards_html(frame, kind):
         version_label = (f'<p class="nfl-report-note">Model {escape(str(row["Model"]))} | Baseline {escape(str(row["Baseline Version"]))} | Market {escape(str(row["Market Version"]))}</p>'
                          if len(versions) > 1 else "")
         if kind == "market":
-            notes = [f'{row["Settled"]} settled']
-            notes.extend(f'{row[field]} {label}' for field, label in
-                         [("Pending", "pending"), ("Missing Odds", "missing odds"), ("No Difference", "no difference")]
-                         if row[field])
-            body = (f'<div class="nfl-report-value">{escape(row["Record"])}</div>'
-                    '<p class="nfl-report-note">Win-Loss-Push</p>'
-                    '<dl class="nfl-report-metrics">'
-                    f'<div><dt>Win Rate</dt><dd>{percentage(row["Win Rate %"])}</dd></div>'
-                    f'<div><dt>Priced Results</dt><dd>{row["Priced Settled"]}</dd></div></dl>'
-                    f'<p class="nfl-report-note">{" | ".join(notes)}</p>')
+            body = (f'<tr><th scope="row">{escape(title)}{version_label}</th>'
+                    f'<td><strong>{escape(row["Record"])}</strong></td>'
+                    f'<td>{percentage(row["Win Rate %"])}</td><td>{row["Pending"]}</td></tr>')
         else:
             subset = frame.loc[(frame["Model Track"] == row["Track"]) & (frame["Model"] == row["Model"])
                                & (frame["Baseline Version"] == row["Baseline Version"])
@@ -243,8 +236,16 @@ def performance_cards_html(frame, kind):
                     f'{note_html}'
                     '<table class="nfl-report-segments"><thead><tr><th>Segment</th><th>W-L-P</th><th>Accuracy</th><th>Pending</th></tr></thead>'
                     f'<tbody>{"".join(segments)}</tbody></table>')
-        report_class = " market" if kind == "market" else ""
-        cards.append(f'<article class="nfl-report-card {track_class}{report_class}"><h4>{escape(title)}</h4>{version_label}{body}</article>')
+        if kind == "market":
+            cards.append(body)
+        else:
+            cards.append(f'<article class="nfl-report-card {track_class}"><h4>{escape(title)}</h4>{version_label}{body}</article>')
+    if kind == "market":
+        cards = ['<article class="nfl-report-card market"><h4>Model vs Market</h4>'
+                 '<table class="nfl-market-summary"><colgroup><col style="width:38%">'
+                 '<col style="width:25%"><col style="width:18%"><col style="width:19%"></colgroup>'
+                 '<thead><tr><th>Track / Market</th><th>Win-Loss-Push</th><th>Win Rate</th><th>Pending</th></tr></thead>'
+                 f'<tbody>{"".join(cards)}</tbody></table></article>']
     return '''<style>
 .nfl-report-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:16px 0 24px;letter-spacing:0}
 .nfl-report-card{min-width:0;padding:20px;background:#14212d;color:#f5f7fa;border:1px solid #46525e;border-top:4px solid #35b58b;border-radius:8px;overflow-wrap:anywhere}
@@ -254,7 +255,11 @@ def performance_cards_html(frame, kind):
 .nfl-report-value{font-size:30px;font-weight:700;line-height:1.3}.nfl-report-value span{font-size:15px;font-weight:400}
 .nfl-report-card .nfl-report-note{color:#c2ccd5;font-size:12px}
 .nfl-report-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:16px 0}
-.nfl-report-card.market .nfl-report-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+.nfl-report-card.market{grid-column:1/-1}
+.nfl-report-card .nfl-market-summary{width:100%;table-layout:fixed;border-collapse:collapse;background:transparent;font-size:13px}
+.nfl-market-summary th,.nfl-market-summary td{padding:12px 3px;border-bottom:1px solid #46525e;text-align:right;color:#f5f7fa;overflow-wrap:anywhere}
+.nfl-market-summary th:first-child{text-align:left}.nfl-market-summary tbody th{font-weight:400}
+.nfl-market-summary thead th{font-size:11px;font-weight:400;color:#c2ccd5}
 .nfl-report-metrics dt{font-size:12px;color:#c2ccd5}.nfl-report-metrics dd{font-size:16px;font-weight:600;margin:4px 0 0}
 .nfl-report-card .nfl-report-segments{width:100%;table-layout:fixed;border-collapse:collapse;margin-top:16px;font-size:12px;background:transparent}
 .nfl-report-segments th,.nfl-report-segments td{text-align:right;padding:8px 3px;border-bottom:1px solid #46525e;color:#f5f7fa}
